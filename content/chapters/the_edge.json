@@ -1,0 +1,164 @@
+{
+  "id": "the_edge",
+  "title_key": "chapter.the_edge",
+  "ending_key": "ending.the_edge",
+  "layers": [
+    { "layer": 0, "drain": 32768, "noise": 8192, "gain": 32768 },
+    { "layer": 1, "drain": 65536, "noise": 8192, "gain": 65536 }
+  ],
+  "forms": [
+    { "id": 1, "node": 1, "controlled": true, "layer": 0, "pos": { "x": 78643200, "y": 134217728 } }
+  ],
+  "ports": [
+    { "node": 2, "layer": 0, "kind": "reserve", "pos": { "x": 131072000, "y": 131072000 }, "capacity": 268435456, "upkeep_rate": 0 },
+    { "node": 3, "layer": 0, "kind": "module", "pos": { "x": 138936320, "y": 131072000 }, "capacity": 268435456, "upkeep_rate": 0 },
+    { "node": 4, "layer": 0, "kind": "port", "pos": { "x": 135004160, "y": 138280960 }, "capacity": 268435456, "upkeep_rate": 0 },
+    { "node": 5, "layer": 0, "kind": "port", "pos": { "x": 106168320, "y": 131072000 }, "capacity": 268435456, "upkeep_rate": 2097152 },
+    { "node": 6, "layer": 0, "kind": "port", "pos": { "x": 163840000, "y": 131072000 }, "capacity": 201326592, "upkeep_rate": 0 },
+    { "node": 7, "layer": 0, "kind": "port", "pos": { "x": 135004160, "y": 104202240 }, "capacity": 201326592, "upkeep_rate": 0 },
+    { "node": 8, "layer": 1, "kind": "port", "pos": { "x": 135004160, "y": 157286400 }, "capacity": 201326592, "upkeep_rate": 0 }
+  ],
+  "routes": [
+    { "route": 1, "tail": 7, "head": 2, "capacity": 131072 },
+    { "route": 2, "tail": 2, "head": 3, "capacity": 131072 },
+    { "route": 3, "tail": 3, "head": 4, "capacity": 786432 },
+    { "route": 4, "tail": 4, "head": 5, "capacity": 1572864 },
+    { "route": 5, "tail": 6, "head": 3, "capacity": 131072 },
+    { "route": 6, "tail": 8, "head": 2, "capacity": 131072 }
+  ],
+  "currents": [
+    {
+      "id": 1,
+      "layer": 0,
+      "bright": true,
+      "active": true,
+      "width": 6291456,
+      "strength": 1572864,
+      "period": 30,
+      "path": [
+        { "x": 123207680, "y": 131072000 },
+        { "x": 131072000, "y": 131072000 },
+        { "x": 135004160, "y": 138280960 },
+        { "x": 138936320, "y": 131072000 },
+        { "x": 146800640, "y": 131072000 }
+      ]
+    },
+    {
+      "id": 2,
+      "layer": 0,
+      "bright": false,
+      "active": true,
+      "width": 6291456,
+      "strength": 393216,
+      "period": 45,
+      "path": [
+        { "x": 135004160, "y": 104202240 },
+        { "x": 144179200, "y": 108789760 },
+        { "x": 153354240, "y": 116654080 },
+        { "x": 159907840, "y": 123207680 },
+        { "x": 163840000, "y": 131072000 }
+      ]
+    },
+    {
+      "id": 3,
+      "layer": 1,
+      "bright": false,
+      "active": true,
+      "width": 6291456,
+      "strength": 524288,
+      "period": 60,
+      "path": [
+        { "x": 117964800, "y": 150732800 },
+        { "x": 127139840, "y": 153354240 },
+        { "x": 136314880, "y": 155975680 },
+        { "x": 145489920, "y": 158597120 },
+        { "x": 154664960, "y": 161218560 }
+      ]
+    }
+  ],
+  "authored_boundaries": [{ "members": [2, 3] }],
+  "objectives": [
+    {
+      "id": "objective.the_edge.hold_the_current",
+      "condition": { "kind": "in_current", "current": 1, "steps": 4096 },
+      "optional": null
+    },
+    {
+      "id": "objective.the_edge.set_it_running",
+      "condition": { "kind": "routes_flowing", "routes": [2, 3, 4] },
+      "optional": null
+    },
+    {
+      "id": "objective.the_edge.open_the_stores",
+      "condition": { "kind": "ports_open", "ports": [6, 7] },
+      "optional": null
+    },
+    {
+      "id": "objective.the_edge.hold_the_inside",
+      "condition": {
+        "kind": "pattern_held",
+        "routes": [2, 3, 4],
+        "nodes": [2, 3, 4],
+        "steps": 8192
+      },
+      "optional": null
+    },
+    {
+      "id": "objective.the_edge.draw_the_edge",
+      "condition": {
+        "kind": "pattern_held",
+        "routes": [2, 3, 4],
+        "nodes": [2, 3, 4],
+        "steps": 10923
+      },
+      "optional": null
+    },
+    {
+      "id": "objective.the_edge.take_the_depth",
+      "condition": { "kind": "in_current", "current": 3, "steps": 4096 },
+      "optional": null
+    },
+    {
+      "id": "objective.the_edge.open_the_deep_store",
+      "condition": { "kind": "ports_open", "ports": [8] },
+      "optional": 5462
+    },
+    {
+      "id": "objective.the_edge.hold_the_edge",
+      "condition": {
+        "kind": "pattern_held",
+        "routes": [2, 3, 4],
+        "nodes": [2, 3, 4],
+        "steps": 13108
+      },
+      "optional": null
+    }
+  ],
+  "anchor_moments": ["objective.the_edge.draw_the_edge"],
+  "events": [
+    { "objective": "objective.the_edge.hold_the_current", "at": 40, "kind": "set_port_open", "node": 4, "open": true },
+    { "objective": "objective.the_edge.hold_the_current", "at": 40, "kind": "set_port_open", "node": 5, "open": true },
+    { "objective": "objective.the_edge.hold_the_edge", "at": 1200, "kind": "set_current_active", "current": 1, "active": false },
+    { "objective": "objective.the_edge.hold_the_edge", "at": 1200, "kind": "set_layer_drain", "layer": 0, "drain": 65536 },
+    { "objective": "objective.the_edge.hold_the_edge", "at": 2700, "kind": "set_current_active", "current": 1, "active": true },
+    { "objective": "objective.the_edge.hold_the_edge", "at": 2700, "kind": "set_layer_drain", "layer": 0, "drain": 32768 },
+    { "objective": "objective.the_edge.hold_the_edge", "at": 3900, "kind": "set_current_active", "current": 1, "active": false },
+    { "objective": "objective.the_edge.hold_the_edge", "at": 3900, "kind": "set_layer_drain", "layer": 0, "drain": 98304 },
+    { "objective": "objective.the_edge.hold_the_edge", "at": 6300, "kind": "set_current_active", "current": 1, "active": true },
+    { "objective": "objective.the_edge.hold_the_edge", "at": 6300, "kind": "set_layer_drain", "layer": 0, "drain": 32768 },
+    { "objective": "objective.the_edge.hold_the_edge", "at": 7500, "kind": "set_current_active", "current": 1, "active": false },
+    { "objective": "objective.the_edge.hold_the_edge", "at": 7500, "kind": "set_layer_drain", "layer": 0, "drain": 131072 },
+    { "objective": "objective.the_edge.hold_the_edge", "at": 10800, "kind": "set_current_active", "current": 1, "active": true },
+    { "objective": "objective.the_edge.hold_the_edge", "at": 10800, "kind": "set_layer_drain", "layer": 0, "drain": 32768 }
+  ],
+  "pressure_schedule": [
+    { "pressure": "drain", "start_step": 30, "primary": true, "target": { "t": "layer", "id": 0 } },
+    { "pressure": "fracture", "start_step": 23170, "primary": false, "target": { "t": "route", "id": 1 } }
+  ],
+  "opening_view": {
+    "inside": [2, 3],
+    "resolution": 1,
+    "window": 45,
+    "surround": "adjacent"
+  }
+}

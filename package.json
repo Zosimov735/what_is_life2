@@ -1,0 +1,41 @@
+{
+  "name": "field-game",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "The field_game workspace root: core, worker, app, and checks.",
+  "workspaces": [
+    "worker",
+    "app"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace field-game-app",
+    "build": "npm run build:content && npm run build:wasm && npm run build --workspace field-game-app",
+    "build:content": "node tools/content-build.mjs",
+    "build:wasm": "wasm-pack build core --target web --release --out-dir ../worker/wasm-pkg",
+    "test": "npm run test:core && npm run test:units && npm run test:tools && npm run check:lexicon",
+    "test:core": "cargo test --manifest-path core/Cargo.toml",
+    "test:units": "vitest run",
+    "test:tools": "node --test \"tools/*.test.mjs\"",
+    "check:lexicon": "node tools/lexicon-check.mjs",
+    "typecheck": "tsc --noEmit -p worker/tsconfig.json && tsc --noEmit -p app/tsconfig.json && tsc --noEmit -p tsconfig.test.json"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/react": "^16.1.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^5.0.0",
+    "@vitest/web-worker": "^3.0.0",
+    "jsdom": "^25.0.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.6.0",
+    "vite": "^7.0.0",
+    "vitest": "^3.0.0"
+  }
+}

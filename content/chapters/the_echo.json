@@ -1,0 +1,245 @@
+{
+  "id": "the_echo",
+  "title_key": "chapter.the_echo",
+  "ending_key": "ending.the_echo",
+  "layers": [
+    { "layer": 0, "drain": 6554, "noise": 8192, "gain": 32768 },
+    { "layer": 1, "drain": 65536, "noise": 16384, "gain": 65536 }
+  ],
+  "forms": [
+    { "id": 1, "node": 1, "controlled": true, "layer": 0, "pos": { "x": 56360960, "y": 128450560 } }
+  ],
+  "ports": [
+    { "node": 2, "layer": 0, "kind": "reserve", "pos": { "x": 111411200, "y": 135004160 }, "capacity": 134217728, "upkeep_rate": 0 },
+    { "node": 3, "layer": 0, "kind": "port", "pos": { "x": 124518400, "y": 130416640 }, "capacity": 268435456, "upkeep_rate": 0 },
+    { "node": 4, "layer": 0, "kind": "port", "pos": { "x": 131727360, "y": 141557760 }, "capacity": 16777216, "upkeep_rate": 0 },
+    { "node": 5, "layer": 0, "kind": "port", "pos": { "x": 137625600, "y": 123207680 }, "capacity": 268435456, "upkeep_rate": 0 },
+    { "node": 6, "layer": 1, "kind": "reserve", "pos": { "x": 116654080, "y": 142868480 }, "capacity": 268435456, "upkeep_rate": 0 },
+    { "node": 7, "layer": 1, "kind": "port", "pos": { "x": 124518400, "y": 150732800 }, "capacity": 268435456, "upkeep_rate": 0 }
+  ],
+  "routes": [
+    { "route": 1, "tail": 1, "head": 2, "capacity": 524288 },
+    { "route": 2, "tail": 6, "head": 7, "capacity": 131072 },
+    { "route": 3, "tail": 7, "head": 4, "capacity": 131072 },
+    { "route": 4, "tail": 2, "head": 3, "capacity": 131072 },
+    { "route": 5, "tail": 3, "head": 4, "capacity": 1048576 },
+    { "route": 6, "tail": 4, "head": 2, "capacity": 65536 },
+    { "route": 7, "tail": 4, "head": 5, "capacity": 1048576 },
+    { "route": 8, "tail": 5, "head": 2, "capacity": 4194304 }
+  ],
+  "currents": [
+    {
+      "id": 1,
+      "layer": 0,
+      "bright": true,
+      "active": true,
+      "width": 4194304,
+      "strength": 524288,
+      "period": 30,
+      "path": [
+        { "x": 52428800, "y": 128450560 },
+        { "x": 60293120, "y": 128450560 },
+        { "x": 68157440, "y": 128450560 },
+        { "x": 76021760, "y": 128450560 },
+        { "x": 83886080, "y": 128450560 },
+        { "x": 91750400, "y": 128450560 },
+        { "x": 99614720, "y": 128450560 }
+      ]
+    },
+    {
+      "id": 2,
+      "layer": 1,
+      "bright": false,
+      "active": true,
+      "width": 3670016,
+      "strength": 262144,
+      "period": 45,
+      "path": [
+        { "x": 85196800, "y": 142868480 },
+        { "x": 91750400, "y": 142868480 },
+        { "x": 98304000, "y": 142868480 },
+        { "x": 104857600, "y": 142868480 },
+        { "x": 111411200, "y": 142868480 },
+        { "x": 117964800, "y": 142868480 },
+        { "x": 124518400, "y": 142868480 }
+      ]
+    }
+  ],
+  "authored_boundaries": [{ "members": [1, 2, 3, 4, 5] }],
+  "objectives": [
+    {
+      "id": "objective.the_echo.hold_the_light",
+      "condition": { "kind": "in_current", "current": 1, "steps": 10923 },
+      "optional": null
+    },
+    {
+      "id": "objective.the_echo.open_the_ring",
+      "condition": { "kind": "ports_open", "ports": [3, 4] },
+      "optional": null
+    },
+    {
+      "id": "objective.the_echo.run_the_ring",
+      "condition": { "kind": "routes_flowing", "routes": [4, 5, 6] },
+      "optional": null
+    },
+    {
+      "id": "objective.the_echo.hold_the_ring",
+      "condition": {
+        "kind": "pattern_held",
+        "routes": [4, 5, 6],
+        "nodes": [3, 4],
+        "steps": 13108
+      },
+      "optional": null
+    },
+    {
+      "id": "objective.the_echo.take_the_deep_band",
+      "condition": { "kind": "in_current", "current": 2, "steps": 16384 },
+      "optional": null
+    },
+    {
+      "id": "objective.the_echo.lay_the_spare_line",
+      "condition": { "kind": "ports_open", "ports": [7] },
+      "optional": 5462
+    },
+    {
+      "id": "objective.the_echo.fill_before_the_echo",
+      "condition": { "kind": "in_current", "current": 1, "steps": 16384 },
+      "optional": null
+    },
+    {
+      "id": "objective.the_echo.hold_through_the_echo",
+      "condition": {
+        "kind": "pattern_held",
+        "routes": [4, 5, 6],
+        "nodes": [3, 4],
+        "steps": 21846
+      },
+      "optional": null
+    }
+  ],
+  "anchor_moments": ["objective.the_echo.hold_the_ring"],
+  "events": [
+    {
+      "objective": "objective.the_echo.hold_the_ring",
+      "at": 3600,
+      "kind": "set_current_active",
+      "current": 1,
+      "active": false
+    },
+    {
+      "objective": "objective.the_echo.hold_the_ring",
+      "at": 3600,
+      "kind": "set_layer_drain",
+      "layer": 0,
+      "drain": 131072
+    },
+    {
+      "objective": "objective.the_echo.hold_the_ring",
+      "at": 5100,
+      "kind": "set_current_active",
+      "current": 1,
+      "active": true
+    },
+    {
+      "objective": "objective.the_echo.hold_the_ring",
+      "at": 5100,
+      "kind": "set_layer_drain",
+      "layer": 0,
+      "drain": 6554
+    },
+    {
+      "objective": "objective.the_echo.hold_through_the_echo",
+      "at": 1800,
+      "kind": "set_current_active",
+      "current": 1,
+      "active": false
+    },
+    {
+      "objective": "objective.the_echo.hold_through_the_echo",
+      "at": 1800,
+      "kind": "set_layer_drain",
+      "layer": 0,
+      "drain": 131072
+    },
+    {
+      "objective": "objective.the_echo.hold_through_the_echo",
+      "at": 3300,
+      "kind": "set_current_active",
+      "current": 1,
+      "active": true
+    },
+    {
+      "objective": "objective.the_echo.hold_through_the_echo",
+      "at": 3300,
+      "kind": "set_layer_drain",
+      "layer": 0,
+      "drain": 6554
+    },
+    {
+      "objective": "objective.the_echo.hold_through_the_echo",
+      "at": 5100,
+      "kind": "set_current_active",
+      "current": 1,
+      "active": false
+    },
+    {
+      "objective": "objective.the_echo.hold_through_the_echo",
+      "at": 5100,
+      "kind": "set_layer_drain",
+      "layer": 0,
+      "drain": 131072
+    },
+    {
+      "objective": "objective.the_echo.hold_through_the_echo",
+      "at": 6600,
+      "kind": "set_current_active",
+      "current": 1,
+      "active": true
+    },
+    {
+      "objective": "objective.the_echo.hold_through_the_echo",
+      "at": 6600,
+      "kind": "set_layer_drain",
+      "layer": 0,
+      "drain": 6554
+    },
+    {
+      "objective": "objective.the_echo.hold_through_the_echo",
+      "at": 8400,
+      "kind": "set_current_active",
+      "current": 1,
+      "active": false
+    },
+    {
+      "objective": "objective.the_echo.hold_through_the_echo",
+      "at": 8400,
+      "kind": "set_layer_drain",
+      "layer": 0,
+      "drain": 131072
+    },
+    {
+      "objective": "objective.the_echo.hold_through_the_echo",
+      "at": 9900,
+      "kind": "set_current_active",
+      "current": 1,
+      "active": true
+    },
+    {
+      "objective": "objective.the_echo.hold_through_the_echo",
+      "at": 9900,
+      "kind": "set_layer_drain",
+      "layer": 0,
+      "drain": 6554
+    }
+  ],
+  "pressure_schedule": [
+    { "pressure": "noise", "start_step": 21500, "primary": true, "target": { "t": "layer", "id": 0 } }
+  ],
+  "opening_view": {
+    "inside": [1, 2, 3, 4, 5],
+    "resolution": 1,
+    "window": 45,
+    "surround": "adjacent"
+  }
+}

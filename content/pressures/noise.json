@@ -1,0 +1,10 @@
+{
+  "id": "noise",
+  "target": "layer",
+  "stages": [
+    { "stage": "signal", "level": 8192, "steps": 120 },
+    { "stage": "pressure", "level": 21845, "steps": 300 },
+    { "stage": "crisis", "level": 43690, "steps": 150 },
+    { "stage": "resolution", "level": 10923, "steps": 90 }
+  ]
+}

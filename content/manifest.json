@@ -1,0 +1,15 @@
+{
+  "content_version": 1,
+  "chapters": [
+    "the_pull",
+    "the_edge",
+    "the_loop",
+    "the_echo",
+    "the_mesh",
+    "the_break",
+    "the_rewrite",
+    "the_quiet_edge"
+  ],
+  "forms": ["thread", "ring", "relay", "vault", "lens", "knot", "wake", "chorus"],
+  "pressures": ["drain", "noise", "fracture", "flood", "interference", "drift"]
+}

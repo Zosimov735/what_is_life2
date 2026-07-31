@@ -1,0 +1,24 @@
+[package]
+name = "field_game_core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Authoritative simulation core for field_game, compiled to WebAssembly."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+
+# Locked by docs/field-framework/ARCHITECTURE.md. Overflow checks stay on in
+# every profile so a crossed cap traps instead of wrapping.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+overflow-checks = true
+
+[profile.dev]
+overflow-checks = true

@@ -1,0 +1,10 @@
+{
+  "id": "drain",
+  "target": "layer",
+  "stages": [
+    { "stage": "signal", "level": 8192, "steps": 90 },
+    { "stage": "pressure", "level": 26214, "steps": 300 },
+    { "stage": "crisis", "level": 52429, "steps": 180 },
+    { "stage": "resolution", "level": 13107, "steps": 120 }
+  ]
+}

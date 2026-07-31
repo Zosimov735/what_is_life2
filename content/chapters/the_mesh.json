@@ -1,0 +1,457 @@
+{
+  "id": "the_mesh",
+  "title_key": "chapter.the_mesh",
+  "ending_key": "ending.the_mesh",
+  "layers": [
+    {
+      "layer": 0,
+      "drain": 0,
+      "noise": 4096,
+      "gain": 32768
+    },
+    {
+      "layer": 1,
+      "drain": 65536,
+      "noise": 8192,
+      "gain": 65536
+    }
+  ],
+  "forms": [
+    {
+      "id": 1,
+      "node": 1,
+      "controlled": true,
+      "layer": 0,
+      "pos": {
+        "x": 65536000,
+        "y": 131072000
+      }
+    },
+    {
+      "id": 2,
+      "node": 2,
+      "controlled": false,
+      "layer": 0,
+      "pos": {
+        "x": 95027200,
+        "y": 85196800
+      }
+    },
+    {
+      "id": 3,
+      "node": 3,
+      "controlled": false,
+      "layer": 0,
+      "pos": {
+        "x": 114688000,
+        "y": 163840000
+      }
+    }
+  ],
+  "ports": [
+    {
+      "node": 4,
+      "layer": 0,
+      "kind": "reserve",
+      "pos": {
+        "x": 95027200,
+        "y": 131072000
+      },
+      "capacity": 268435456,
+      "upkeep_rate": 0
+    },
+    {
+      "node": 5,
+      "layer": 0,
+      "kind": "port",
+      "pos": {
+        "x": 134348800,
+        "y": 131072000
+      },
+      "capacity": 12582912,
+      "upkeep_rate": 0
+    },
+    {
+      "node": 6,
+      "layer": 0,
+      "kind": "module",
+      "pos": {
+        "x": 95027200,
+        "y": 104857600
+      },
+      "capacity": 268435456,
+      "upkeep_rate": 0
+    },
+    {
+      "node": 7,
+      "layer": 0,
+      "kind": "port",
+      "pos": {
+        "x": 95027200,
+        "y": 75366400
+      },
+      "capacity": 268435456,
+      "upkeep_rate": 0
+    },
+    {
+      "node": 8,
+      "layer": 0,
+      "kind": "module",
+      "pos": {
+        "x": 114688000,
+        "y": 144179200
+      },
+      "capacity": 134217728,
+      "upkeep_rate": 0
+    },
+    {
+      "node": 9,
+      "layer": 0,
+      "kind": "port",
+      "pos": {
+        "x": 114688000,
+        "y": 173670400
+      },
+      "capacity": 134217728,
+      "upkeep_rate": 0
+    },
+    {
+      "node": 10,
+      "layer": 0,
+      "kind": "reserve",
+      "pos": {
+        "x": 170393600,
+        "y": 111411200
+      },
+      "capacity": 16777216,
+      "upkeep_rate": 0
+    },
+    {
+      "node": 11,
+      "layer": 1,
+      "kind": "port",
+      "pos": {
+        "x": 111411200,
+        "y": 167772160
+      },
+      "capacity": 16777216,
+      "upkeep_rate": 0
+    }
+  ],
+  "routes": [
+    {
+      "route": 1,
+      "tail": 4,
+      "head": 6,
+      "capacity": 1572864
+    },
+    {
+      "route": 2,
+      "tail": 6,
+      "head": 7,
+      "capacity": 1572864
+    },
+    {
+      "route": 3,
+      "tail": 7,
+      "head": 10,
+      "capacity": 1572864
+    },
+    {
+      "route": 4,
+      "tail": 8,
+      "head": 9,
+      "capacity": 1572864
+    },
+    {
+      "route": 5,
+      "tail": 9,
+      "head": 10,
+      "capacity": 1572864
+    },
+    {
+      "route": 6,
+      "tail": 10,
+      "head": 4,
+      "capacity": 1048576
+    }
+  ],
+  "currents": [
+    {
+      "id": 1,
+      "layer": 0,
+      "bright": true,
+      "active": true,
+      "width": 6291456,
+      "strength": 393216,
+      "period": 30,
+      "path": [
+        {
+          "x": 58982400,
+          "y": 131072000
+        },
+        {
+          "x": 68812800,
+          "y": 131072000
+        },
+        {
+          "x": 78643200,
+          "y": 131072000
+        },
+        {
+          "x": 88473600,
+          "y": 131072000
+        },
+        {
+          "x": 98304000,
+          "y": 131072000
+        },
+        {
+          "x": 108134400,
+          "y": 131072000
+        },
+        {
+          "x": 117964800,
+          "y": 131072000
+        },
+        {
+          "x": 127795200,
+          "y": 131072000
+        },
+        {
+          "x": 137625600,
+          "y": 131072000
+        },
+        {
+          "x": 147456000,
+          "y": 131072000
+        },
+        {
+          "x": 157286400,
+          "y": 131072000
+        },
+        {
+          "x": 167116800,
+          "y": 131072000
+        },
+        {
+          "x": 176947200,
+          "y": 131072000
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "layer": 1,
+      "bright": false,
+      "active": true,
+      "width": 4194304,
+      "strength": 262144,
+      "period": 45,
+      "path": [
+        {
+          "x": 85196800,
+          "y": 157286400
+        },
+        {
+          "x": 91750400,
+          "y": 157286400
+        },
+        {
+          "x": 98304000,
+          "y": 157286400
+        },
+        {
+          "x": 104857600,
+          "y": 157286400
+        },
+        {
+          "x": 111411200,
+          "y": 157286400
+        },
+        {
+          "x": 117964800,
+          "y": 157286400
+        },
+        {
+          "x": 124518400,
+          "y": 157286400
+        },
+        {
+          "x": 131072000,
+          "y": 157286400
+        },
+        {
+          "x": 137625600,
+          "y": 157286400
+        }
+      ]
+    }
+  ],
+  "authored_boundaries": [
+    {
+      "members": [
+        8,
+        9,
+        10
+      ]
+    },
+    {
+      "members": [
+        4,
+        6,
+        7
+      ]
+    },
+    {
+      "members": [
+        6,
+        7
+      ]
+    }
+  ],
+  "objectives": [
+    {
+      "id": "objective.the_mesh.follow_the_supply",
+      "condition": {
+        "kind": "in_current",
+        "current": 1,
+        "steps": 5462
+      },
+      "optional": null
+    },
+    {
+      "id": "objective.the_mesh.open_the_north_store",
+      "condition": {
+        "kind": "ports_open",
+        "ports": [
+          7
+        ]
+      },
+      "optional": null
+    },
+    {
+      "id": "objective.the_mesh.open_the_south_store",
+      "condition": {
+        "kind": "ports_open",
+        "ports": [
+          9
+        ]
+      },
+      "optional": null
+    },
+    {
+      "id": "objective.the_mesh.carry_the_first_pattern",
+      "condition": {
+        "kind": "pattern_held",
+        "routes": [
+          1,
+          2,
+          3,
+          6
+        ],
+        "nodes": [
+          4,
+          6,
+          7
+        ],
+        "steps": 32768
+      },
+      "optional": null
+    },
+    {
+      "id": "objective.the_mesh.open_the_spare_intake",
+      "condition": {
+        "kind": "ports_open",
+        "ports": [
+          5
+        ]
+      },
+      "optional": null
+    },
+    {
+      "id": "objective.the_mesh.link_the_second_pattern",
+      "condition": {
+        "kind": "routes_flowing",
+        "routes": [
+          4,
+          5
+        ]
+      },
+      "optional": null
+    },
+    {
+      "id": "objective.the_mesh.take_the_depth",
+      "condition": {
+        "kind": "in_current",
+        "current": 2,
+        "steps": 2731
+      },
+      "optional": null
+    },
+    {
+      "id": "objective.the_mesh.open_the_deep_port",
+      "condition": {
+        "kind": "ports_open",
+        "ports": [
+          11
+        ]
+      },
+      "optional": 5462
+    },
+    {
+      "id": "objective.the_mesh.hold_both_patterns",
+      "condition": {
+        "kind": "pattern_held",
+        "routes": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "nodes": [
+          4,
+          5,
+          8
+        ],
+        "steps": 32768
+      },
+      "optional": null
+    }
+  ],
+  "anchor_moments": [
+    "objective.the_mesh.carry_the_first_pattern"
+  ],
+  "events": [
+    {
+      "at": 9000,
+      "kind": "set_port_open",
+      "node": 5,
+      "objective": "objective.the_mesh.hold_both_patterns",
+      "open": false
+    }
+  ],
+  "pressure_schedule": [
+    {
+      "pressure": "interference",
+      "start_step": 73000,
+      "primary": true,
+      "target": {
+        "t": "node",
+        "id": 4
+      }
+    }
+  ],
+  "opening_view": {
+    "inside": [
+      4,
+      6,
+      7
+    ],
+    "resolution": 1,
+    "window": 45,
+    "surround": "adjacent"
+  }
+}

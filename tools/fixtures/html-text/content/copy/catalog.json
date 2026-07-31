@@ -1,0 +1,10 @@
+{
+  "catalogVersion": 1,
+  "locale": "en",
+  "entries": {
+    "objective.follow_current": {
+      "kind": "objective",
+      "text": "Follow the bright current."
+    }
+  }
+}

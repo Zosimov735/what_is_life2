@@ -1,0 +1,10 @@
+{
+  "id": "fracture",
+  "target": "route",
+  "stages": [
+    { "stage": "signal", "level": 13107, "steps": 90 },
+    { "stage": "pressure", "level": 32768, "steps": 240 },
+    { "stage": "crisis", "level": 58982, "steps": 120 },
+    { "stage": "resolution", "level": 16384, "steps": 90 }
+  ]
+}

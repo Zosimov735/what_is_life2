@@ -1,0 +1,18 @@
+{
+  "catalogVersion": 1,
+  "locale": "en",
+  "entries": {
+    "objective.the_edge.hold_inside": {
+      "kind": "objective",
+      "text": "Hold the inside steady."
+    },
+    "objective.follow_current": {
+      "kind": "objective",
+      "text": "Follow the bright current."
+    },
+    "label.still_mode": {
+      "kind": "label",
+      "text": "Still Mode"
+    }
+  }
+}

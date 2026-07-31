@@ -1,0 +1,7 @@
+{
+  "name": "field-game-worker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "The dedicated worker: protocol envelopes, the WASM core instance, and persistence."
+}

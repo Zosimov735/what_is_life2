@@ -1,0 +1,25 @@
+{
+  "catalogVersion": 1,
+  "locale": "en",
+  "entries": {
+    "objective.too_long": {
+      "kind": "objective",
+      "text": "Follow the bright current across the deeper layer"
+    },
+    "Objective.BadKey": {
+      "kind": "label",
+      "text": "Archive"
+    },
+    "objective.the_edge.2nd_hold": {
+      "kind": "objective",
+      "text": "Hold the inside steady."
+    },
+    "instruction.bad_label": {
+      "kind": "instruction",
+      "text": "Press space for still mode."
+    },
+    "label.no_kind": {
+      "text": "Anchor"
+    }
+  }
+}

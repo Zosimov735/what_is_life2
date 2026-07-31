@@ -1,0 +1,12 @@
+{
+  "id": "lens",
+  "route_reach": 33554432,
+  "route_capacity": 2097152,
+  "forecast_depth": 30,
+  "leak_frac": 40,
+  "upkeep_rate": 0,
+  "capacity": 16777216,
+  "reserve": 0,
+  "steer_scale": 65536,
+  "abilities": []
+}

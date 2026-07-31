@@ -1,0 +1,165 @@
+{
+  "id": "the_break",
+  "title_key": "chapter.the_break",
+  "ending_key": "ending.the_break",
+  "layers": [{ "layer": 0, "drain": 0, "noise": 4096, "gain": 32768 }],
+  "forms": [
+    { "id": 1, "node": 1, "controlled": true, "layer": 0, "pos": { "x": 81920000, "y": 102236160 } }
+  ],
+  "ports": [
+    { "node": 2, "layer": 0, "kind": "port", "pos": { "x": 91750400, "y": 98304000 }, "capacity": 268435456, "upkeep_rate": 0 },
+    { "node": 3, "layer": 0, "kind": "port", "pos": { "x": 85196800, "y": 115998720 }, "capacity": 268435456, "upkeep_rate": 0 },
+    { "node": 4, "layer": 0, "kind": "port", "pos": { "x": 106168320, "y": 114032640 }, "capacity": 268435456, "upkeep_rate": 0 },
+    { "node": 5, "layer": 0, "kind": "port", "pos": { "x": 93061120, "y": 119930880 }, "capacity": 268435456, "upkeep_rate": 0 },
+    { "node": 6, "layer": 0, "kind": "port", "pos": { "x": 98304000, "y": 131072000 }, "capacity": 33554432, "upkeep_rate": 786432 },
+    { "node": 7, "layer": 0, "kind": "module", "pos": { "x": 104857600, "y": 102236160 }, "capacity": 268435456, "upkeep_rate": 1048576 },
+    { "node": 8, "layer": 0, "kind": "module", "pos": { "x": 131072000, "y": 137625600 }, "capacity": 33554432, "upkeep_rate": 393216 },
+    { "node": 9, "layer": 0, "kind": "port", "pos": { "x": 111411200, "y": 134348800 }, "capacity": 268435456, "upkeep_rate": 0 },
+    { "node": 10, "layer": 0, "kind": "port", "pos": { "x": 91750400, "y": 111411200 }, "capacity": 4194304, "upkeep_rate": 393216 }
+  ],
+  "routes": [
+    { "route": 1, "tail": 3, "head": 10, "capacity": 524288 },
+    { "route": 2, "tail": 3, "head": 7, "capacity": 524288 },
+    { "route": 3, "tail": 4, "head": 10, "capacity": 524288 },
+    { "route": 4, "tail": 4, "head": 7, "capacity": 524288 },
+    { "route": 5, "tail": 10, "head": 5, "capacity": 524288 },
+    { "route": 6, "tail": 5, "head": 8, "capacity": 393216 },
+    { "route": 7, "tail": 5, "head": 6, "capacity": 1572864 },
+    { "route": 8, "tail": 2, "head": 9, "capacity": 393216 }
+  ],
+  "currents": [
+    {
+      "id": 1,
+      "layer": 0,
+      "bright": true,
+      "active": true,
+      "width": 2097152,
+      "strength": 16777216,
+      "period": 30,
+      "path": [
+        { "x": 78643200, "y": 98304000 },
+        { "x": 81920000, "y": 98304000 },
+        { "x": 85196800, "y": 98304000 },
+        { "x": 88473600, "y": 98304000 },
+        { "x": 91750400, "y": 98304000 },
+        { "x": 95027200, "y": 98304000 },
+        { "x": 98304000, "y": 98304000 },
+        { "x": 101580800, "y": 98304000 },
+        { "x": 104857600, "y": 98304000 },
+        { "x": 108134400, "y": 98304000 },
+        { "x": 111411200, "y": 98304000 },
+        { "x": 114688000, "y": 98304000 },
+        { "x": 117964800, "y": 98304000 },
+        { "x": 121241600, "y": 98304000 },
+        { "x": 124518400, "y": 98304000 },
+        { "x": 127795200, "y": 98304000 },
+        { "x": 131072000, "y": 98304000 }
+      ]
+    },
+    {
+      "id": 2,
+      "layer": 0,
+      "bright": false,
+      "active": false,
+      "width": 2097152,
+      "strength": 786432,
+      "period": 45,
+      "path": [
+        { "x": 85196800, "y": 119930880 },
+        { "x": 88473600, "y": 119930880 },
+        { "x": 91750400, "y": 119930880 },
+        { "x": 95027200, "y": 119930880 },
+        { "x": 98304000, "y": 119930880 },
+        { "x": 101580800, "y": 119930880 }
+      ]
+    }
+  ],
+  "authored_boundaries": [{ "members": [1, 2, 3, 4, 5, 6, 8, 10] }],
+  "objectives": [
+    {
+      "id": "objective.the_break.follow_the_supply",
+      "condition": { "kind": "in_current", "current": 1, "steps": 16384 },
+      "optional": null
+    },
+    {
+      "id": "objective.the_break.open_the_intake",
+      "condition": { "kind": "ports_open", "ports": [2] },
+      "optional": null
+    },
+    {
+      "id": "objective.the_break.open_the_lines",
+      "condition": { "kind": "ports_open", "ports": [3, 4] },
+      "optional": null
+    },
+    {
+      "id": "objective.the_break.open_the_run",
+      "condition": { "kind": "ports_open", "ports": [5, 6, 10] },
+      "optional": null
+    },
+    {
+      "id": "objective.the_break.start_the_run",
+      "condition": { "kind": "routes_flowing", "routes": [7] },
+      "optional": null
+    },
+    {
+      "id": "objective.the_break.hold_the_run",
+      "condition": {
+        "kind": "pattern_held",
+        "routes": [7],
+        "nodes": [5, 10],
+        "steps": 21846
+      },
+      "optional": null
+    },
+    {
+      "id": "objective.the_break.open_the_store",
+      "condition": { "kind": "ports_open", "ports": [9] },
+      "optional": 5462
+    },
+    {
+      "id": "objective.the_break.carry_the_run",
+      "condition": {
+        "kind": "pattern_held",
+        "routes": [7],
+        "nodes": [5, 10],
+        "steps": 21846
+      },
+      "optional": null
+    },
+    {
+      "id": "objective.the_break.hold_past_the_break",
+      "condition": {
+        "kind": "pattern_held",
+        "routes": [7],
+        "nodes": [5, 10],
+        "steps": 21846
+      },
+      "optional": null
+    }
+  ],
+  "anchor_moments": ["objective.the_break.hold_the_run"],
+  "events": [
+    {
+      "objective": "objective.the_break.hold_the_run",
+      "at": 1,
+      "kind": "set_current_active",
+      "current": 2,
+      "active": true
+    },
+    {
+      "objective": "objective.the_break.hold_the_run",
+      "at": 4500,
+      "kind": "set_route_cut",
+      "route": 5
+    }
+  ],
+  "pressure_schedule": [
+    { "pressure": "fracture", "start_step": 81600, "primary": true, "target": { "t": "none", "id": null } }
+  ],
+  "opening_view": {
+    "inside": [1, 2, 3, 4, 5, 6, 8, 10],
+    "resolution": 1,
+    "window": 45,
+    "surround": "adjacent"
+  }
+}

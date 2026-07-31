@@ -1,0 +1,166 @@
+{
+  "id": "the_pull",
+  "title_key": "chapter.the_pull",
+  "ending_key": "ending.the_pull",
+  "layers": [
+    { "layer": 0, "drain": 0, "noise": 8192, "gain": 32768 },
+    { "layer": 1, "drain": 131072, "noise": 16384, "gain": 65536 }
+  ],
+  "forms": [
+    { "id": 1, "node": 1, "controlled": true, "layer": 0, "pos": { "x": 49807360, "y": 142868480 } }
+  ],
+  "ports": [
+    { "node": 2, "layer": 0, "kind": "port", "pos": { "x": 167772160, "y": 118620160 }, "capacity": 268435456, "upkeep_rate": 0 },
+    { "node": 3, "layer": 0, "kind": "port", "pos": { "x": 190054400, "y": 134217728 }, "capacity": 134217728, "upkeep_rate": 0 },
+    { "node": 4, "layer": 0, "kind": "port", "pos": { "x": 167772160, "y": 150077440 }, "capacity": 268435456, "upkeep_rate": 0 },
+    { "node": 5, "layer": 0, "kind": "port", "pos": { "x": 212336640, "y": 154664960 }, "capacity": 268435456, "upkeep_rate": 0 },
+    { "node": 6, "layer": 0, "kind": "reserve", "pos": { "x": 149422080, "y": 134217728 }, "capacity": 268435456, "upkeep_rate": 0 },
+    { "node": 7, "layer": 1, "kind": "port", "pos": { "x": 135004160, "y": 148111360 }, "capacity": 268435456, "upkeep_rate": 0 }
+  ],
+  "routes": [
+    { "route": 1, "tail": 6, "head": 2, "capacity": 524288 },
+    { "route": 2, "tail": 2, "head": 3, "capacity": 2097152 },
+    { "route": 3, "tail": 3, "head": 4, "capacity": 393216 },
+    { "route": 4, "tail": 4, "head": 2, "capacity": 2097152 },
+    { "route": 5, "tail": 3, "head": 5, "capacity": 2097152 },
+    { "route": 6, "tail": 5, "head": 6, "capacity": 2097152 }
+  ],
+  "currents": [
+    {
+      "id": 1,
+      "layer": 0,
+      "bright": true,
+      "active": true,
+      "width": 4194304,
+      "strength": 262144,
+      "period": 30,
+      "path": [
+        { "x": 58720256, "y": 134217728 },
+        { "x": 65536000, "y": 133169152 },
+        { "x": 72351744, "y": 132251648 },
+        { "x": 79167488, "y": 131465216 },
+        { "x": 85983232, "y": 130940928 },
+        { "x": 92798976, "y": 130613248 },
+        { "x": 99614720, "y": 130547712 },
+        { "x": 106430464, "y": 130613248 },
+        { "x": 113246208, "y": 130940928 },
+        { "x": 120061952, "y": 131465216 },
+        { "x": 126877696, "y": 132251648 },
+        { "x": 133693440, "y": 133169152 },
+        { "x": 140509184, "y": 134217728 }
+      ]
+    },
+    {
+      "id": 2,
+      "layer": 0,
+      "bright": false,
+      "active": true,
+      "width": 2621440,
+      "strength": 1048576,
+      "period": 45,
+      "path": [
+        { "x": 149422080, "y": 129761280 },
+        { "x": 149422080, "y": 134217728 },
+        { "x": 149422080, "y": 138674176 }
+      ]
+    },
+    {
+      "id": 3,
+      "layer": 1,
+      "bright": false,
+      "active": true,
+      "width": 3670016,
+      "strength": 1048576,
+      "period": 60,
+      "path": [
+        { "x": 78643200, "y": 144179200 },
+        { "x": 85196800, "y": 144179200 },
+        { "x": 91750400, "y": 144179200 },
+        { "x": 98304000, "y": 144179200 },
+        { "x": 104857600, "y": 144179200 },
+        { "x": 111411200, "y": 144179200 },
+        { "x": 117964800, "y": 144179200 },
+        { "x": 124518400, "y": 144179200 }
+      ]
+    }
+  ],
+  "authored_boundaries": [{ "members": [2, 3, 4] }],
+  "objectives": [
+    {
+      "id": "objective.the_pull.follow_current",
+      "condition": { "kind": "in_current", "current": 1, "steps": 1800 },
+      "optional": null
+    },
+    {
+      "id": "objective.the_pull.hold_center",
+      "condition": {
+        "kind": "hold_position",
+        "layer": 0,
+        "pos": { "x": 99614720, "y": 130547712 },
+        "radius": 6291456,
+        "steps": 2400
+      },
+      "optional": null
+    },
+    {
+      "id": "objective.the_pull.release_pulse",
+      "condition": { "kind": "pulse_released", "count": 1 },
+      "optional": null
+    },
+    {
+      "id": "objective.the_pull.open_port",
+      "condition": { "kind": "ports_open", "ports": [2] },
+      "optional": null
+    },
+    {
+      "id": "objective.the_pull.close_loop",
+      "condition": { "kind": "routes_flowing", "routes": [2, 3, 4] },
+      "optional": null
+    },
+    {
+      "id": "objective.the_pull.carry_pattern",
+      "condition": {
+        "kind": "pattern_held",
+        "routes": [2, 3, 4],
+        "nodes": [2, 3, 4],
+        "steps": 7500
+      },
+      "optional": null
+    },
+    {
+      "id": "objective.the_pull.take_the_depth",
+      "condition": { "kind": "in_current", "current": 3, "steps": 900 },
+      "optional": null
+    },
+    {
+      "id": "objective.the_pull.open_the_deep_port",
+      "condition": { "kind": "ports_open", "ports": [7] },
+      "optional": 1800
+    },
+    {
+      "id": "objective.the_pull.hold_the_moving_current",
+      "condition": { "kind": "in_current", "current": 1, "steps": 10923 },
+      "optional": null
+    }
+  ],
+  "anchor_moments": ["objective.the_pull.carry_pattern"],
+  "events": [
+    {
+      "objective": "objective.the_pull.hold_the_moving_current",
+      "at": 600,
+      "kind": "set_current_active",
+      "current": 3,
+      "active": false
+    }
+  ],
+  "pressure_schedule": [
+    { "pressure": "interference", "start_step": 900, "primary": true, "target": { "t": "node", "id": 5 } },
+    { "pressure": "drift", "start_step": 25333, "primary": false, "target": { "t": "layer", "id": 0 } }
+  ],
+  "opening_view": {
+    "inside": [2, 3, 4],
+    "resolution": 1,
+    "window": 45,
+    "surround": "adjacent"
+  }
+}

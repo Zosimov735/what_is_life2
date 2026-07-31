@@ -1,0 +1,59 @@
+{
+  "id": "the_pull",
+  "title_key": "chapter.the_pull",
+  "ending_key": "ending.the_pull",
+  "layers": [{ "layer": 0, "drain": 0, "noise": 4096, "gain": 32768 }],
+  "forms": [
+    {
+      "id": 1,
+      "node": 1,
+      "controlled": true,
+      "layer": 0,
+      "pos": { "x": 131072000, "y": 131072000 }
+    }
+  ],
+  "ports": [
+    {
+      "node": 2,
+      "layer": 0,
+      "kind": "reserve",
+      "pos": { "x": 157286400, "y": 131072000 },
+      "capacity": 16777216,
+      "upkeep_rate": 0
+    }
+  ],
+  "routes": [],
+  "currents": [
+    {
+      "id": 1,
+      "layer": 0,
+      "bright": true,
+      "active": true,
+      "width": 2621440,
+      "strength": 2097152,
+      "period": 30,
+      "path": [
+        { "x": 124518400, "y": 131072000 },
+        { "x": 131072000, "y": 131072000 },
+        { "x": 137625600, "y": 131072000 }
+      ]
+    }
+  ],
+  "authored_boundaries": [],
+  "objectives": [
+    {
+      "id": "objective.the_pull.stand_in_the_band",
+      "condition": { "kind": "in_current", "current": 1, "steps": 1024 },
+      "optional": null
+    }
+  ],
+  "anchor_moments": [],
+  "events": [],
+  "pressure_schedule": [],
+  "opening_view": {
+    "inside": [2],
+    "resolution": 1,
+    "window": 45,
+    "surround": "adjacent"
+  }
+}

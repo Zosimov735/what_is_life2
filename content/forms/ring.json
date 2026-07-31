@@ -1,0 +1,12 @@
+{
+  "id": "ring",
+  "route_reach": 25165824,
+  "route_capacity": 2097152,
+  "forecast_depth": 0,
+  "leak_frac": 8,
+  "upkeep_rate": 0,
+  "capacity": 100663296,
+  "reserve": 0,
+  "steer_scale": 65536,
+  "abilities": []
+}

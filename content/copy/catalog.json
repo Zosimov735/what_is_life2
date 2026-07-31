@@ -1,0 +1,837 @@
+{
+  "catalogVersion": 1,
+  "locale": "en",
+  "note": [
+    "The single source of player-facing text for field_game.",
+    "No component may write a player-facing string inline; every one is read",
+    "from here through the copy accessor described in field_game/AGENTS.md.",
+    "Wording rules, including the six-word limit on objectives and",
+    "instructions, are in docs/field-framework/LEXICON.md and are enforced by",
+    "field_game/tools/lexicon-check.mjs."
+  ],
+
+  "entries": {
+    "notice.preparing": { "kind": "notice", "text": "Preparing the field." },
+    "notice.run_resumed": { "kind": "notice", "text": "Run resumed." },
+    "notice.content_invalid": { "kind": "notice", "text": "The field could not be established." },
+    "notice.echo_route_removal": { "kind": "notice", "text": "Cutting that route changed the pattern." },
+    "notice.echo_boundary_severance": { "kind": "notice", "text": "Severing the boundary changed the pattern." },
+    "notice.echo_component_substitution": { "kind": "notice", "text": "Replacing that node changed the pattern." },
+    "notice.echo_evaluation": { "kind": "notice", "text": "The committed view changed the pattern." },
+
+    "objective.the_edge.hold_the_current": {
+      "kind": "objective",
+      "text": "Hold the bright current."
+    },
+
+    "instruction.choose_form": { "kind": "instruction", "text": "Choose a Form." },
+
+    "label.still_mode": { "kind": "label", "text": "Still Mode" },
+    "label.anchor": { "kind": "label", "text": "Anchor" },
+    "label.quick_retry": { "kind": "label", "text": "Quick Retry" },
+    "label.branch_recovery": { "kind": "label", "text": "Branch Recovery" },
+    "label.archive": { "kind": "label", "text": "Archive" },
+    "label.why": { "kind": "label", "text": "Why?" },
+    "label.impulse": { "kind": "label", "text": "Impulse" },
+    "label.pulse": { "kind": "label", "text": "Pulse" },
+    "label.queue": { "kind": "label", "text": "Queued changes" },
+    "label.cost": { "kind": "label", "text": "Cost" },
+    "label.chapter_review": { "kind": "label", "text": "Chapter complete" },
+    "label.continue": { "kind": "label", "text": "Continue" },
+    "label.ending": { "kind": "label", "text": "Campaign complete" },
+
+    "label.candidates": { "kind": "label", "text": "Candidates" },
+    "label.candidate_standing": { "kind": "label", "text": "Standing View" },
+    "label.candidate_finer": { "kind": "label", "text": "Finer" },
+    "label.candidate_coarser": { "kind": "label", "text": "Coarser" },
+    "label.candidate_lateral": { "kind": "label", "text": "Shifted" },
+    "label.candidate_drawn": { "kind": "label", "text": "Drawn Boundary" },
+    "label.candidate_clusters": { "kind": "label", "text": "Route Cluster" },
+    "label.candidate_authored": { "kind": "label", "text": "Physical Boundary" },
+    "label.candidate_responses": { "kind": "label", "text": "Shared Response" },
+
+    "label.tier": { "kind": "label", "text": "Tier" },
+    "label.value_scale_stability": { "kind": "label", "text": "Scale Stability" },
+    "label.value_shared_failure": { "kind": "label", "text": "Shared Failure" },
+    "label.value_cut_impact": { "kind": "label", "text": "Cut Impact" },
+    "label.value_boundary_sufficiency": {
+      "kind": "label",
+      "text": "Boundary Sufficiency"
+    },
+    "label.value_unassigned": { "kind": "label", "text": "Not read" },
+    "label.sensitivity": { "kind": "label", "text": "Tolerance decides this ranking" },
+
+    "label.handoff": { "kind": "label", "text": "Hand control to the next Form" },
+    "label.coordinate_profile": { "kind": "label", "text": "Coordinate profile" },
+    "label.coordinate_replays": { "kind": "label", "text": "Replay samples" },
+    "label.coord_swap_range": { "kind": "label", "text": "Swap Range" },
+    "label.coord_self_support": { "kind": "label", "text": "Self-Support" },
+    "label.coord_throughput_in": { "kind": "label", "text": "Throughput in" },
+    "label.coord_throughput_out": { "kind": "label", "text": "Throughput out" },
+    "label.coord_upkeep_mix": { "kind": "label", "text": "Upkeep Mix" },
+    "label.coord_reach": { "kind": "label", "text": "Reach" },
+    "label.coord_input_resolution": { "kind": "label", "text": "Input Resolution" },
+    "label.coord_horizon": { "kind": "label", "text": "Horizon" },
+    "label.coord_source_trace": { "kind": "label", "text": "Source Trace" },
+    "label.coord_instruction_separation": { "kind": "label", "text": "Instruction Separation" },
+    "label.coord_turnover_tolerance": { "kind": "label", "text": "Turnover Tolerance" },
+
+    "chapter.the_pull": { "kind": "chapter", "text": "The Pull" },
+    "chapter.the_edge": { "kind": "chapter", "text": "The Edge" },
+    "chapter.the_loop": { "kind": "chapter", "text": "The Loop" },
+    "chapter.the_echo": { "kind": "chapter", "text": "The Echo" },
+    "chapter.the_mesh": { "kind": "chapter", "text": "The Mesh" },
+    "chapter.the_break": { "kind": "chapter", "text": "The Break" },
+    "chapter.the_rewrite": { "kind": "chapter", "text": "The Rewrite" },
+    "chapter.the_quiet_edge": { "kind": "chapter", "text": "The Quiet Edge" },
+
+    "form.thread": { "kind": "form", "text": "Thread" },
+    "form.ring": { "kind": "form", "text": "Ring" },
+    "form.relay": { "kind": "form", "text": "Relay" },
+    "form.vault": { "kind": "form", "text": "Vault" },
+    "form.lens": { "kind": "form", "text": "Lens" },
+    "form.knot": { "kind": "form", "text": "Knot" },
+    "form.wake": { "kind": "form", "text": "Wake" },
+    "form.chorus": { "kind": "form", "text": "Chorus" },
+
+    "promise.thread": { "kind": "promise", "text": "Fast steering, weak boundary." },
+    "promise.ring": { "kind": "promise", "text": "Strong boundary, short reach." },
+    "promise.relay": {
+      "kind": "promise",
+      "text": "Moves charge across long routes, vulnerable to cuts."
+    },
+    "promise.vault": { "kind": "promise", "text": "Preserves stored state, responds slowly." },
+    "promise.lens": {
+      "kind": "promise",
+      "text": "Forecasts distant change, holds little charge."
+    },
+    "promise.knot": { "kind": "promise", "text": "Supports dense routing, pays high upkeep." },
+    "promise.wake": { "kind": "promise", "text": "Leaves delayed effects along its path." },
+    "promise.chorus": {
+      "kind": "promise",
+      "text": "Coordinates several linked Forms, vulnerable to separation."
+    },
+
+    "pressure.drain": { "kind": "pressure", "text": "Drain" },
+    "pressure.noise": { "kind": "pressure", "text": "Noise" },
+    "pressure.fracture": { "kind": "pressure", "text": "Fracture" },
+    "pressure.flood": { "kind": "pressure", "text": "Flood" },
+    "pressure.interference": { "kind": "pressure", "text": "Interference" },
+    "pressure.drift": { "kind": "pressure", "text": "Drift" },
+
+    "explanation.pressure_drain": {
+      "kind": "explanation",
+      "text": "Drain steadily removes stored Charge, deepening what each layer already takes. It builds from a signal through pressure to a crisis, then resolves and passes. Deeper layers drain harder, so retreating upward slows the loss while it stands."
+    },
+    "explanation.pressure_noise": {
+      "kind": "explanation",
+      "text": "Noise distorts routes and forecasts, so what the Field reports drifts from what it does. It builds from a signal through pressure to a crisis, then resolves and passes. Readings taken during it deserve less trust than usual."
+    },
+    "explanation.pressure_fracture": {
+      "kind": "explanation",
+      "text": "Fracture breaks existing connections. It builds from a signal through pressure to a crisis, then resolves and passes. Routes with an alternative path around them lose less when one is cut."
+    },
+    "explanation.pressure_flood": {
+      "kind": "explanation",
+      "text": "Flood overloads heavily used Nodes, pressing them past their thresholds. It builds from a signal through pressure to a crisis, then resolves and passes. A Node standing over its threshold sheds Charge and throttles its Routes, so spreading the load suppresses what Flood accelerates."
+    },
+    "explanation.pressure_interference": {
+      "kind": "explanation",
+      "text": "Interference redirects currents through competing paths. It builds from a signal through pressure to a crisis, then resolves and passes. A Pulse released within reach of its target presses it back a quarter at a time."
+    },
+    "explanation.pressure_drift": {
+      "kind": "explanation",
+      "text": "Drift moves valuable regions across the field. It builds from a signal through pressure to a crisis, then resolves and passes. A pattern anchored to one place weathers it worse than one that can follow."
+    },
+
+    "explanation.still_mode": {
+      "kind": "explanation",
+      "text": "Still Mode pauses the field so routes and boundaries can be edited directly. Every committed change spends Impulse."
+    },
+    "explanation.impulse": {
+      "kind": "explanation",
+      "text": "Impulse pays for queued changes. You carry up to six and regain three after completing a layer objective."
+    },
+    "explanation.handoff": {
+      "kind": "explanation",
+      "text": "Control moves to another Form at once, and costs no Impulse. Only one Form is steered at a time: the one you leave keeps its station in a linked set, or slows to a stop where it stands. Every Form gathers from the band it stands in whether or not you steer it, so which one you hold decides where a Pulse can reach and which pattern you can tend."
+    },
+    "explanation.coordinate_profile": {
+      "kind": "explanation",
+      "text": "The coordinate profile is ten separate readings of the standing View over its window. They are never added, averaged, or folded into one figure, and none of them ranks anything: ranking reads the four privilege values alone. Eight are read off the recorded window. The last two replay it, so they are taken only when you ask for them. A reading the window cannot support carries no number and says why."
+    },
+    "explanation.chapter_review": {
+      "kind": "explanation",
+      "text": "A chapter closes when every objective it requires is complete. An Anchor is written at that step, so the run can be resumed exactly here. The next chapter establishes its own Field, currents, and pressures; what you carry across is the Form you chose, the Impulse you hold, and the objectives already behind you."
+    },
+    "explanation.ending": {
+      "kind": "explanation",
+      "text": "The last chapter of the campaign is complete. The run stands where it ended and takes no further step; a new run may be started, or an exported run imported, from here."
+    },
+
+    "explanation.the_edge.hold_the_current": {
+      "kind": "explanation",
+      "text": "The bright current delivers Charge each step to every Node standing in its band, and three Nodes stand in this one. Keep the Form inside it and watch what those three take: the inside of this chapter is the Nodes the current reaches, and everything after this is about where its edge stands."
+    },
+
+    "ending.the_pull": {
+      "kind": "ending",
+      "text": "The current is followed and held. The campaign closes here."
+    },
+    "ending.the_edge": {
+      "kind": "ending",
+      "text": "The inside stands. The campaign closes here."
+    },
+    "ending.the_loop": {
+      "kind": "ending",
+      "text": "The circuit closes on itself. The campaign closes here."
+    },
+    "ending.the_echo": {
+      "kind": "ending",
+      "text": "The earlier trace answered the later break. The campaign closes here."
+    },
+    "ending.the_mesh": {
+      "kind": "ending",
+      "text": "Two patterns stand, and neither is the other. The campaign closes here."
+    },
+    "ending.the_break": {
+      "kind": "ending",
+      "text": "The pattern carried on past the break. The campaign closes here."
+    },
+    "ending.the_rewrite": {
+      "kind": "ending",
+      "text": "The module is replaced and continuity holds. The campaign closes here."
+    },
+    "ending.the_quiet_edge": {
+      "kind": "ending",
+      "text": "The pattern continues without direct control."
+    },
+
+    "objective.the_pull.follow_current": {
+      "kind": "objective",
+      "text": "Follow the bright current."
+    },
+    "explanation.the_pull.follow_current": {
+      "kind": "explanation",
+      "text": "A current delivers Charge each step to every Node standing in its band. The bright one is the widest band on this layer: steer into it and stay inside it. Cursor direction sets the heading and cursor distance sets the speed."
+    },
+    "objective.the_pull.hold_center": {
+      "kind": "objective",
+      "text": "Hold the center."
+    },
+    "explanation.the_pull.hold_center": {
+      "kind": "explanation",
+      "text": "Bringing the cursor close to the Form asks for no speed at all, so the Form settles where it stands. Holding inside the current keeps the Charge arriving while nothing else is asked of you."
+    },
+    "objective.the_pull.release_pulse": {
+      "kind": "objective",
+      "text": "Release a Pulse."
+    },
+    "explanation.the_pull.release_pulse": {
+      "kind": "explanation",
+      "text": "Holding the primary button charges a Pulse, and releasing it emits one. A longer hold reaches further: an empty release reaches eight units and a full charge reaches one hundred and ninety-two. What a Pulse reaches, it gathers from or opens."
+    },
+    "objective.the_pull.open_port": {
+      "kind": "objective",
+      "text": "Open the port."
+    },
+    "explanation.the_pull.open_port": {
+      "kind": "explanation",
+      "text": "A Port stands closed until a Pulse reaches it. A Route carries Charge from its tail to its head only while both of those Nodes are open, so opening one Port is what starts the first Route flowing."
+    },
+    "objective.the_pull.close_loop": {
+      "kind": "objective",
+      "text": "Close one loop."
+    },
+    "explanation.the_pull.close_loop": {
+      "kind": "explanation",
+      "text": "Three Routes stand between three Ports, tail to head and back again. Open all three Ports and the Charge runs the circuit: Routes are passed in ascending order each step, so a closed circuit carries several hops in one step and sustains itself."
+    },
+    "objective.the_pull.carry_pattern": {
+      "kind": "objective",
+      "text": "Carry the pattern through the break."
+    },
+    "explanation.the_pull.carry_pattern": {
+      "kind": "explanation",
+      "text": "A Node holding more than its threshold sheds a quarter of the excess every step, and the Routes into it carry half as much while it does. Open the Port beyond it and the Charge has somewhere else to go, so the pattern carries on across the break."
+    },
+    "objective.the_pull.take_the_depth": {
+      "kind": "objective",
+      "text": "Descend to the deeper current."
+    },
+    "explanation.the_pull.take_the_depth": {
+      "kind": "explanation",
+      "text": "The field stands in layers, and the Form may take one. The wheel over the surface, or the two bracket keys, moves it a layer at a time, and one change waits a moment before the next is read. The deeper layer gives twice what this one gives and takes a steady loss from every Node standing on it, so depth is a trade rather than a direction."
+    },
+    "objective.the_pull.open_the_deep_port": {
+      "kind": "objective",
+      "text": "Open that port, if you like."
+    },
+    "explanation.the_pull.open_the_deep_port": {
+      "kind": "explanation",
+      "text": "This one is optional. It stands for a while and then the chapter carries on without it, so taking it costs nothing and letting it go costs nothing but the time it stood. A Pulse reaches only what stands on the Form's own layer, so the Port past the deep current's far end is opened from beside it, and reaching it asks for a long hold."
+    },
+    "objective.the_pull.hold_the_moving_current": {
+      "kind": "objective",
+      "text": "Hold the current as it moves."
+    },
+    "explanation.the_pull.hold_the_moving_current": {
+      "kind": "explanation",
+      "text": "Drift moves this current across the field, once at each stage it enters, and each move is wider than the one before it until the pressure passes. The count is cumulative: a step outside the band adds nothing and takes nothing away, so what is asked is that you follow the band to where it went and stand in it again."
+    },
+    "objective.the_edge.set_it_running": {
+      "kind": "objective",
+      "text": "Set the Charge running through."
+    },
+    "explanation.the_edge.set_it_running": {
+      "kind": "explanation",
+      "text": "Three Routes carry from the reserve the bright current fills, through two Nodes, and out to the Node west of them, which pays away everything that reaches it. Each Route is wider than the one before it, so nothing along the line can be given more than it can pass on. The two Nodes that stand closed open a moment after the chapter does, and the line carries from the step they do: a Route moves Charge only while the Nodes at both of its ends stand open."
+    },
+    "objective.the_edge.open_the_stores": {
+      "kind": "objective",
+      "text": "Open both outer Ports."
+    },
+    "explanation.the_edge.open_the_stores": {
+      "kind": "explanation",
+      "text": "Two more Ports stand outside the line, one north and one east, each in the outer current and each holding everything it has been given. Open them and their Routes carry inward — a second way in and a third, for the stretches when the bright current does not run."
+    },
+    "objective.the_edge.hold_the_inside": {
+      "kind": "objective",
+      "text": "Hold the inside steady."
+    },
+    "explanation.the_edge.hold_the_inside": {
+      "kind": "explanation",
+      "text": "What the reserve at the head of the line holds rises while the bright current runs, and it stops rising at the ceiling a Node may carry. Everything past the reserve is passed straight on, so an inside is held by what arrives at its head, not by what any one Node keeps."
+    },
+    "objective.the_edge.draw_the_edge": {
+      "kind": "objective",
+      "text": "Draw the edge around the inside."
+    },
+    "explanation.the_edge.draw_the_edge": {
+      "kind": "explanation",
+      "text": "Space opens Still Mode and the field stands still. There are two ways to move the edge from here. The arrow keys walk the insides the field proposes, one at a time, and the one standing is the one a commit would take. Or take hold of a handle on the edge and let it go over a Node, which puts that Node inside instead. Enter commits what stands proposed and is also the way out, for one Impulse; a completed objective gives three back. Every member holding a Route or a neighbour outside the inside loses a share of what it holds each step, which is Leakage, so where the edge stands decides what the inside keeps."
+    },
+    "objective.the_edge.take_the_depth": {
+      "kind": "objective",
+      "text": "Take the Form a layer down."
+    },
+    "explanation.the_edge.take_the_depth": {
+      "kind": "explanation",
+      "text": "The wheel over the surface, or the two bracket keys, moves the Form a layer at a time, and one change waits a moment before the next is read. The deeper layer pays twice what this one pays and takes a steady loss from every Node standing on it, so depth is a trade rather than a direction."
+    },
+    "objective.the_edge.open_the_deep_store": {
+      "kind": "objective",
+      "text": "Open that store, if you like."
+    },
+    "explanation.the_edge.open_the_deep_store": {
+      "kind": "explanation",
+      "text": "This one is optional. It stands for a while and then the chapter carries on without it, so taking it costs nothing and letting it go costs nothing but the time it stood. The Port under the deep current has taken Charge from that current since the chapter opened and released none of it. A Pulse reaches only what stands on the Form's own layer, so it is opened from beside it, and what it holds runs to the inside once it is."
+    },
+    "objective.the_edge.hold_the_edge": {
+      "kind": "objective",
+      "text": "Hold the inside through three Breaks."
+    },
+    "explanation.the_edge.hold_the_edge": {
+      "kind": "explanation",
+      "text": "The bright current stops three times, each stop longer than the one before it, and the loss every Node on this layer takes rises with each one. What the inside already holds is what carries it across: draw the edge so that it keeps more, open the outer Ports so that more arrives, or form a Route of your own in Still Mode. Between the stops the current runs again and the reserve fills, so there is time to change the answer before the next one."
+    },
+
+    "objective.the_loop.follow_the_supply": {
+      "kind": "objective",
+      "text": "Follow the bright supply band."
+    },
+    "explanation.the_loop.follow_the_supply": {
+      "kind": "explanation",
+      "text": "The bright band is this chapter's only supply. It gives Charge each step to the Nodes standing in it, and the Form's own Node is one of them. No other Node on this field is given anything, so what the circuit runs on is what the Form carries out of this band."
+    },
+    "objective.the_loop.open_the_intake": {
+      "kind": "objective",
+      "text": "Open the intake port."
+    },
+    "explanation.the_loop.open_the_intake": {
+      "kind": "explanation",
+      "text": "A Port stands closed until a Pulse reaches it, and a Route carries nothing while either of its ends is closed. The intake is where the run begins: open it, and the Routes drawn beyond it have somewhere to start from."
+    },
+    "objective.the_loop.open_the_run": {
+      "kind": "objective",
+      "text": "Open the rest of the run."
+    },
+    "explanation.the_loop.open_the_run": {
+      "kind": "explanation",
+      "text": "Three more Ports stand along the run, and the Routes between them are drawn already. Each opens the way the first one did: hold the primary button beside it and release. A longer hold reaches further, and a Pulse opens every closed Port inside its reach at once."
+    },
+    "objective.the_loop.start_the_run": {
+      "kind": "objective",
+      "text": "Start the run carrying Charge."
+    },
+    "explanation.the_loop.start_the_run": {
+      "kind": "explanation",
+      "text": "Charge reaches the run only along a Route you draw. Still Mode holds the field still: a handle on the Form and a handle on the intake propose one connection, and Enter commits it for one Impulse. The Form must stand inside its own reach of the Port, so bring it near before you ask."
+    },
+    "objective.the_loop.hold_the_run": {
+      "kind": "objective",
+      "text": "Close the circuit and hold."
+    },
+    "explanation.the_loop.hold_the_run": {
+      "kind": "explanation",
+      "text": "The last Node of the run has nowhere to send what arrives, so it fills, carries more than it can hold, and sheds a quarter of the excess every step while it does. Give it somewhere to go: open one of the stores below the run and connect the outfall to it. Each store returns Charge to the intake at its own rate, and the circuit closes on itself."
+    },
+    "objective.the_loop.open_the_spare": {
+      "kind": "objective",
+      "text": "Open the spare, if you like."
+    },
+    "explanation.the_loop.open_the_spare": {
+      "kind": "explanation",
+      "text": "This one is optional. The spare junction is a fourth store, and the widest of the four: it banks more than any of the others and returns Charge to the intake slowly. Nothing runs through it until a Route is drawn to it. It stands for a while and then the chapter carries on without it."
+    },
+    "objective.the_loop.carry_the_circuit": {
+      "kind": "objective",
+      "text": "Keep the circuit supplied."
+    },
+    "explanation.the_loop.carry_the_circuit": {
+      "kind": "explanation",
+      "text": "Every Node of the run pays upkeep out of what it holds, every step, and the store pays too. The circuit carries Charge back to the intake but makes none, so the band is what keeps it standing. The count starts again from nothing on any step the run is not carrying, and leaving the band for long is what stops it."
+    },
+    "objective.the_loop.carry_the_break": {
+      "kind": "objective",
+      "text": "Carry the run past the closure."
+    },
+    "explanation.the_loop.carry_the_break": {
+      "kind": "explanation",
+      "text": "One Port of the run closes as this objective opens, and every Route through it stops. No routing carries the run past a closed Port: a Pulse released beside it is the one thing that opens it again. Nothing is lost while the run stands still except the time it stands."
+    },
+    "objective.the_loop.close_and_sustain": {
+      "kind": "objective",
+      "text": "Sustain the circuit under Flood."
+    },
+    "explanation.the_loop.close_and_sustain": {
+      "kind": "explanation",
+      "text": "Flood finds the Node the most Charge has passed through and holds it, and it looks again at every stage it enters. While it stands, that Node carries more than it can hold at a lower level than its own, so it sheds a quarter of the excess every step. What the stores have banked is what pays for that loss, and the run stands as long as more arrives than leaves."
+    },
+    "objective.the_echo.hold_the_light": {
+      "kind": "objective",
+      "text": "Stand in the bright current."
+    },
+    "explanation.the_echo.hold_the_light": {
+      "kind": "explanation",
+      "text": "A current delivers Charge each step to every Node standing in its band, and the Form's own Node is one of them. A Route runs from that Node to the store beyond the band's east end, so what is gathered here arrives there. Nothing else on this layer stands in the band."
+    },
+    "objective.the_echo.open_the_ring": {
+      "kind": "objective",
+      "text": "Open the two dark Ports."
+    },
+    "explanation.the_echo.open_the_ring": {
+      "kind": "explanation",
+      "text": "A Port stands closed until a Pulse reaches it. Two of them stand between the store and the Route that returns to it, and a Route carries Charge only while both of its Nodes are open."
+    },
+    "objective.the_echo.run_the_ring": {
+      "kind": "objective",
+      "text": "Start the ring turning."
+    },
+    "explanation.the_echo.run_the_ring": {
+      "kind": "explanation",
+      "text": "Routes are passed in ascending order each step, so Charge leaves the store, crosses both Ports and comes back to the store inside one step. What the ring turns on is what the store holds."
+    },
+    "objective.the_echo.hold_the_ring": {
+      "kind": "objective",
+      "text": "Hold the ring."
+    },
+    "explanation.the_echo.hold_the_ring": {
+      "kind": "explanation",
+      "text": "The near Node takes more each step than it passes on, so it climbs past its threshold, sheds a quarter of the excess every step, and halves the Routes into it while it stands there. Open the Port beside it and the Charge has somewhere else to go."
+    },
+    "objective.the_echo.take_the_deep_band": {
+      "kind": "objective",
+      "text": "Descend to the deeper band."
+    },
+    "explanation.the_echo.take_the_deep_band": {
+      "kind": "explanation",
+      "text": "The wheel over the surface, or the two bracket keys, moves the Form a layer at a time, and one change waits a moment before the next is read. The deeper layer gives twice what this one gives and takes a steady loss from every Node standing on it."
+    },
+    "objective.the_echo.lay_the_spare_line": {
+      "kind": "objective",
+      "text": "Open that Port, if you like."
+    },
+    "explanation.the_echo.lay_the_spare_line": {
+      "kind": "explanation",
+      "text": "This one is optional. It stands for a while and then the chapter carries on without it, so taking it costs nothing and letting it go costs nothing but the time it stood. The Port it names is the one Route between the deep store and the ring, and a Pulse reaches only what stands on the Form's own layer."
+    },
+    "objective.the_echo.fill_before_the_echo": {
+      "kind": "objective",
+      "text": "Fill the store again."
+    },
+    "explanation.the_echo.fill_before_the_echo": {
+      "kind": "explanation",
+      "text": "The store holds two thousand and forty-eight units before it begins to shed, and the ring spends what it holds. Standing in the bright current is how Charge goes back into it from this layer."
+    },
+    "objective.the_echo.hold_through_the_echo": {
+      "kind": "objective",
+      "text": "Hold the ring through it."
+    },
+    "explanation.the_echo.hold_through_the_echo": {
+      "kind": "explanation",
+      "text": "The ring turns on what the store holds, and what the store holds is what was gathered before now. Whatever else was already running into the ring when the bright current stopped is running into it still."
+    },
+    "objective.the_mesh.follow_the_supply": {
+      "kind": "objective",
+      "text": "Stand in the bright current."
+    },
+    "explanation.the_mesh.follow_the_supply": {
+      "kind": "explanation",
+      "text": "The bright current delivers Charge every step to every Node standing in its band, and the intake standing in it is what supplies the whole of this chapter. Stand in it and watch the intake fill."
+    },
+    "objective.the_mesh.open_the_north_store": {
+      "kind": "objective",
+      "text": "Open the northern store."
+    },
+    "explanation.the_mesh.open_the_north_store": {
+      "kind": "explanation",
+      "text": "Three Forms stand on this field and only one of them is steered. The northern store is a Port, and a Pulse released beside it is what opens it \u2014 the Form already standing beside it is a press away, in Still Mode, under Hand control to the next Form. Control moves at once and costs no Impulse."
+    },
+    "objective.the_mesh.open_the_south_store": {
+      "kind": "objective",
+      "text": "Open the southern store."
+    },
+    "explanation.the_mesh.open_the_south_store": {
+      "kind": "explanation",
+      "text": "The same again, on the other side. The southern Form stands beside the southern store, and the whole of what a Handoff asks is that you take it up. The Form you leave slows to a stop where it stands and keeps whatever its Node holds."
+    },
+    "objective.the_mesh.carry_the_first_pattern": {
+      "kind": "objective",
+      "text": "Carry the northern pattern."
+    },
+    "explanation.the_mesh.carry_the_first_pattern": {
+      "kind": "explanation",
+      "text": "A pattern stands when every Route of it carries Charge on the same step and no Node of it is carrying more than it can hold. The northern pattern runs intake, collector, store, outfall, and back to the intake. Keep the intake supplied and it turns on its own."
+    },
+    "objective.the_mesh.open_the_spare_intake": {
+      "kind": "objective",
+      "text": "Open the spare intake."
+    },
+    "explanation.the_mesh.open_the_spare_intake": {
+      "kind": "explanation",
+      "text": "A second Node stands in the band, further east, and it is closed. Opening it is what makes a second supply possible: the southern pattern can draw from the main intake or from this one, and that choice is the chapter's own."
+    },
+    "objective.the_mesh.link_the_second_pattern": {
+      "kind": "objective",
+      "text": "Set the southern pattern flowing."
+    },
+    "explanation.the_mesh.link_the_second_pattern": {
+      "kind": "explanation",
+      "text": "The southern pattern has a collector, a store, and a return, and no way in. In Still Mode, draw one Route into its collector \u2014 from the main intake, or from the spare one. Both leave the pattern flowing. What they do not share is what happens when Interference arrives."
+    },
+    "objective.the_mesh.take_the_depth": {
+      "kind": "objective",
+      "text": "Descend to the deeper current."
+    },
+    "explanation.the_mesh.take_the_depth": {
+      "kind": "explanation",
+      "text": "The deeper current pays double what the surface pays and takes a steady loss for standing there. The wheel or the bracket keys take the Form down a layer and back up. Nothing above stops while you are down here."
+    },
+    "objective.the_mesh.open_the_deep_port": {
+      "kind": "objective",
+      "text": "Open the deep port, optionally."
+    },
+    "explanation.the_mesh.open_the_deep_port": {
+      "kind": "explanation",
+      "text": "This one is optional. It stands for a while and then the chapter carries on without it. A Pulse cannot cross a layer, so it can only be opened from down here \u2014 and nothing later asks for it."
+    },
+    "objective.the_mesh.hold_both_patterns": {
+      "kind": "objective",
+      "text": "Hold both patterns at once."
+    },
+    "explanation.the_mesh.hold_both_patterns": {
+      "kind": "explanation",
+      "text": "Both patterns stand or neither counts: every Route of both carries Charge on the same step, and neither the intake nor the outfall carries more than it can hold. Interference gives one Node first claim on everything the band delivers, which makes leaning on that one Node look like enough. It is not: what one intake can pass on bounds what both patterns can draw."
+    },
+    "objective.the_break.follow_the_supply": {
+      "kind": "objective",
+      "text": "Follow the bright current east."
+    },
+    "explanation.the_break.follow_the_supply": {
+      "kind": "explanation",
+      "text": "The bright current delivers Charge each step, split between every Node standing in its band. The intake stands in it, so what the band gives is what the run will have. Keep the Form inside the band and this objective completes."
+    },
+    "objective.the_break.open_the_intake": {
+      "kind": "objective",
+      "text": "Open the intake in the band."
+    },
+    "explanation.the_break.open_the_intake": {
+      "kind": "explanation",
+      "text": "A Port stands closed until a Pulse reaches it, and a Route carries nothing while either of its ends is closed. The intake stands in the band beside the Form: hold the primary button, then release."
+    },
+    "objective.the_break.open_the_lines": {
+      "kind": "objective",
+      "text": "Open both lines below it."
+    },
+    "explanation.the_break.open_the_lines": {
+      "kind": "explanation",
+      "text": "Two lines stand below the intake, and each is a way into the run. Open both. Which of them the run carries through is settled later, by the Route you draw, and not by which Port is open."
+    },
+    "objective.the_break.open_the_run": {
+      "kind": "objective",
+      "text": "Open the junction and core."
+    },
+    "explanation.the_break.open_the_run": {
+      "kind": "explanation",
+      "text": "Below the lines stand the junction, the core, and the outfall the core sends to. One long Pulse released between them opens all three at once. Nothing carries Charge through any of them yet."
+    },
+    "objective.the_break.start_the_run": {
+      "kind": "objective",
+      "text": "Start the run carrying Charge."
+    },
+    "explanation.the_break.start_the_run": {
+      "kind": "explanation",
+      "text": "Charge reaches the run only along a Route you draw. Still Mode holds the field still: a handle on the intake and a handle on a line propose one connection, and Enter commits it for one Impulse. The two Nodes must stand inside the Form's own reach of each other."
+    },
+    "objective.the_break.hold_the_run": {
+      "kind": "objective",
+      "text": "Hold the run through the cut."
+    },
+    "explanation.the_break.hold_the_run": {
+      "kind": "explanation",
+      "text": "The run carries what the band gives to the core, and the core sends what it can to the outfall. A dim current stands over the core from here on, and carries a little into it on its own. Part way through this hold the junction's own Route into the core is severed: the junction then carries more than it can hold, and the objective stands in a setback until you move one end of a line onto the core yourself, in Still Mode."
+    },
+    "objective.the_break.open_the_store": {
+      "kind": "objective",
+      "text": "Open the store, if you like."
+    },
+    "explanation.the_break.open_the_store": {
+      "kind": "explanation",
+      "text": "This one is optional. The store stands away from the run and takes Charge from the intake along a slow Route, but only once it is open, so a store opened here is a full store later. Nothing later requires it, and letting it go costs the time it stood."
+    },
+    "objective.the_break.carry_the_run": {
+      "kind": "objective",
+      "text": "Carry the run a while."
+    },
+    "explanation.the_break.carry_the_run": {
+      "kind": "explanation",
+      "text": "Nothing new is asked. The run has to keep carrying while the store fills, and the count starts again from nothing on any step the core sends the outfall nothing."
+    },
+    "objective.the_break.hold_past_the_break": {
+      "kind": "objective",
+      "text": "Hold the run past the break."
+    },
+    "explanation.the_break.hold_past_the_break": {
+      "kind": "explanation",
+      "text": "Fracture finds the standing Route the most Charge has lately passed through and breaks it, once, when it reaches its crisis. That is the Route you drew, and it does not come back. Three answers stand: move one end of a line onto the intake, connect the store into the core, or cut the Route into the tail and reshape the inside to the core and its outfall, which the dim current alone can carry."
+    },
+    "objective.the_rewrite.follow_the_band": {
+      "kind": "objective",
+      "text": "Hold the bright band."
+    },
+    "explanation.the_rewrite.follow_the_band": {
+      "kind": "explanation",
+      "text": "The bright band delivers sixteen units of Charge a step, split between every Node standing in it, and the Form is a Node. A Route already runs from the Form to the intake, so what the Form gathers reaches the run: the intake fills, the two carriers between it and the junction pass eight a step along, and the junction banks what the run has not spent. Step out of the band and nothing new arrives: the run has what it has, every Node of it pays its own upkeep, and the boundary leaks a share of what the inside holds every step."
+    },
+    "objective.the_rewrite.open_the_dependents": {
+      "kind": "objective",
+      "text": "Open the two waiting Nodes."
+    },
+    "explanation.the_rewrite.open_the_dependents": {
+      "kind": "explanation",
+      "text": "Two Nodes stand east of the junction with a Route already drawn to each of them. A Route into a Node that is not open carries nothing, so nothing reaches them yet. A Pulse released beside a Node opens it, and the reach grows with how long the Pulse is held: an empty release reaches eight units and a full charge reaches a hundred and ninety-two."
+    },
+    "objective.the_rewrite.run_the_dependency": {
+      "kind": "objective",
+      "text": "Start both Routes carrying."
+    },
+    "explanation.the_rewrite.run_the_dependency": {
+      "kind": "explanation",
+      "text": "Once both are open the junction sends what it holds along both Routes, three units a step each. That pair is the dependency: everything east of the junction runs on what those two Routes carry, and they carry only on a step the junction has something to send."
+    },
+    "objective.the_rewrite.hold_the_dependency": {
+      "kind": "objective",
+      "text": "Hold both Routes carrying."
+    },
+    "explanation.the_rewrite.hold_the_dependency": {
+      "kind": "explanation",
+      "text": "Both Routes have to carry on the same step, and neither Node beyond them may hold more than its own threshold. Nothing takes Charge out of those two yet, so they fill in a dozen steps, carry more than they can hold, and shed a quarter of the excess every step while they do. Still Mode is where that is answered: draw a Route from each of them to the store beyond, and what arrives has somewhere to go. Each queued change costs one Impulse, and a completed objective gives three back."
+    },
+    "objective.the_rewrite.take_the_deep_band": {
+      "kind": "objective",
+      "text": "Take the deep band."
+    },
+    "explanation.the_rewrite.take_the_deep_band": {
+      "kind": "explanation",
+      "text": "The deep band delivers twenty a step where the bright one delivers sixteen, because the deeper layer pays at twice the rate of the surface. It also takes one unit a step from every Node standing on it. The Route from the Form to the intake carries across layers, so the run keeps its supply while the Form is down there."
+    },
+    "objective.the_rewrite.open_the_deep_spare": {
+      "kind": "objective",
+      "text": "Open the spare, if you like."
+    },
+    "explanation.the_rewrite.open_the_deep_spare": {
+      "kind": "explanation",
+      "text": "This one is optional. A Port stands two hundred and twenty units below the deep band, further than the longest Pulse reaches, so the Form has to leave the band to open it. No Route runs to it and nothing later in the chapter asks for it: what it costs is the time spent away from the band. It stands for its own span and then the chapter carries on without it, which takes longer than taking it does."
+    },
+    "objective.the_rewrite.carry_the_supply": {
+      "kind": "objective",
+      "text": "Carry the run past Fracture."
+    },
+    "explanation.the_rewrite.carry_the_supply": {
+      "kind": "explanation",
+      "text": "Fracture builds through two stages and breaks one Route as it enters the third, and the one it is aimed at here is the line from the Form to the intake. Nothing routes around a Route that is gone. The intake holds a few hundred units and the junction rather more, so the dependency stands about a hundred steps on what is already banked. Drawing the line again is one queued change. A Route reaches only between two Nodes inside the Form's own reach, and this one runs from the Form's own Node, with 512 units added to every distance for each layer between them: it cannot be drawn from the deep band at all."
+    },
+    "objective.the_rewrite.rewrite_the_module": {
+      "kind": "objective",
+      "text": "Replace the module without stopping."
+    },
+    "explanation.the_rewrite.rewrite_the_module": {
+      "kind": "explanation",
+      "text": "The two carriers between the intake and the junction are the module, and the Route joining them breaks two minutes into this objective. From the step this objective opens, every Node on the surface loses a tenth of a unit each step as well, so nothing here holds what it held. Once the Route between the carriers is gone the junction takes nothing in at all \u2014 no Route reaches it from the intake, wherever the Form is standing \u2014 and it spends six a step, so the dependency stands about seventy steps on what it banked. What a late rewrite pays for is the waiting and nothing else. Both spares below the carriers are open and empty, the standby beside the junction is full, and one queue holds six changes: a Route drawn, one end of a Route moved, a Route cut, the boundary redrawn. What the run carries out of this chapter is the Impulse it closes with: what it had, less what the changes cost, plus the three the last completion grants, clamped at six."
+    },
+
+    "objective.the_quiet_edge.close_the_spare_arm": {
+      "kind": "objective",
+      "text": "Close the spare arm too."
+    },
+    "explanation.the_quiet_edge.close_the_spare_arm": {
+      "kind": "explanation",
+      "text": "The pattern is an intake, five arms, and a hold that carries back round to the intake. Every arm needs a Route out of it or it takes in more than it can hold. A sixth arm stands beside the five with its own way out already drawn and nothing carrying into it. Six Routes drawn is six queued changes, and only a run carrying six Impulse can afford them before anything here completes."
+    },
+    "objective.the_quiet_edge.close_the_ring_at_once": {
+      "kind": "objective",
+      "text": "Close the ring at once."
+    },
+    "explanation.the_quiet_edge.close_the_ring_at_once": {
+      "kind": "explanation",
+      "text": "Five Routes, one out of each arm into the hold, close the pattern; each is one queued change. A run carrying five Impulse can draw all five and hold the pattern before this stands down. A run carrying four cannot, and its way through is the relief Port on the layer below, which no queued change is spent on and which costs the time it takes to get there."
+    },
+    "objective.the_quiet_edge.close_the_ring": {
+      "kind": "objective",
+      "text": "Close the ring."
+    },
+    "explanation.the_quiet_edge.close_the_ring": {
+      "kind": "explanation",
+      "text": "Every arm needs somewhere to send what arrives, or it stands over its own threshold and sheds a quarter of the excess each step. Draw a Route from each arm into the hold, or open the relief Port at depth with a Pulse so the last arm carries through it instead. The pattern is held when all five arms carry and none of them is over."
+    },
+    "objective.the_quiet_edge.take_the_deep_band": {
+      "kind": "objective",
+      "text": "Take the deep band."
+    },
+    "explanation.the_quiet_edge.take_the_deep_band": {
+      "kind": "explanation",
+      "text": "The deeper current delivers twice what the bright one does per step, and it stands over the relief Port. Press for depth and hold the band. The ring carries the pattern the whole time the Form is down there, which is what closing it bought."
+    },
+    "objective.the_quiet_edge.hold_past_the_deep_stop": {
+      "kind": "objective",
+      "text": "Hold past the deep stop."
+    },
+    "explanation.the_quiet_edge.hold_past_the_deep_stop": {
+      "kind": "explanation",
+      "text": "The deep current stops as this opens. What reaches the pattern from outside it is falling away, and the ring carries on what it already holds. Nothing here asks the Form to do anything the ring is not already doing."
+    },
+    "objective.the_quiet_edge.carry_the_closed_field": {
+      "kind": "objective",
+      "text": "Carry the closed field."
+    },
+    "explanation.the_quiet_edge.carry_the_closed_field": {
+      "kind": "explanation",
+      "text": "The bright band stops here as well, and the layer's loss is raised again. Nothing outside the pattern delivers anything now: what the ring carries is what the ring already held, less what the layer takes from every Node each step. The intake stands on about three thousand units when this opens."
+    },
+    "objective.the_quiet_edge.let_it_run": {
+      "kind": "objective",
+      "text": "Let it run."
+    },
+    "explanation.the_quiet_edge.let_it_run": {
+      "kind": "explanation",
+      "text": "Nothing here needs the Form. Let go of the steering, release no Pulse, ask for no depth, open no Still Mode: the ring carries itself for the whole of this. Noise narrows what every Route on this layer moves while it runs, and the pattern is still standing at the end of it."
+    },
+    "ending.the_quiet_edge.thread.spare": {
+      "kind": "ending",
+      "text": "The ring closed with its spare arm as well, and six arms carry it. Thread crossed the field faster than any of the eight could."
+    },
+    "ending.the_quiet_edge.thread.whole": {
+      "kind": "ending",
+      "text": "The ring closed at once, and five arms carry it. Thread crossed the field faster than any of the eight could."
+    },
+    "ending.the_quiet_edge.thread.steady": {
+      "kind": "ending",
+      "text": "The ring closed in its own time, and five arms carry it. Thread crossed the field faster than any of the eight could."
+    },
+    "ending.the_quiet_edge.ring.spare": {
+      "kind": "ending",
+      "text": "The ring closed with its spare arm as well, and six arms carry it. Ring reached every arm from the shortest reach any Form has."
+    },
+    "ending.the_quiet_edge.ring.whole": {
+      "kind": "ending",
+      "text": "The ring closed at once, and five arms carry it. Ring reached every arm from the shortest reach any Form has."
+    },
+    "ending.the_quiet_edge.ring.steady": {
+      "kind": "ending",
+      "text": "The ring closed in its own time, and five arms carry it. Ring reached every arm from the shortest reach any Form has."
+    },
+    "ending.the_quiet_edge.relay.spare": {
+      "kind": "ending",
+      "text": "The ring closed with its spare arm as well, and six arms carry it. Relay drew each arm's line twice as wide as the others could."
+    },
+    "ending.the_quiet_edge.relay.whole": {
+      "kind": "ending",
+      "text": "The ring closed at once, and five arms carry it. Relay drew each arm's line twice as wide as the others could."
+    },
+    "ending.the_quiet_edge.relay.steady": {
+      "kind": "ending",
+      "text": "The ring closed in its own time, and five arms carry it. Relay drew each arm's line twice as wide as the others could."
+    },
+    "ending.the_quiet_edge.vault.spare": {
+      "kind": "ending",
+      "text": "The ring closed with its spare arm as well, and six arms carry it. Vault moved slowest of the eight and carried the largest store."
+    },
+    "ending.the_quiet_edge.vault.whole": {
+      "kind": "ending",
+      "text": "The ring closed at once, and five arms carry it. Vault moved slowest of the eight and carried the largest store."
+    },
+    "ending.the_quiet_edge.vault.steady": {
+      "kind": "ending",
+      "text": "The ring closed in its own time, and five arms carry it. Vault moved slowest of the eight and carried the largest store."
+    },
+    "ending.the_quiet_edge.lens.spare": {
+      "kind": "ending",
+      "text": "The ring closed with its spare arm as well, and six arms carry it. Lens carried the smallest store of the eight and read furthest ahead."
+    },
+    "ending.the_quiet_edge.lens.whole": {
+      "kind": "ending",
+      "text": "The ring closed at once, and five arms carry it. Lens carried the smallest store of the eight and read furthest ahead."
+    },
+    "ending.the_quiet_edge.lens.steady": {
+      "kind": "ending",
+      "text": "The ring closed in its own time, and five arms carry it. Lens carried the smallest store of the eight and read furthest ahead."
+    },
+    "ending.the_quiet_edge.knot.spare": {
+      "kind": "ending",
+      "text": "The ring closed with its spare arm as well, and six arms carry it. Knot paid more upkeep every step than any of the eight."
+    },
+    "ending.the_quiet_edge.knot.whole": {
+      "kind": "ending",
+      "text": "The ring closed at once, and five arms carry it. Knot paid more upkeep every step than any of the eight."
+    },
+    "ending.the_quiet_edge.knot.steady": {
+      "kind": "ending",
+      "text": "The ring closed in its own time, and five arms carry it. Knot paid more upkeep every step than any of the eight."
+    },
+    "ending.the_quiet_edge.wake.spare": {
+      "kind": "ending",
+      "text": "The ring closed with its spare arm as well, and six arms carry it. Wake left an entry behind it on every line it took, and the field kept them."
+    },
+    "ending.the_quiet_edge.wake.whole": {
+      "kind": "ending",
+      "text": "The ring closed at once, and five arms carry it. Wake left an entry behind it on every line it took, and the field kept them."
+    },
+    "ending.the_quiet_edge.wake.steady": {
+      "kind": "ending",
+      "text": "The ring closed in its own time, and five arms carry it. Wake left an entry behind it on every line it took, and the field kept them."
+    },
+    "ending.the_quiet_edge.chorus.spare": {
+      "kind": "ending",
+      "text": "The ring closed with its spare arm as well, and six arms carry it. Chorus held its linked Forms on station the whole way."
+    },
+    "ending.the_quiet_edge.chorus.whole": {
+      "kind": "ending",
+      "text": "The ring closed at once, and five arms carry it. Chorus held its linked Forms on station the whole way."
+    },
+    "ending.the_quiet_edge.chorus.steady": {
+      "kind": "ending",
+      "text": "The ring closed in its own time, and five arms carry it. Chorus held its linked Forms on station the whole way."
+    }
+  }
+}

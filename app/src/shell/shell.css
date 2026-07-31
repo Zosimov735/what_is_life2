@@ -1,0 +1,712 @@
+/* The shell's surfaces. Graphite, no imported font, nothing fetched. */
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: #0b0c0e;
+  color: #d7d9dd;
+  font: 16px/1.5 system-ui, sans-serif;
+}
+
+/* The neutral surface shown while the worker opens. */
+.notice {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  letter-spacing: 0.08em;
+  opacity: 0.72;
+}
+
+/* The opening selection: the eight Forms and the one promise each makes.
+
+   It is the only surface that stands before there is a run, and it is laid out
+   as what it is — a list of choices, in the closed set's own order, with no
+   mark on any of them. No figures appear anywhere here: the parameters a Form
+   authors are said in its promise and never shown as numbers. */
+.opening {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 1.6rem;
+  padding: 2rem 1rem;
+  overflow-y: auto;
+}
+
+.opening-line {
+  margin: 0;
+  letter-spacing: 0.12em;
+  opacity: 0.72;
+}
+
+.opening-forms {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.6rem;
+  width: min(52rem, 100%);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.opening-form {
+  display: grid;
+  gap: 0.3rem;
+  width: 100%;
+  height: 100%;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(215, 217, 221, 0.22);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.opening-form:hover,
+.opening-form:focus-visible {
+  border-color: rgba(215, 217, 221, 0.5);
+  background: rgba(215, 217, 221, 0.05);
+}
+
+.opening-form:focus-visible {
+  outline: 2px solid rgba(215, 217, 221, 0.8);
+  outline-offset: 2px;
+}
+
+.opening-form-name {
+  letter-spacing: 0.1em;
+}
+
+.opening-form-promise {
+  font-size: 0.88rem;
+  line-height: 1.5;
+  opacity: 0.68;
+}
+
+/* The field. Full viewport, and empty until the renderer arrives.
+   The cursor is the platform's own and stays visible: its distance from the
+   Form is what sets speed, so hiding it would hide the control. No pointer
+   lock is taken anywhere, and nothing draws a cursor of its own. */
+.field {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  cursor: default;
+}
+
+/* The one visible objective, and the optional control that explains it.
+   Chrome, and as little of it as the rule allows: one line at the foot of the
+   surface, the field moving behind it. Nothing here covers the field, takes
+   focus, or waits to be dismissed — there is no modal tutorial anywhere. */
+.objective {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  justify-items: center;
+  gap: 0.4rem;
+  padding: 1.4rem 1rem 1.8rem;
+  pointer-events: none;
+  background: linear-gradient(to top, rgba(11, 12, 14, 0.72), rgba(11, 12, 14, 0));
+}
+
+.objective-line {
+  margin: 0;
+  letter-spacing: 0.06em;
+  opacity: 0.9;
+}
+
+/* A setback is legible without colour alone: the line dims and sits lower. */
+.objective[data-state='failed_recoverable'] .objective-line {
+  opacity: 0.62;
+  transform: translateY(0.15rem);
+}
+
+.objective-why {
+  pointer-events: auto;
+  border: 1px solid rgba(215, 217, 221, 0.28);
+  border-radius: 999px;
+  padding: 0.1rem 0.7rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.82rem;
+  letter-spacing: 0.06em;
+  opacity: 0.62;
+  cursor: pointer;
+}
+
+.objective-why:hover,
+.objective-why:focus-visible {
+  opacity: 1;
+}
+
+.objective-why:focus-visible {
+  outline: 2px solid rgba(215, 217, 221, 0.8);
+  outline-offset: 2px;
+}
+
+.objective-detail {
+  pointer-events: auto;
+  max-width: 46rem;
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  text-align: center;
+  opacity: 0.74;
+}
+
+/* The standing pressure's own line: the concise explanation beside the
+   renderer's direct cues. Top corner, opposite register from the objective at
+   the foot of the surface, so the two are never stacked and never confused.
+   Nothing here covers the field, takes focus, or waits to be dismissed. */
+.pressure-line {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: grid;
+  justify-items: center;
+  gap: 0.4rem;
+  padding: 1.1rem 1rem 0.9rem;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(11, 12, 14, 0.6), rgba(11, 12, 14, 0));
+}
+
+.pressure-name {
+  margin: 0;
+  font-size: 0.92rem;
+  letter-spacing: 0.14em;
+  opacity: 0.66;
+}
+
+/* The reading sharpens as the stage does, without a word for it. */
+.pressure-line[data-stage='crisis'] .pressure-name {
+  opacity: 0.95;
+}
+
+.pressure-line[data-stage='resolution'] .pressure-name {
+  opacity: 0.5;
+}
+
+/* The queued-change tray. Chrome, in a corner, with the field behind it: the
+   goal is that Still Mode separates inspection from committed changes without
+   leaving the main screen, so nothing here covers the surface, takes focus, or
+   waits to be dismissed. It fades with the ramp, so the 250 ms that slows the
+   field is the same 250 ms that brings the tray up and takes it away. */
+.tray {
+  position: fixed;
+  top: 0;
+  right: 0;
+  display: grid;
+  gap: 0.35rem;
+  min-width: 11rem;
+  /* Wide enough for the four value rows a ranked candidate carries, and no
+     wider: the tray is chrome in a corner, and the Field reads behind it. */
+  max-width: 21rem;
+  padding: 0.9rem 1.1rem 1rem;
+  pointer-events: none;
+  font-size: 0.86rem;
+  letter-spacing: 0.06em;
+  background: linear-gradient(to bottom left, rgba(11, 12, 14, 0.72), rgba(11, 12, 14, 0));
+  opacity: 1;
+  transition: opacity 250ms linear;
+}
+
+.tray[data-mode='ramp_in'],
+.tray[data-mode='ramp_out'] {
+  opacity: 0.45;
+}
+
+.tray-name {
+  margin: 0;
+  opacity: 0.9;
+}
+
+.tray-reading {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.4rem;
+  margin: 0;
+  opacity: 0.66;
+}
+
+/* The name half of a reading row. The row is two items pushed to its two ends,
+   so the name holds one line: a wrapped name would put the two ends of one
+   reading on two rows. */
+.tray-term {
+  white-space: nowrap;
+}
+
+.tray-value {
+  font-variant-numeric: tabular-nums;
+}
+
+/* One entry per queued change, in the order they were queued: a mark for the
+   change and the Impulse it costs. What the change itself is reads on the
+   field, where it is drawn. */
+/* The candidates of the standing slate, one per line, named by their source.
+   Nothing here is focusable and nothing here is a figure: the list is read,
+   and the arrows walk it. */
+.tray-candidates {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0.1rem 0 0.35rem;
+  padding: 0;
+  list-style: none;
+}
+.tray-candidate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  opacity: 0.72;
+}
+
+/* The tier the candidates below it stand in. A tier is the rank of a set under
+   the dominance relation, so it heads a group rather than standing beside a
+   candidate as a figure of its own. */
+.tray-tier {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  margin-top: 0.25rem;
+  opacity: 0.5;
+  font-size: 0.66rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.tray-tier-name {
+  font-size: 0.66rem;
+}
+
+/* Four readings, one per row, each drawn as the range the comparison reads.
+   Never one bar: the four are never combined. */
+.tray-values {
+  display: flex;
+  flex-direction: column;
+  gap: 0.14rem;
+  width: 100%;
+  padding: 0.1rem 0 0.25rem 0.85rem;
+}
+.tray-value-row {
+  display: grid;
+  grid-template-columns: 8.4rem 1fr;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  min-height: 0.85rem;
+}
+.tray-value-name {
+  font-size: 0.62rem;
+  line-height: 1.25;
+  letter-spacing: 0.01em;
+  opacity: 0.6;
+}
+.tray-range {
+  position: relative;
+  display: block;
+  height: 0.42rem;
+  border-radius: 0.21rem;
+  background: rgba(195, 164, 255, 0.12);
+}
+/* The span between low and high, and the value's own place inside it. */
+.tray-range-span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--range-low);
+  width: var(--range-span);
+  min-width: 2px;
+  border-radius: 0.21rem;
+  background: rgba(195, 164, 255, 0.55);
+}
+.tray-range-at {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  left: var(--range-at);
+  width: 2px;
+  background: rgba(233, 226, 255, 0.95);
+}
+/* An unassigned value is an absence rather than a zero, and reads as one
+   without colour: the row carries a mark and no bar at all. */
+.tray-value-row[data-assigned='false'] .tray-range {
+  background: transparent;
+  border-top: 1px dashed rgba(195, 164, 255, 0.4);
+  border-radius: 0;
+  height: auto;
+}
+.tray-value-absent {
+  display: block;
+  font-size: 0.6rem;
+  letter-spacing: 0.04em;
+  opacity: 0.45;
+}
+
+/* The tolerance-sensitivity flag. */
+.tray-sensitivity {
+  margin: 0.2rem 0 0.35rem;
+  font-size: 0.63rem;
+  letter-spacing: 0.03em;
+  opacity: 0.7;
+  border-left: 2px solid rgba(233, 226, 255, 0.5);
+  padding-left: 0.35rem;
+}
+.tray-candidate[data-focused='true'] {
+  opacity: 1;
+}
+.tray-candidate[data-focused='true'] .tray-mark {
+  background: rgba(230, 220, 255, 0.85);
+  border-color: rgba(230, 220, 255, 0.95);
+}
+.tray-candidate-name {
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+}
+/* The walk's announcement carries no visible reading of its own — the marked
+   list entry already shows it — so it holds no space while it stands. */
+.tray-focus {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  margin: 0;
+}
+
+.tray-queue {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tray-entry {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.tray-entry-cost {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.74rem;
+  opacity: 0.6;
+}
+
+.tray-mark {
+  display: block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border: 1px solid rgba(195, 164, 255, 0.75);
+  border-radius: 50%;
+  background: rgba(195, 164, 255, 0.3);
+}
+
+/* A conflict is legible without colour alone: the mark opens up. */
+.tray-entry[data-conflict='true'] .tray-mark {
+  background: transparent;
+  border-style: dashed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tray {
+    transition: none;
+  }
+}
+
+
+/* The optional coordinate-profile surface, and the Echo.
+
+   Both are chrome, and both keep the division the rest of the shell keeps:
+   nothing about the Field is drawn here, and nothing here covers the surface.
+   The opt-in control stands in the bottom-left corner, opposite the tray, so
+   the two never overlap; the panel it opens is the only place in the whole
+   shell a coordinate number appears. Ordinary play renders neither — the
+   component returns nothing outside the still surface's own modes. */
+
+.inspect {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  display: grid;
+  gap: 0.4rem;
+  justify-items: start;
+  /* Narrow enough to stand clear of the objective's own centred column at the
+     narrowest viewport the shell targets: the panel is chrome in a corner, and
+     nothing here may cover the one line a player is reading. */
+  max-width: 19rem;
+  padding: 0.9rem 1.1rem 1rem;
+  /* The panel takes clicks and the region does not, exactly as the objective's
+     own control does: the Field behind it stays reachable. */
+  pointer-events: none;
+  color: #d7d9dd;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+}
+
+.inspect-open,
+.inspect-replays {
+  pointer-events: auto;
+  border: 1px solid rgba(215, 217, 221, 0.28);
+  border-radius: 999px;
+  padding: 0.1rem 0.7rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.82rem;
+  letter-spacing: 0.06em;
+  opacity: 0.62;
+  cursor: pointer;
+}
+
+.inspect-open:hover,
+.inspect-open:focus-visible,
+.inspect-replays:hover,
+.inspect-replays:focus-visible {
+  opacity: 1;
+}
+
+.inspect-open:focus-visible,
+.inspect-replays:focus-visible {
+  outline: 2px solid rgba(215, 217, 221, 0.8);
+  outline-offset: 2px;
+}
+
+.inspect-panel {
+  pointer-events: auto;
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.6rem 0.75rem;
+  /* A profile is ten rows and an explanation; on a short viewport it scrolls
+     rather than running off the top of the surface. */
+  max-height: 70vh;
+  overflow-y: auto;
+  border: 1px solid rgba(215, 217, 221, 0.16);
+  border-radius: 0.4rem;
+  background: rgba(11, 12, 14, 0.72);
+}
+
+.inspect-detail {
+  margin: 0 0 0.35rem;
+  max-width: 17rem;
+  font-size: 0.76rem;
+  line-height: 1.55;
+  opacity: 0.7;
+}
+
+/* One row per reading. Ten readings stand separately and none is drawn as a
+   share of another, because there is no whole for them to be shares of. */
+.inspect-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.2rem;
+  margin: 0;
+}
+
+.inspect-name {
+  opacity: 0.72;
+}
+
+.inspect-value {
+  font-variant-numeric: tabular-nums;
+}
+
+/* An unassigned reading is an absence, and reads as one without colour. */
+.inspect-row[data-assigned='false'] .inspect-value {
+  opacity: 0.5;
+  font-style: italic;
+}
+
+/* The Handoff: control moving to another Form, in Still Mode, at once and for
+   nothing.
+
+   Its own region, in the corner the shell leaves free — the tray holds the top
+   right, the review the top left, the coordinate-profile control the bottom
+   left — so the two Still Mode controls stand one to each bottom corner and
+   neither covers the other. Chrome, on the same terms as everything else here:
+   the region takes no clicks, the buttons do, nothing covers the field, and
+   nothing waits to be dismissed. */
+.handoff {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  /* Narrow enough to stand clear of the objective's own centred column, on the
+     same reasoning the coordinate-profile control stands clear of it. */
+  max-width: 19rem;
+  padding: 0.9rem 1.1rem 1rem;
+  pointer-events: none;
+  color: #d7d9dd;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+}
+
+.handoff-move,
+.handoff-why {
+  pointer-events: auto;
+  border: 1px solid rgba(215, 217, 221, 0.28);
+  border-radius: 999px;
+  padding: 0.1rem 0.7rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.82rem;
+  letter-spacing: 0.06em;
+  opacity: 0.62;
+  cursor: pointer;
+}
+
+.handoff-move:hover,
+.handoff-move:focus-visible,
+.handoff-why:hover,
+.handoff-why:focus-visible {
+  opacity: 1;
+}
+
+.handoff-move:focus-visible,
+.handoff-why:focus-visible {
+  outline: 2px solid rgba(215, 217, 221, 0.8);
+  outline-offset: 2px;
+}
+
+/* The detail behind `Why?`, on its own line under the two controls. */
+.handoff-detail {
+  pointer-events: auto;
+  flex-basis: 100%;
+  margin: 0;
+  max-width: 17rem;
+  font-size: 0.76rem;
+  line-height: 1.55;
+  text-align: right;
+  opacity: 0.7;
+}
+
+/* The Echo: one short line, centred under the objective, and never a wall. */
+.echo {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 4.4rem;
+  margin: 0;
+  padding: 0 1rem;
+  text-align: center;
+  pointer-events: none;
+  color: #d7d9dd;
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  opacity: 0.78;
+}
+
+/* The chapter review, and the ending a completed campaign closes on. A corner
+   surface: the chapter that opened is already moving behind it, so it covers as
+   little as it can, waits for nothing, and is let go of by its own control. The
+   left corner is its own, opposite the pressure line and clear of the one
+   objective at the foot. */
+.review {
+  position: fixed;
+  left: 1rem;
+  top: 1rem;
+  display: grid;
+  justify-items: start;
+  gap: 0.35rem;
+  max-width: 22rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid rgba(215, 217, 221, 0.18);
+  border-radius: 0.4rem;
+  background: rgba(11, 12, 14, 0.72);
+  color: #d7d9dd;
+}
+
+.review-label {
+  margin: 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.56;
+}
+
+.review-line {
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: 0.06em;
+  opacity: 0.92;
+}
+
+.review-detail {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  opacity: 0.74;
+}
+
+.review-why,
+.review-continue {
+  border: 1px solid rgba(215, 217, 221, 0.28);
+  border-radius: 999px;
+  padding: 0.1rem 0.7rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.82rem;
+  letter-spacing: 0.06em;
+  opacity: 0.62;
+  cursor: pointer;
+}
+
+.review-why:hover,
+.review-why:focus-visible,
+.review-continue:hover,
+.review-continue:focus-visible {
+  opacity: 1;
+}
+
+.review-why:focus-visible,
+.review-continue:focus-visible {
+  outline: 2px solid rgba(215, 217, 221, 0.8);
+  outline-offset: 2px;
+}
+
+/* On a surface too narrow for the panel and the one objective to stand side by
+   side, the panel stands above it. Nothing chrome puts on the surface may cover
+   the line a player is reading, and a corner is only a corner while there is
+   room for one. */
+@media (max-width: 56rem) {
+  .inspect {
+    bottom: 5.2rem;
+  }
+
+  /* And too narrow for the two Still Mode controls to hold one corner each:
+     the Handoff stands above the coordinate-profile control rather than
+     across it, clear of the control's own row and of the objective below. */
+  .handoff {
+    bottom: 9rem;
+  }
+
+  .review {
+    max-width: none;
+    right: 1rem;
+  }
+}

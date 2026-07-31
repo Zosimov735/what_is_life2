@@ -1,0 +1,10 @@
+{
+  "id": "flood",
+  "target": "node",
+  "stages": [
+    { "stage": "signal", "level": 13107, "steps": 90 },
+    { "stage": "pressure", "level": 32768, "steps": 240 },
+    { "stage": "crisis", "level": 52429, "steps": 150 },
+    { "stage": "resolution", "level": 13107, "steps": 90 }
+  ]
+}

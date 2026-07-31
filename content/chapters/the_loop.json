@@ -1,0 +1,168 @@
+{
+  "id": "the_loop",
+  "title_key": "chapter.the_loop",
+  "ending_key": "ending.the_loop",
+  "layers": [{ "layer": 0, "drain": 0, "noise": 4096, "gain": 32768 }],
+  "forms": [
+    { "id": 1, "node": 1, "controlled": true, "layer": 0, "pos": { "x": 81264640, "y": 106168320 } }
+  ],
+  "ports": [
+    { "node": 2, "layer": 0, "kind": "port", "pos": { "x": 138936320, "y": 125829120 }, "capacity": 2621440, "upkeep_rate": 32768 },
+    { "node": 3, "layer": 0, "kind": "port", "pos": { "x": 117964800, "y": 131072000 }, "capacity": 2228224, "upkeep_rate": 32768 },
+    { "node": 4, "layer": 0, "kind": "port", "pos": { "x": 159907840, "y": 131072000 }, "capacity": 4194304, "upkeep_rate": 32768 },
+    { "node": 5, "layer": 0, "kind": "port", "pos": { "x": 171704320, "y": 149422080 }, "capacity": 8388608, "upkeep_rate": 16384 },
+    { "node": 6, "layer": 0, "kind": "port", "pos": { "x": 149422080, "y": 154664960 }, "capacity": 16777216, "upkeep_rate": 16384 },
+    { "node": 7, "layer": 0, "kind": "port", "pos": { "x": 163840000, "y": 171048960 }, "capacity": 41943040, "upkeep_rate": 32768 },
+    { "node": 8, "layer": 0, "kind": "port", "pos": { "x": 191365120, "y": 161218560 }, "capacity": 83886080, "upkeep_rate": 65536 },
+    { "node": 9, "layer": 0, "kind": "port", "pos": { "x": 190054400, "y": 136314880 }, "capacity": 201326592, "upkeep_rate": 16384 }
+  ],
+  "routes": [
+    { "route": 1, "tail": 4, "head": 5, "capacity": 2097152 },
+    { "route": 2, "tail": 2, "head": 4, "capacity": 2097152 },
+    { "route": 3, "tail": 3, "head": 2, "capacity": 2097152 },
+    { "route": 4, "tail": 6, "head": 3, "capacity": 1572864 },
+    { "route": 5, "tail": 7, "head": 3, "capacity": 1310720 },
+    { "route": 6, "tail": 8, "head": 3, "capacity": 524288 },
+    { "route": 7, "tail": 9, "head": 3, "capacity": 786432 }
+  ],
+  "currents": [
+    {
+      "id": 1,
+      "layer": 0,
+      "bright": true,
+      "active": true,
+      "width": 2097152,
+      "strength": 1048576,
+      "period": 30,
+      "path": [
+        { "x": 85196800, "y": 98304000 },
+        { "x": 88473600, "y": 98304000 },
+        { "x": 91750400, "y": 98304000 },
+        { "x": 95027200, "y": 98304000 },
+        { "x": 98304000, "y": 98304000 },
+        { "x": 101580800, "y": 98304000 },
+        { "x": 104857600, "y": 98304000 },
+        { "x": 108134400, "y": 98304000 },
+        { "x": 111411200, "y": 98304000 },
+        { "x": 114688000, "y": 98304000 },
+        { "x": 117964800, "y": 98304000 },
+        { "x": 121241600, "y": 98304000 },
+        { "x": 124518400, "y": 98304000 },
+        { "x": 127795200, "y": 98304000 },
+        { "x": 131072000, "y": 98304000 },
+        { "x": 134348800, "y": 98304000 },
+        { "x": 137625600, "y": 98304000 },
+        { "x": 140902400, "y": 98304000 },
+        { "x": 144179200, "y": 98304000 },
+        { "x": 147456000, "y": 98304000 },
+        { "x": 150732800, "y": 98304000 },
+        { "x": 154009600, "y": 98304000 },
+        { "x": 157286400, "y": 98304000 },
+        { "x": 160563200, "y": 98304000 },
+        { "x": 163840000, "y": 98304000 },
+        { "x": 167116800, "y": 98304000 },
+        { "x": 170393600, "y": 98304000 },
+        { "x": 173670400, "y": 98304000 },
+        { "x": 176947200, "y": 98304000 },
+        { "x": 180224000, "y": 98304000 },
+        { "x": 183500800, "y": 98304000 },
+        { "x": 186777600, "y": 98304000 },
+        { "x": 190054400, "y": 98304000 }
+      ]
+    }
+  ],
+  "authored_boundaries": [{ "members": [2, 3, 4, 5] }],
+  "objectives": [
+    {
+      "id": "objective.the_loop.follow_the_supply",
+      "condition": { "kind": "in_current", "current": 1, "steps": 5462 },
+      "optional": null
+    },
+    {
+      "id": "objective.the_loop.open_the_intake",
+      "condition": { "kind": "ports_open", "ports": [3] },
+      "optional": null
+    },
+    {
+      "id": "objective.the_loop.open_the_run",
+      "condition": { "kind": "ports_open", "ports": [2, 4, 5] },
+      "optional": null
+    },
+    {
+      "id": "objective.the_loop.start_the_run",
+      "condition": { "kind": "routes_flowing", "routes": [1, 2, 3] },
+      "optional": null
+    },
+    {
+      "id": "objective.the_loop.hold_the_run",
+      "condition": {
+        "kind": "pattern_held",
+        "routes": [1, 2, 3],
+        "nodes": [2, 4, 5],
+        "steps": 13108
+      },
+      "optional": null
+    },
+    {
+      "id": "objective.the_loop.open_the_spare",
+      "condition": { "kind": "ports_open", "ports": [9] },
+      "optional": 5462
+    },
+    {
+      "id": "objective.the_loop.carry_the_circuit",
+      "condition": {
+        "kind": "pattern_held",
+        "routes": [1, 2, 3],
+        "nodes": [2, 4, 5],
+        "steps": 16384
+      },
+      "optional": null
+    },
+    {
+      "id": "objective.the_loop.carry_the_break",
+      "condition": {
+        "kind": "pattern_held",
+        "routes": [1, 2, 3],
+        "nodes": [2, 4, 5],
+        "steps": 13108
+      },
+      "optional": null
+    },
+    {
+      "id": "objective.the_loop.close_and_sustain",
+      "condition": {
+        "kind": "pattern_held",
+        "routes": [1, 2, 3],
+        "nodes": [2, 4, 5],
+        "steps": 21846
+      },
+      "optional": null
+    }
+  ],
+  "anchor_moments": ["objective.the_loop.hold_the_run"],
+  "events": [
+    {
+      "objective": "objective.the_loop.carry_the_break",
+      "at": 1,
+      "kind": "set_port_open",
+      "node": 4,
+      "open": false
+    },
+    {
+      "objective": "objective.the_loop.close_and_sustain",
+      "at": 1,
+      "kind": "set_layer_drain",
+      "layer": 0,
+      "drain": 65536
+    }
+  ],
+  "pressure_schedule": [
+    { "pressure": "flood", "start_step": 76000, "primary": true, "target": { "t": "none", "id": null } }
+  ],
+  "opening_view": {
+    "inside": [2, 3, 4, 5],
+    "resolution": 1,
+    "window": 45,
+    "surround": "adjacent"
+  }
+}

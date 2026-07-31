@@ -1,0 +1,579 @@
+{
+  "id": "the_quiet_edge",
+  "title_key": "chapter.the_quiet_edge",
+  "ending_key": "ending.the_quiet_edge",
+  "ending_marks": [
+    {
+      "mark": "spare",
+      "objective": "objective.the_quiet_edge.close_the_spare_arm"
+    },
+    {
+      "mark": "whole",
+      "objective": "objective.the_quiet_edge.close_the_ring_at_once"
+    },
+    {
+      "mark": "steady"
+    }
+  ],
+  "layers": [
+    {
+      "layer": 0,
+      "drain": 0,
+      "noise": 4096,
+      "gain": 32768
+    },
+    {
+      "layer": 1,
+      "drain": 65536,
+      "noise": 8192,
+      "gain": 65536
+    }
+  ],
+  "forms": [
+    {
+      "id": 1,
+      "node": 1,
+      "controlled": true,
+      "layer": 0,
+      "pos": {
+        "x": 91750400,
+        "y": 98304000
+      }
+    }
+  ],
+  "ports": [
+    {
+      "node": 2,
+      "layer": 0,
+      "kind": "reserve",
+      "pos": {
+        "x": 91750400,
+        "y": 124518400
+      },
+      "capacity": 196608000,
+      "upkeep_rate": 0
+    },
+    {
+      "node": 3,
+      "layer": 0,
+      "kind": "module",
+      "pos": {
+        "x": 76021760,
+        "y": 144179200
+      },
+      "capacity": 33554432,
+      "upkeep_rate": 0
+    },
+    {
+      "node": 4,
+      "layer": 0,
+      "kind": "module",
+      "pos": {
+        "x": 85852160,
+        "y": 144179200
+      },
+      "capacity": 33554432,
+      "upkeep_rate": 0
+    },
+    {
+      "node": 5,
+      "layer": 0,
+      "kind": "module",
+      "pos": {
+        "x": 95682560,
+        "y": 144179200
+      },
+      "capacity": 33554432,
+      "upkeep_rate": 0
+    },
+    {
+      "node": 6,
+      "layer": 0,
+      "kind": "module",
+      "pos": {
+        "x": 105512960,
+        "y": 144179200
+      },
+      "capacity": 33554432,
+      "upkeep_rate": 0
+    },
+    {
+      "node": 7,
+      "layer": 0,
+      "kind": "module",
+      "pos": {
+        "x": 115343360,
+        "y": 144179200
+      },
+      "capacity": 33554432,
+      "upkeep_rate": 0
+    },
+    {
+      "node": 8,
+      "layer": 0,
+      "kind": "reserve",
+      "pos": {
+        "x": 95682560,
+        "y": 157286400
+      },
+      "capacity": 196608000,
+      "upkeep_rate": 0
+    },
+    {
+      "node": 9,
+      "layer": 0,
+      "kind": "module",
+      "pos": {
+        "x": 111411200,
+        "y": 134348800
+      },
+      "capacity": 33554432,
+      "upkeep_rate": 0
+    },
+    {
+      "node": 10,
+      "layer": 1,
+      "kind": "port",
+      "pos": {
+        "x": 190054400,
+        "y": 190054400
+      },
+      "capacity": 33554432,
+      "upkeep_rate": 0
+    }
+  ],
+  "routes": [
+    {
+      "route": 1,
+      "tail": 8,
+      "head": 2,
+      "capacity": 13107200
+    },
+    {
+      "route": 2,
+      "tail": 2,
+      "head": 3,
+      "capacity": 524288
+    },
+    {
+      "route": 3,
+      "tail": 2,
+      "head": 4,
+      "capacity": 524288
+    },
+    {
+      "route": 4,
+      "tail": 2,
+      "head": 5,
+      "capacity": 524288
+    },
+    {
+      "route": 5,
+      "tail": 2,
+      "head": 6,
+      "capacity": 524288
+    },
+    {
+      "route": 6,
+      "tail": 2,
+      "head": 7,
+      "capacity": 524288
+    },
+    {
+      "route": 7,
+      "tail": 9,
+      "head": 8,
+      "capacity": 10485760
+    },
+    {
+      "route": 8,
+      "tail": 7,
+      "head": 10,
+      "capacity": 524288
+    },
+    {
+      "route": 9,
+      "tail": 10,
+      "head": 8,
+      "capacity": 6553600
+    },
+    {
+      "route": 10,
+      "tail": 1,
+      "head": 8,
+      "capacity": 2097152
+    }
+  ],
+  "currents": [
+    {
+      "id": 1,
+      "layer": 0,
+      "bright": true,
+      "active": true,
+      "width": 2621440,
+      "strength": 4194304,
+      "period": 30,
+      "path": [
+        {
+          "x": 72089600,
+          "y": 98304000
+        },
+        {
+          "x": 74711040,
+          "y": 98304000
+        },
+        {
+          "x": 77332480,
+          "y": 98304000
+        },
+        {
+          "x": 79953920,
+          "y": 98304000
+        },
+        {
+          "x": 82575360,
+          "y": 98304000
+        },
+        {
+          "x": 85196800,
+          "y": 98304000
+        },
+        {
+          "x": 87818240,
+          "y": 98304000
+        },
+        {
+          "x": 90439680,
+          "y": 98304000
+        },
+        {
+          "x": 93061120,
+          "y": 98304000
+        },
+        {
+          "x": 95682560,
+          "y": 98304000
+        },
+        {
+          "x": 98304000,
+          "y": 98304000
+        },
+        {
+          "x": 100925440,
+          "y": 98304000
+        },
+        {
+          "x": 103546880,
+          "y": 98304000
+        },
+        {
+          "x": 106168320,
+          "y": 98304000
+        },
+        {
+          "x": 108789760,
+          "y": 98304000
+        },
+        {
+          "x": 111411200,
+          "y": 98304000
+        },
+        {
+          "x": 114032640,
+          "y": 98304000
+        },
+        {
+          "x": 116654080,
+          "y": 98304000
+        },
+        {
+          "x": 119275520,
+          "y": 98304000
+        },
+        {
+          "x": 121896960,
+          "y": 98304000
+        },
+        {
+          "x": 124518400,
+          "y": 98304000
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "layer": 1,
+      "bright": false,
+      "active": true,
+      "width": 2621440,
+      "strength": 4194304,
+      "period": 45,
+      "path": [
+        {
+          "x": 170393600,
+          "y": 180224000
+        },
+        {
+          "x": 174325760,
+          "y": 182190080
+        },
+        {
+          "x": 178257920,
+          "y": 184156160
+        },
+        {
+          "x": 182190080,
+          "y": 186122240
+        },
+        {
+          "x": 186122240,
+          "y": 188088320
+        },
+        {
+          "x": 190054400,
+          "y": 190054400
+        },
+        {
+          "x": 193986560,
+          "y": 192020480
+        },
+        {
+          "x": 197918720,
+          "y": 193986560
+        },
+        {
+          "x": 201850880,
+          "y": 195952640
+        },
+        {
+          "x": 205783040,
+          "y": 197918720
+        },
+        {
+          "x": 209715200,
+          "y": 199884800
+        }
+      ]
+    }
+  ],
+  "authored_boundaries": [
+    {
+      "members": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ]
+    }
+  ],
+  "objectives": [
+    {
+      "id": "objective.the_quiet_edge.close_the_spare_arm",
+      "condition": {
+        "kind": "pattern_held",
+        "nodes": [
+          3,
+          4,
+          5,
+          6,
+          7,
+          9
+        ],
+        "routes": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "steps": 1024
+      },
+      "optional": 2400
+    },
+    {
+      "id": "objective.the_quiet_edge.close_the_ring_at_once",
+      "condition": {
+        "kind": "pattern_held",
+        "nodes": [
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "routes": [
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "steps": 1024
+      },
+      "optional": 1800
+    },
+    {
+      "id": "objective.the_quiet_edge.close_the_ring",
+      "condition": {
+        "kind": "pattern_held",
+        "nodes": [
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "routes": [
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "steps": 16384
+      },
+      "optional": null
+    },
+    {
+      "id": "objective.the_quiet_edge.take_the_deep_band",
+      "condition": {
+        "kind": "in_current",
+        "current": 2,
+        "steps": 21846
+      },
+      "optional": null
+    },
+    {
+      "id": "objective.the_quiet_edge.hold_past_the_deep_stop",
+      "condition": {
+        "kind": "pattern_held",
+        "nodes": [
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "routes": [
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "steps": 21846
+      },
+      "optional": null
+    },
+    {
+      "id": "objective.the_quiet_edge.carry_the_closed_field",
+      "condition": {
+        "kind": "pattern_held",
+        "nodes": [
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "routes": [
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "steps": 21846
+      },
+      "optional": null
+    },
+    {
+      "id": "objective.the_quiet_edge.let_it_run",
+      "condition": {
+        "kind": "pattern_held",
+        "nodes": [
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "routes": [
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "steps": 32768
+      },
+      "optional": null
+    }
+  ],
+  "anchor_moments": [
+    "objective.the_quiet_edge.close_the_ring",
+    "objective.the_quiet_edge.carry_the_closed_field"
+  ],
+  "events": [
+    {
+      "objective": "objective.the_quiet_edge.close_the_ring",
+      "at": 1,
+      "kind": "set_layer_drain",
+      "layer": 0,
+      "drain": 410
+    },
+    {
+      "objective": "objective.the_quiet_edge.hold_past_the_deep_stop",
+      "at": 1,
+      "kind": "set_current_active",
+      "current": 2,
+      "active": false
+    },
+    {
+      "objective": "objective.the_quiet_edge.carry_the_closed_field",
+      "at": 1,
+      "kind": "set_current_active",
+      "current": 1,
+      "active": false
+    },
+    {
+      "objective": "objective.the_quiet_edge.carry_the_closed_field",
+      "at": 1,
+      "kind": "set_layer_drain",
+      "layer": 0,
+      "drain": 819
+    }
+  ],
+  "pressure_schedule": [
+    {
+      "pressure": "noise",
+      "start_step": 106000,
+      "primary": true,
+      "target": {
+        "t": "layer",
+        "id": 0
+      }
+    }
+  ],
+  "opening_view": {
+    "inside": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ],
+    "resolution": 1,
+    "window": 45,
+    "surround": "adjacent"
+  }
+}

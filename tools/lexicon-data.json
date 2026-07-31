@@ -1,0 +1,89 @@
+{
+  "dataVersion": 1,
+  "note": [
+    "Machine-readable half of docs/field-framework/LEXICON.md.",
+    "LEXICON.md is the human authority and carries the open-ended noun and verb",
+    "lists plus the writing rules. This file carries only what the check needs:",
+    "the four closed name sets, the prohibited terms, and the copy kinds.",
+    "This file is excluded from the scan because it must spell out the terms the",
+    "scan rejects. Keep it in step with LEXICON.md whenever either one changes."
+  ],
+
+  "canonical": {
+    "interfaceLabels": [
+      "Still Mode",
+      "Anchor",
+      "Quick Retry",
+      "Branch Recovery",
+      "Archive",
+      "Why?",
+      "Impulse",
+      "Pulse"
+    ],
+    "pressures": ["Drain", "Noise", "Fracture", "Flood", "Interference", "Drift"],
+    "chapters": [
+      "The Pull",
+      "The Edge",
+      "The Loop",
+      "The Echo",
+      "The Mesh",
+      "The Break",
+      "The Rewrite",
+      "The Quiet Edge"
+    ],
+    "forms": ["Thread", "Ring", "Relay", "Vault", "Lens", "Knot", "Wake", "Chorus"]
+  },
+
+  "copyKinds": {
+    "objective": { "maxWords": 6 },
+    "instruction": { "maxWords": 6 },
+    "label": {},
+    "chapter": { "canonicalSet": "chapters" },
+    "form": { "canonicalSet": "forms" },
+    "pressure": { "canonicalSet": "pressures" },
+    "promise": {},
+    "explanation": {},
+    "notice": {},
+    "ending": {}
+  },
+
+  "prohibited": {
+    "representational": [
+      "creature", "creatures", "organism", "organisms", "animal", "animals",
+      "beast", "beasts", "insect", "insects", "avatar", "hero", "villain",
+      "npc", "pet", "monster", "monsters",
+
+      "cell", "cells", "cellular", "membrane", "tissue", "blood", "bone",
+      "brain", "muscle", "nerve", "limb", "tentacle", "gill", "gills",
+      "fin", "fins",
+
+      "plant", "plants", "flower", "petal", "fungus", "spore", "spores",
+      "bacteria", "microbe", "virus",
+
+      "fish", "whale", "bird", "worm", "snake", "amoeba", "plankton",
+      "jellyfish",
+
+      "eat", "eats", "eating", "feed", "feeds", "feeding", "food", "hunger",
+      "hungry", "swim", "swims", "swimming", "crawl", "slither",
+
+      "predator", "predators", "prey", "hunt", "hunts", "hunting", "sting",
+      "bite", "devour", "enemy", "enemies", "weapon", "attack", "attacks",
+      "damage", "wound", "heal", "health",
+
+      "kill", "kills", "die", "dies", "dying", "death", "corpse", "alive",
+      "survive", "survives", "survived", "surviving", "survival", "birth",
+      "born", "breed", "offspring",
+
+      "evolve", "evolves", "evolving", "evolution", "evolutionary", "gene",
+      "genes", "genetic", "genome", "dna", "species", "habitat", "ecosystem",
+      "ecology", "biology", "biological", "biome", "metabolism", "metabolic",
+
+      "water", "aquatic", "underwater", "ocean", "sea", "pond", "river",
+      "sky", "cloud", "sun", "moon", "forest", "desert", "weather", "storm"
+    ],
+    "collapsed-value": [
+      "score", "scores", "scored", "scoring", "rating", "ratings",
+      "fitness", "aliveness"
+    ]
+  }
+}

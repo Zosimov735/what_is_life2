@@ -1,0 +1,22 @@
+{
+  "id": "chorus",
+  "route_reach": 41943040,
+  "route_capacity": 2097152,
+  "forecast_depth": 0,
+  "leak_frac": 20,
+  "upkeep_rate": 4096,
+  "capacity": 50331648,
+  "reserve": 0,
+  "steer_scale": 65536,
+  "abilities": [
+    {
+      "kind": "linked_forms",
+      "separation": 16777216,
+      "offsets": [
+        { "x": -3145728, "y": -2359296 },
+        { "x": -3670016, "y": 2621440 },
+        { "x": 786432, "y": 3932160 }
+      ]
+    }
+  ]
+}

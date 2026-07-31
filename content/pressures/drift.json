@@ -1,0 +1,10 @@
+{
+  "id": "drift",
+  "target": "layer",
+  "stages": [
+    { "stage": "signal", "level": 8192, "steps": 150 },
+    { "stage": "pressure", "level": 26214, "steps": 360 },
+    { "stage": "crisis", "level": 49152, "steps": 180 },
+    { "stage": "resolution", "level": 13107, "steps": 120 }
+  ]
+}
