@@ -4,7 +4,7 @@
 //
 // Dependency-free on purpose: it runs on a bare node install before any
 // package.json, bundler, or test framework exists, and later goals run it
-// unchanged. See field_game/AGENTS.md for the invocation and
+// unchanged. See AGENTS.md for the invocation and
 // docs/field-framework/LEXICON.md for the rules it enforces.
 //
 // It reports six kinds of violation:
@@ -808,16 +808,16 @@ function parseArguments(argv) {
 const HELP = `Approved-lexicon and copy-catalog check for the field_game workspace.
 
 Usage:
-  node field_game/tools/lexicon-check.mjs [--root <dir>] [--json]
+  node tools/lexicon-check.mjs [--root <dir>] [--json]
 
   --root <dir>  Treat <dir> as the workspace root and scan only it. Without it
-                the check scans field_game/ plus docs/field-framework/.
+                the check scans the repository plus docs/field-framework/.
   --json        Emit a machine-readable report on stdout.
   --help        Show this text.
 
 Exit codes: 0 clean, 1 violations found, 2 bad usage.
 
-Rules: docs/field-framework/LEXICON.md. Invocation: field_game/AGENTS.md.
+Rules: tools/lexicon-data.json and AGENTS.md.
 `;
 
 function main() {
@@ -835,7 +835,7 @@ function main() {
   const workspaceRoot = options.root
     ? path.resolve(options.root)
     : DEFAULT_WORKSPACE;
-  const repoRoot = path.resolve(workspaceRoot, '..');
+  const repoRoot = workspaceRoot;
   const report = new Report(workspaceRoot, repoRoot);
 
   const isExcluded = (absolute) => {
@@ -850,10 +850,13 @@ function main() {
 
   // The workspace is scanned in full. The framework documents are scanned for
   // wording only, and only when the check runs on the real workspace.
-  const workspaceFiles = walk(workspaceRoot, isExcluded);
+  const documentRoot = path.join(workspaceRoot, 'docs', 'field-framework');
+  const workspaceFiles = walk(workspaceRoot, isExcluded).filter(
+    (file) => !file.startsWith(`${documentRoot}${path.sep}`),
+  );
   const documentFiles = options.root
     ? []
-    : walk(path.join(repoRoot, 'docs', 'field-framework'), () => false).filter(
+    : walk(documentRoot, () => false).filter(
         (file) => !EXCLUDED_DOCUMENTS.has(path.basename(file)),
       );
 
