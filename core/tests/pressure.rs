@@ -985,7 +985,6 @@ fn drain_scales_the_targeted_layer_through_the_one_drain_sink() {
     let outcome = field_mod::advance(
         &mut field,
         ControlState::default(),
-        &[],
         FRAC_ONE,
         &mut staged.staging(),
     );
@@ -1014,7 +1013,7 @@ fn noise_narrows_route_flow_by_the_drawn_scale_and_zero_noise_draws_nothing() {
     let mut quiet = opening.clone();
     let mut unstaged = Unstaged::default();
     let before = unstaged.stream;
-    field_mod::advance(&mut quiet, ControlState::default(), &[], FRAC_ONE, &mut unstaged.staging());
+    field_mod::advance(&mut quiet, ControlState::default(), FRAC_ONE, &mut unstaged.staging());
     assert_eq!(unstaged.stream, before, "a run without noise consumes no words");
     assert_eq!(quiet.routes[0].flow, 16 * ONE_UNIT, "and the flow is the whole capacity");
 
@@ -1032,7 +1031,6 @@ fn noise_narrows_route_flow_by_the_drawn_scale_and_zero_noise_draws_nothing() {
     let outcome = field_mod::advance(
         &mut noisy,
         ControlState::default(),
-        &[],
         FRAC_ONE,
         &mut staged.staging(),
     );
@@ -1062,7 +1060,6 @@ fn flood_lowers_the_targeted_threshold_for_decay_and_the_throttle() {
     let outcome = field_mod::advance(
         &mut field,
         ControlState::default(),
-        &[],
         FRAC_ONE,
         &mut staged.staging(),
     );
@@ -1138,7 +1135,6 @@ fn interference_redirects_a_share_of_every_same_layer_emission_to_its_target() {
     let outcome = field_mod::advance(
         &mut field,
         ControlState::default(),
-        &[],
         FRAC_ONE,
         &mut staged.staging(),
     );
@@ -1168,7 +1164,6 @@ fn interference_redirects_a_share_of_every_same_layer_emission_to_its_target() {
     let outcome = field_mod::advance(
         &mut nearly,
         ControlState::default(),
-        &[],
         FRAC_ONE,
         &mut staged.staging(),
     );
@@ -1528,6 +1523,7 @@ fn a_seat_taken_at_the_opening_boundary_fires_its_stage_entry_one_shots() {
         ports: Vec::new(),
         routes: Vec::new(),
         currents: Vec::new(),
+        physical_compartment: Default::default(),
         authored_boundaries: Vec::new(),
         objectives: Vec::new(),
         anchor_moments: Vec::new(),
