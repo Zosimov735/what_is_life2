@@ -955,6 +955,7 @@ fn optional_chapter() -> content::Chapter {
         ports: Vec::new(),
         routes: Vec::new(),
         currents: Vec::new(),
+        physical_compartment: Default::default(),
         authored_boundaries: Vec::new(),
         objectives: vec![
             content::Objective {
