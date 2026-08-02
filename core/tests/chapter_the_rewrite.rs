@@ -308,6 +308,12 @@ struct Driven {
     store_units: i64,
     form_units: i64,
     forms: usize,
+    /// Trail entries still standing in this chapter's Field at the latest
+    /// pre-transition reading.
+    pending_trails: usize,
+    /// Whole-unit capacities of the Routes the player formed in this chapter,
+    /// in Route identifier order.
+    formed_route_capacities: Vec<i64>,
     routes: usize,
     /// The Routes standing at the close, tail and head, ascending.
     standing_routes: Vec<(u32, u32, u32)>,
@@ -686,6 +692,8 @@ fn drive_full(
         store_units: 0,
         form_units: 0,
         forms: 0,
+        pending_trails: 0,
+        formed_route_capacities: Vec::new(),
         routes: 0,
         standing_routes: Vec::new(),
         view_members: Vec::new(),
@@ -908,6 +916,14 @@ fn drive_full(
                 .find(|form| form.controlled)
                 .map_or(0, |form| form.charge / ONE_UNIT);
             driven.forms = state.now.forms.len();
+            driven.pending_trails = state.now.pending.len();
+            driven.formed_route_capacities = state
+                .now
+                .routes
+                .iter()
+                .filter(|route| route.formed_step >= driven.opening_step)
+                .map(|route| route.capacity / ONE_UNIT)
+                .collect();
             driven.routes = state.now.routes.len();
             driven.standing_routes =
                 state.now.routes.iter().map(|r| (r.route, r.tail, r.head)).collect();
@@ -1185,10 +1201,10 @@ fn every_starting_form_completes_the_whole_chapter() {
     let authored = authored_order();
     println!("\nthe eight Forms through the whole chapter");
     println!(
-        "{:<8} {:>10} {:>8} {:>8} {:>8} {:>6} {:>8} {:>8} {:>8}",
-        "form", "objectives", "steps", "minutes", "setbacks", "routes", "compartment", "standby", "store",
+        "{:<8} {:>10} {:>8} {:>8} {:>8} {:>6} {:>5} {:>6} {:>8} {:>8} {:>8}",
+        "form", "objectives", "steps", "minutes", "setbacks", "routes", "forms", "trails", "compartment", "standby", "store",
     );
-    let mut readings: Vec<(&str, i64, i64, i64)> = Vec::new();
+    let mut evidence: Vec<(&str, usize, usize, Vec<i64>)> = Vec::new();
     for form in field_game_core::run::FORMS {
         let run = drive_as(form, Path::ByParts, false, true);
         assert_eq!(run.completed, authored, "{form} completes the whole chapter in order");
@@ -1201,24 +1217,63 @@ fn every_starting_form_completes_the_whole_chapter() {
         }
         assert!(run.deep_spare_open, "{form} opened the deep spare the optional test names");
         println!(
-            "{form:<8} {:>10} {at:>8} {:>8} {:>8} {:>6} {:>8} {:>8} {:>8}",
+            "{form:<8} {:>10} {at:>8} {:>8} {:>8} {:>6} {:>5} {:>6} {:>8} {:>8} {:>8}",
             run.completed.len(),
             minutes(at),
             run.setbacks.len(),
             run.routes,
+            run.forms,
+            run.pending_trails,
             run.compartment_units,
             run.standby_units,
             run.store_units,
         );
-        readings.push((form, run.compartment_units, run.standby_units, run.store_units));
+        evidence.push((
+            form,
+            run.forms,
+            run.pending_trails,
+            run.formed_route_capacities.clone(),
+        ));
     }
-    let distinct: std::collections::BTreeSet<(i64, i64, i64)> =
-        readings.iter().map(|held| (held.1, held.2, held.3)).collect();
-    assert!(
-        distinct.len() >= 3,
-        "the eight Forms end the chapter holding only {} distinct readings: {readings:?}",
-        distinct.len(),
+    // Closing Charge may converge under the chapter's one causal physical-
+    // compartment coefficient. Assert the chassis mechanisms this script
+    // actually exercises instead of treating incidental final magnitudes as a
+    // Form fingerprint: Chorus stands its linked group up, Wake leaves delayed
+    // Trail entries, and Relay gives every Route the player forms twice the
+    // ordinary capacity.
+    let of = |named: &str| {
+        evidence.iter().find(|held| held.0 == named).expect("Form evidence")
+    };
+    assert_eq!(
+        of("chorus").1,
+        4,
+        "Chorus stands three linked Forms beside the controlled one",
     );
+    for held in evidence.iter().filter(|held| held.0 != "chorus") {
+        assert_eq!(
+            held.1,
+            1,
+            "{} stands only the chapter's controlled Form",
+            held.0,
+        );
+    }
+    assert!(of("wake").2 > 0, "Wake leaves delayed Trail entries in the Field");
+    for held in evidence.iter().filter(|held| held.0 != "wake") {
+        assert_eq!(held.2, 0, "{} authors no Trail entries", held.0);
+    }
+    assert_eq!(
+        of("relay").3.as_slice(),
+        [64, 64, 64, 64],
+        "Relay doubles all four Routes this chapter asks the player to form",
+    );
+    for held in evidence.iter().filter(|held| held.0 != "relay") {
+        assert_eq!(
+            held.3.as_slice(),
+            [32, 32, 32, 32],
+            "{} forms all four Routes at the ordinary capacity",
+            held.0,
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
