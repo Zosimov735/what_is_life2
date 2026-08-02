@@ -35,12 +35,20 @@ in advance.
 ## Local commands
 
 ```bash
-npm install
+nvm use
+npm ci
+npm run doctor
 npm run dev
 npm test
 npm run build
 ```
 
-The complete suite and production build require Rust, Cargo, `wasm-pack`, and
-the `wasm32-unknown-unknown` target. See [AGENTS.md](AGENTS.md) for the current
-workspace rules and detailed command notes.
+The pinned Rust toolchain, WASM target, and local `wasm-pack` package are used by
+the repository scripts. `npm run dev` prepares missing or stale generated
+inputs before starting Vite. See [AGENTS.md](AGENTS.md) for the current workspace
+rules and [Platform and delivery](docs/field-framework/PLATFORM_AND_DELIVERY.md)
+for the static-web and planned macOS package architecture.
+
+Production does not require an application server. The web build is static,
+and the planned macOS `.app`/`.dmg` will use Tauri 2 to host the same
+Worker/Rust-WASM application locally.

@@ -1,0 +1,61 @@
+name: Validate static game
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Use pinned Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Use pinned npm
+        run: npm install --global npm@11.9.0
+
+      - name: Install JavaScript and wasm-pack dependencies
+        run: npm ci
+
+      - name: Resolve pinned Rust toolchain and WASM target
+        run: |
+          rustc --version
+          cargo --version
+          rustup target list --installed
+
+      - name: Confirm toolchain
+        run: npm run doctor
+
+      - name: Build static production game
+        run: npm run build
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Run post-implementation validation
+        run: npm test
+
+      - name: Upload static game
+        uses: actions/upload-artifact@v4
+        with:
+          name: what-is-life-2-static-${{ github.sha }}
+          path: app/dist
+          if-no-files-found: error
+          retention-days: 14

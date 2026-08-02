@@ -6,9 +6,11 @@ Read this file before changing the repository.
 
 1. `docs/field-framework/README.md`
 2. `docs/field-framework/DECISIONS.md`
-3. `docs/field-framework/WORKING_RULES.md`
-4. `docs/field-framework/CODEBASE_STATE.md`
-5. The owning product, systems, visual, or implementation document linked from
+3. `docs/field-framework/DEVELOPMENT_LOOP.md`
+4. `docs/field-framework/MILESTONES.md`
+5. `docs/field-framework/WORKING_RULES.md`
+6. `docs/field-framework/CODEBASE_STATE.md`
+7. The owning product, systems, visual, or implementation document linked from
    the canonical index.
 
 The old `LEXICON.md`, `SPEC.md`, `PLAN.md`, `FRAMEWORK.md`, and
@@ -39,6 +41,15 @@ The order is:
 5. run the relevant checks and report exact results.
 
 Do not author a failing test to drive design or implementation.
+
+## Continuous execution
+
+Follow `docs/field-framework/DEVELOPMENT_LOOP.md`. Complete one bounded
+milestone, inspect it directly, validate it only after implementation, publish
+the verified scope to `main`, reconvene the panel, record the next milestone,
+and continue. Do not wait for approval between ordinary milestones. Panel
+findings, evidence, and remote commit identifiers belong in
+`docs/field-framework/MILESTONES.md`.
 
 ## Causal and scientific guardrails
 
@@ -86,18 +97,28 @@ Rust/WASM deterministic simulation core
 - Pixi/Canvas owns rendering derived from snapshots; renderer state never
   changes simulation outcomes.
 
+Remote development uses Vite. Production is a static artifact. The first macOS
+package is a thin Tauri 2 host for the same Worker/WASM build and does not start
+a production web server. Do not move the core to native desktop IPC without a
+representative profile and an explicit superseding decision. See
+`docs/field-framework/PLATFORM_AND_DELIVERY.md`.
+
 ## Commands
 
 Run from the repository root:
 
 ```bash
-npm install
+nvm use
+npm ci
+npm run doctor
 npm run dev
 npm run build:content
+npm run build:wasm:dev
 npm run build:wasm
 npm run build
 npm run typecheck
 npm test
+npm run verify
 node tools/lexicon-check.mjs
 ```
 

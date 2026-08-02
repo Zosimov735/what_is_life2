@@ -95,7 +95,10 @@ verification record is preserved in
   because their source documents were never committed and could not be
   recovered.
 
-## Next implementation order
+## Dependency backlog
+
+The selected current step lives in [the milestone ledger](MILESTONES.md). This
+list records causal dependency order rather than a second active plan.
 
 1. Add a `PhysicalCompartment` to authoritative Rust state and remove every
    causal dependency on `ViewDeclaration`.

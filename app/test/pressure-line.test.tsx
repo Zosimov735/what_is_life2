@@ -12,7 +12,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, test } from 'vitest';
 import catalog from '../../content/copy/catalog.json';
 import { PressureLine, surfaced } from '../src/shell/PressureLine';
-import { PRESSURE_IDS, type PressureState } from '../../../field_game/worker/src/protocol';
+import { PRESSURE_IDS, type PressureState } from '../../worker/src/protocol';
 
 afterEach(cleanup);
 

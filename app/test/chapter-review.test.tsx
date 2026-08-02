@@ -12,7 +12,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, test } from 'vitest';
 import catalog from '../../content/copy/catalog.json';
 import { ChapterReview } from '../src/shell/ChapterReview';
-import type { ChapterChanged, RunCompleted } from '../../../field_game/worker/src/protocol';
+import type { ChapterChanged, RunCompleted } from '../../worker/src/protocol';
 
 afterEach(cleanup);
 

@@ -22,9 +22,15 @@ When documents overlap, read them in this order:
    model.
 5. [Number 2 mock-up pseudocode](NUMBER_2_MOCKUP_PSEUDOCODE.md) — visual and
    implementation contract for every retained mock-up.
-6. [Current codebase state](CODEBASE_STATE.md) — dated implementation truth and
+6. [Platform and delivery](PLATFORM_AND_DELIVERY.md) — remote, static-web, and
+   macOS runtime and packaging boundaries.
+7. [Current codebase state](CODEBASE_STATE.md) — dated implementation truth and
    known mismatches.
-7. [Working rules](WORKING_RULES.md) — contributor process, including the
+8. [Continuous development loop](DEVELOPMENT_LOOP.md) — binding milestone,
+   publication, and panel-review cycle.
+9. [Milestone ledger](MILESTONES.md) — the sole authority for the one active
+   implementation milestone and its evidence.
+10. [Working rules](WORKING_RULES.md) — contributor process, including the
    absolute no-TDD rule.
 
 If a visual label conflicts with a mechanics document, the visual composition
@@ -42,22 +48,16 @@ what exists today.
 - [Legacy contract status](LEGACY_CONTRACT_STATUS.md), recording documents that
   could not be recovered instead of silently recreating them.
 
-## Current implementation priority
+## Active implementation milestone
 
-The first causal migration is to introduce a physical compartment independent
-of any observation View. The simulation transition must never read a View to
-decide leakage, membership, permeability, or any other physical behavior.
+[The milestone ledger](MILESTONES.md) is the sole authority for what is active
+now. Implementation sequences in the mechanics contract, mock-up pseudocode,
+and dated codebase state are dependency backlogs; they do not compete with the
+one selected milestone.
 
-After that:
-
-1. separate immutable generator specification from embodied runtime state;
-2. make Route transfer order-independent;
-3. correct Supply capture geometry and resource accounting;
-4. expose measurable Form contracts;
-5. integrate the Atlas and first regime;
-6. add passive instruments and typed counterfactual experiments;
-7. build Ensemble, Holdout, and genuine local Renewal on the corrected causal
-   model, and test whether the function continues.
+After a milestone is implemented, inspected, validated, and published, the
+science, game-design, and engine panel reviews its evidence and selects the next
+bounded milestone.
 
 ## Editing rule
 

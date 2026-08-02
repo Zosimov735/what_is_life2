@@ -122,3 +122,27 @@ Status: accepted and absolute.
 Test-driven development is prohibited for this project. Product and systems
 contracts may precede code. Implementation comes next. Tests and other checks
 are added or updated only after the behavior exists, to validate that behavior.
+
+## D-013 — Development is a continuous panel-gated milestone loop
+
+Status: accepted.
+
+Development proceeds one bounded milestone at a time in this order: canonical
+contract, implementation, direct inspection or play, post-implementation
+validation, publication to `main`, panel review, and selection of the next
+milestone. Ordinary milestone transitions require no additional approval.
+Completion evidence, the published commit, panel findings, and the selected
+next milestone are recorded in `MILESTONES.md`. The loop pauses only under the
+stop conditions in `DEVELOPMENT_LOOP.md`.
+
+## D-014 — Remote development and static dual delivery share one WASM core
+
+Status: accepted.
+
+Development uses a Vite server in the remote workspace. Production is a static application
+and has no required application server. Browser delivery serves `app/dist` from
+a static host; the first macOS package uses Tauri 2 to host the same assets in
+WKWebView. Both initially run the deterministic Rust/WASM core in the dedicated
+Worker. A native desktop Rust host requires profiling evidence and a later
+superseding decision; packaging convenience alone is not sufficient reason to
+create a second simulation path.

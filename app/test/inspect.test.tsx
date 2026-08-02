@@ -18,8 +18,8 @@ import type {
   EchoHighlight,
   InspectRequest,
   PerturbationResult,
-} from '../../../field_game/worker/src/protocol';
-import type { FrameState } from '../../../field_game/worker/src/frame-state';
+} from '../../worker/src/protocol';
+import type { FrameState } from '../../worker/src/frame-state';
 
 afterEach(cleanup);
 

@@ -17,7 +17,7 @@ import { afterEach, expect, test } from 'vitest';
 import catalog from '../../content/copy/catalog.json';
 import chapter from '../../content/chapters/the_edge.json';
 import { Objective, explanationKey } from '../src/shell/Objective';
-import type { ObjectiveState } from '../../../field_game/worker/src/protocol';
+import type { ObjectiveState } from '../../worker/src/protocol';
 
 afterEach(cleanup);
 

@@ -13,6 +13,9 @@ const CORE_DOCUMENTS = [
   'README.md',
   'PRODUCT_OUTLINE.md',
   'DECISIONS.md',
+  'DEVELOPMENT_LOOP.md',
+  'MILESTONES.md',
+  'PLATFORM_AND_DELIVERY.md',
   'WORKING_RULES.md',
   'CODEBASE_STATE.md',
   'ATLAS_AND_MECHANICS.md',
@@ -115,4 +118,19 @@ test('no-TDD rule and lost-contract status are explicit', () => {
   for (const missing of ['LEXICON.md', 'SPEC.md', 'PLAN.md', 'FRAMEWORK.md', 'ARCHITECTURE.md']) {
     assert.ok(recovery.includes(`\`${missing}\``), `${missing} recovery status must be recorded`);
   }
+});
+
+test('continuous execution and static Mac delivery are canonical', () => {
+  const loop = fs.readFileSync(path.join(DOC_ROOT, 'DEVELOPMENT_LOOP.md'), 'utf8');
+  const milestones = fs.readFileSync(path.join(DOC_ROOT, 'MILESTONES.md'), 'utf8');
+  const platform = fs.readFileSync(path.join(DOC_ROOT, 'PLATFORM_AND_DELIVERY.md'), 'utf8');
+
+  assert.match(loop, /publish it, reconvene the panel/i);
+  assert.match(loop, /Never write a test first/i);
+  assert.match(loop, /GitHub `main` is canonical/i);
+  assert.match(milestones, /^## Active$/m);
+  assert.match(milestones, /M-001 — Reproducible remote-to-laptop build baseline/);
+  assert.match(platform, /Tauri 2 as a thin static host/i);
+  assert.match(platform, /requires no application server/i);
+  assert.match(platform, /dedicated module Web Worker/i);
 });

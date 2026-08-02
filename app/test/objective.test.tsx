@@ -12,8 +12,8 @@ import catalog from '../../content/copy/catalog.json';
 import chapter from '../../content/chapters/the_pull.json';
 import { Objective, explanationKey } from '../src/shell/Objective';
 import { openTelemetry, TELEMETRY_MARKS } from '../src/shell/telemetry';
-import type { FrameState } from '../../../field_game/worker/src/frame-state';
-import type { ObjectiveState } from '../../../field_game/worker/src/protocol';
+import type { FrameState } from '../../worker/src/frame-state';
+import type { ObjectiveState } from '../../worker/src/protocol';
 
 afterEach(cleanup);
 

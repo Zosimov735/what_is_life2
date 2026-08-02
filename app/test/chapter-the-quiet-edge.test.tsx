@@ -20,7 +20,7 @@ import chapter from '../../content/chapters/the_quiet_edge.json';
 import manifest from '../../content/manifest.json';
 import { Objective, explanationKey } from '../src/shell/Objective';
 import { ChapterReview } from '../src/shell/ChapterReview';
-import type { ObjectiveState } from '../../../field_game/worker/src/protocol';
+import type { ObjectiveState } from '../../worker/src/protocol';
 
 afterEach(cleanup);
 
