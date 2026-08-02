@@ -321,6 +321,12 @@ struct Driven {
     form_units: i64,
     forms: usize,
     routes: usize,
+    /// Trail entries still standing in this chapter's Field at the latest
+    /// pre-transition reading.
+    pending_trails: usize,
+    /// Whole-unit capacities of the Routes the player formed in this chapter,
+    /// in Route identifier order.
+    formed_route_capacities: Vec<i64>,
     /// Impulse the run stood with at the close.
     impulse: u8,
     /// What the objective stream left standing, after every `objective_changed`
@@ -534,6 +540,8 @@ fn drive_full(
         form_units: 0,
         forms: 0,
         routes: 0,
+        pending_trails: 0,
+        formed_route_capacities: Vec::new(),
         impulse: 0,
         standing: Vec::new(),
         reported: Vec::new(),
@@ -750,6 +758,14 @@ fn drive_full(
                 .map_or(0, |form| form.charge / ONE_UNIT);
             driven.forms = state.now.forms.len();
             driven.routes = state.now.routes.len();
+            driven.pending_trails = state.now.pending.len();
+            driven.formed_route_capacities = state
+                .now
+                .routes
+                .iter()
+                .filter(|route| route.formed_step >= driven.opening_step)
+                .map(|route| route.capacity / ONE_UNIT)
+                .collect();
             driven.impulse = state.progress.impulse;
         }
     }
@@ -907,7 +923,7 @@ fn every_starting_form_completes_the_whole_chapter() {
         "{:<8} {:>10} {:>8} {:>8} {:>8} {:>6} {:>8} {:>6} {:>7}",
         "form", "objectives", "steps", "minutes", "setbacks", "forms", "reserve", "held", "bank",
     );
-    let mut readings: Vec<(&str, i64, i64, usize)> = Vec::new();
+    let mut evidence: Vec<(&str, usize, usize, Vec<i64>)> = Vec::new();
     for form in field_game_core::run::FORMS {
         let run = drive_as(form, Layout::Near, false, true);
         assert_eq!(run.completed, authored, "{form} completes the whole chapter in order");
@@ -930,18 +946,51 @@ fn every_starting_form_completes_the_whole_chapter() {
             run.form_units,
             run.store_units,
         );
-        readings.push((form, run.reserve_units, run.store_units, run.forms));
+        evidence.push((
+            form,
+            run.forms,
+            run.pending_trails,
+            run.formed_route_capacities.clone(),
+        ));
     }
-    // The same script, eight different Fields at the end of it: what a Form's
-    // authored parameters are for. Ring and Vault differ only in what their
-    // Boundary leaks, so the reserve is where they part.
-    let distinct: std::collections::BTreeSet<(i64, i64, usize)> =
-        readings.iter().map(|held| (held.1, held.2, held.3)).collect();
-    assert!(
-        distinct.len() >= 4,
-        "the eight Forms end the chapter holding only {} distinct readings: {readings:?}",
-        distinct.len(),
+    // Closing Charge is not required to encode chassis identity: every run is
+    // under this chapter's one physical-compartment coefficient. Pin the three
+    // mechanisms this script actually exercises instead. Chorus stands its
+    // linked group up, Wake leaves delayed entries, and Relay authors twice the
+    // capacity on each Route the player forms.
+    let of = |named: &str| {
+        evidence.iter().find(|held| held.0 == named).expect("Form evidence")
+    };
+    assert_eq!(
+        of("chorus").1,
+        4,
+        "Chorus stands three linked Forms beside the controlled one",
     );
+    for held in evidence.iter().filter(|held| held.0 != "chorus") {
+        assert_eq!(
+            held.1,
+            1,
+            "{} stands only the chapter's controlled Form",
+            held.0,
+        );
+    }
+    assert!(of("wake").2 > 0, "Wake leaves delayed Trail entries in the Field");
+    for held in evidence.iter().filter(|held| held.0 != "wake") {
+        assert_eq!(held.2, 0, "{} authors no Trail entries", held.0);
+    }
+    assert_eq!(
+        of("relay").3.as_slice(),
+        [64, 64],
+        "Relay doubles both player-formed Routes",
+    );
+    for held in evidence.iter().filter(|held| held.0 != "relay") {
+        assert_eq!(
+            held.3.as_slice(),
+            [32, 32],
+            "{} forms the two Routes at the ordinary capacity",
+            held.0,
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

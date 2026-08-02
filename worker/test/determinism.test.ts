@@ -28,6 +28,7 @@ import {
   type Payload,
   type ResponseEnvelope,
 } from '../src/protocol';
+import { FRAME_VERSION } from '../src/frame-state';
 import { CONTENT_HASH } from '../src/content';
 
 const WORKER_ENTRY = new URL('../src/entry.ts', import.meta.url);
@@ -229,7 +230,7 @@ test('the frame event acknowledges a frame and carries the snapshot when a step 
     expect(bytes.length).toBeGreaterThan(32);
     expect(String.fromCharCode(...bytes.subarray(0, 4))).toBe('FGF1');
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    expect(view.getUint16(4, true)).toBe(1);
+    expect(view.getUint16(4, true)).toBe(FRAME_VERSION);
     expect(view.getUint8(14)).toBe(0);
   }
   expect(carried).toBeGreaterThan(0);

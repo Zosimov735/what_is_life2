@@ -763,10 +763,20 @@ fn a_run_carrying_a_committed_reshape_exports_and_restores_byte_for_byte() {
         "and the one field a restore normalizes is the only one that moved",
     );
 
-    // What the commit did is in the bytes: the formed Route, the standing
-    // inside it left, and a trajectory that starts at the commit.
+    // What the commit did is in the bytes: it formed the Route, replaced the
+    // material compartment, preserved the passive View, and restarted the
+    // trajectory at the commit.
     assert_eq!(routes(&fresh), routes(&session));
-    assert_eq!(inside(&fresh), vec![2, 4]);
+    assert_eq!(
+        physical_members(&fresh),
+        vec![2, 4],
+        "the committed compartment restores",
+    );
+    assert_eq!(
+        inside(&fresh),
+        vec![2, 3],
+        "the passive View is preserved across the restore",
+    );
     assert_eq!(
         fresh.run().expect("a run is loaded").state().trace.start_step,
         200,

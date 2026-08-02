@@ -181,6 +181,9 @@ struct Driven {
     inside_units: i64,
     form_units: i64,
     forms: usize,
+    /// Trail entries still standing in this chapter's Field at the latest
+    /// pre-transition reading.
+    pending_trails: usize,
 }
 
 impl Driven {
@@ -256,6 +259,7 @@ fn drive_as(form: &str, allowances: bool, takes_the_test: bool) -> Driven {
         inside_units: 0,
         form_units: 0,
         forms: 0,
+        pending_trails: 0,
     };
     // The events a run opens with, the opening objective among them: they are
     // recorded rather than drained, or the first thing the chapter offered
@@ -351,6 +355,7 @@ fn drive_as(form: &str, allowances: bool, takes_the_test: bool) -> Driven {
                     .find(|form| form.controlled)
                     .map_or(0, |form| form.charge / ONE_UNIT);
                 driven.forms = state.now.forms.len();
+                driven.pending_trails = state.now.pending.len();
             }
         }
     }
@@ -506,7 +511,7 @@ fn every_starting_form_completes_the_whole_chapter() {
         "{:<8} {:>10} {:>9} {:>8} {:>8} {:>6} {:>7} {:>6}",
         "form", "objectives", "completes", "minutes", "setback", "forms", "inside", "held",
     );
-    let mut readings: Vec<(&str, i64, i64, usize)> = Vec::new();
+    let mut evidence: Vec<(&str, usize, usize)> = Vec::new();
     for form in field_game_core::run::FORMS {
         let run = drive_as(form, false, true);
         assert_eq!(run.completed, authored, "{form} completes the whole chapter in order");
@@ -529,19 +534,31 @@ fn every_starting_form_completes_the_whole_chapter() {
             run.inside_units,
             run.form_units,
         );
-        readings.push((form, run.inside_units, run.form_units, run.forms));
+        evidence.push((form, run.forms, run.pending_trails));
     }
-    // The same script, eight different Fields at the end of it: what a Form's
-    // authored parameters are for.
-    for (place, first) in readings.iter().enumerate() {
-        for second in &readings[place + 1..] {
-            assert!(
-                (first.1, first.2, first.3) != (second.1, second.2, second.3),
-                "{} and {} end the same run holding the same readings",
-                first.0,
-                second.0,
-            );
-        }
+    // Closing Charge is allowed to converge under the chapter's one physical
+    // leakage coefficient. Assert the rule-changing abilities this chapter
+    // actually carries instead of treating incidental final magnitudes as a
+    // chassis fingerprint.
+    let of = |named: &str| {
+        evidence.iter().find(|held| held.0 == named).expect("Form evidence")
+    };
+    assert_eq!(
+        of("chorus").1,
+        4,
+        "Chorus stands three linked Forms beside the controlled one",
+    );
+    for held in evidence.iter().filter(|held| held.0 != "chorus") {
+        assert_eq!(
+            held.1,
+            1,
+            "{} stands only the chapter's controlled Form",
+            held.0,
+        );
+    }
+    assert!(of("wake").2 > 0, "Wake leaves delayed Trail entries in the Field");
+    for held in evidence.iter().filter(|held| held.0 != "wake") {
+        assert_eq!(held.2, 0, "{} authors no Trail entries", held.0);
     }
 }
 

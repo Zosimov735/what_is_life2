@@ -1280,6 +1280,26 @@ fn the_authored_conditions_span_the_step_counts_they_name() {
     assert_eq!(content.version, CONTENT_VERSION);
     let chapter = chapter();
 
+    // Reshaping the physical compartment is a paid structural action, not a
+    // timer padded out to make the chapter longer. Pin that distinction before
+    // adding the genuinely timed conditions below.
+    let reshapes: Vec<_> = chapter
+        .objectives
+        .iter()
+        .filter(|objective| {
+            matches!(&objective.condition, content::Condition::CompartmentReshaped { .. })
+        })
+        .collect();
+    assert_eq!(reshapes.len(), 1, "the chapter authors one compartment action");
+    let reshape = reshapes[0];
+    assert_eq!(reshape.id.as_str(), "objective.the_edge.draw_the_edge");
+    assert_eq!(reshape.condition.target(), 1, "the paid action completes on its own step");
+    assert_eq!(
+        content::effective_steps(&reshape.condition),
+        1,
+        "the structural action contributes no hidden pacing hold",
+    );
+
     let mut spans = Vec::new();
     for objective in &chapter.objectives {
         let target = objective.condition.target();
@@ -1295,13 +1315,14 @@ fn the_authored_conditions_span_the_step_counts_they_name() {
         }
     }
     let total: i64 = spans.iter().map(|(_, _, span)| span).sum();
-    println!("\nThe Edge — authored duration, by objective");
+    println!("\nThe Edge — authored timed duration, by objective");
     for (id, target, span) in &spans {
         println!("  {id:<46} authored {target:>6}  spans {span:>6}");
     }
     println!("  {:<46} {:>15} {total:>12}", "in all", "");
+    assert_eq!(spans.len(), 4, "the chapter authors four genuinely timed conditions");
     assert!(
-        total > 40_000 && total < 50_000,
-        "the authored duration comes to {total} steps, outside the band the pacing was set in",
+        total > 29_000 && total < 30_000,
+        "the authored timed duration comes to {total} steps, outside its pacing band",
     );
 }
