@@ -56,6 +56,10 @@
     }
   ],
   "authored_boundaries": [{ "members": [2, 3] }],
+  "physical_compartment": {
+    "members": [2, 3],
+    "leak_per_exposed_contact_per_step": 64
+  },
   "objectives": [
     {
       "id": "objective.the_edge.hold_the_current",

@@ -65,7 +65,7 @@ pub fn fixture_files() -> Vec<String> {
 /// The init JSON a session opens on, over one file list of the caller's own.
 pub fn worker_init_of(listed: &[String]) -> String {
     format!(
-        "{{\"content\":{},\"protocol\":1,\"save_version\":1}}",
+        "{{\"content\":{},\"protocol\":2,\"save_version\":2}}",
         bundle_of(MANIFEST, listed),
     )
 }
@@ -143,12 +143,12 @@ pub fn bundle_of(manifest: &str, listed: &[String]) -> String {
 /// authored content it imported.
 pub fn worker_init() -> String {
     format!(
-        "{{\"content\":{},\"protocol\":1,\"save_version\":1}}",
+        "{{\"content\":{},\"protocol\":2,\"save_version\":2}}",
         bundle_with(&content_hash()),
     )
 }
 
 /// The same, under a digest that does not describe the bytes beside it.
 pub fn worker_init_with(hash: &str) -> String {
-    format!("{{\"content\":{},\"protocol\":1,\"save_version\":1}}", bundle_with(hash))
+    format!("{{\"content\":{},\"protocol\":2,\"save_version\":2}}", bundle_with(hash))
 }

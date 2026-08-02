@@ -27,13 +27,13 @@ export interface Engine {
 }
 
 /**
- * The dash pattern one boundary mark is drawn with: on-length, off-length.
+ * The dash pattern one hull mark is drawn with: on-length, off-length, or an
+ * empty array for the solid material compartment.
  *
- * Three registers, told apart without a colour so the reading holds through a
- * palette change and for a colour-blind reader alike: the standing boundary is the
- * long dash, the change a queue proposes is the short one, and a candidate of
- * the standing slate is the sparse one. Both engines read this, so parity is a
- * fact about the code rather than a thing to keep checking.
+ * Three registers are told apart without relying on colour: the committed
+ * compartment is solid and heavy, its proposed edit is short-dashed, the View
+ * is long-dashed and thin, and a candidate is sparse. Both engines read this,
+ * so parity is a fact about the code rather than a thing to keep checking.
  *
  * A candidate's own sparseness is its tier: the nondominated set is drawn
  * closest to solid and each tier below it is drawn sparser, so the ranking
@@ -54,10 +54,12 @@ export function playbackSwell(radius: number, factor: number): number {
 }
 
 export function dashOf(mark: {
+  role: 'compartment' | 'view' | 'candidate';
   proposed: boolean;
   candidate: number;
   tier: number;
-}): [number, number] {
+}): number[] {
   if (mark.candidate > 0) return [2, 4 + 4 * Math.max(1, mark.tier)];
-  return mark.proposed ? [4, 6] : [10, 7];
+  if (mark.role === 'compartment') return mark.proposed ? [4, 6] : [];
+  return [12, 8];
 }

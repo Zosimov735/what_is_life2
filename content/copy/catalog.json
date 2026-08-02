@@ -17,7 +17,10 @@
     "notice.echo_route_removal": { "kind": "notice", "text": "Cutting that route changed the pattern." },
     "notice.echo_boundary_severance": { "kind": "notice", "text": "Severing the boundary changed the pattern." },
     "notice.echo_component_substitution": { "kind": "notice", "text": "Replacing that node changed the pattern." },
-    "notice.echo_evaluation": { "kind": "notice", "text": "The committed view changed the pattern." },
+    "notice.echo_evaluation": {
+      "kind": "notice",
+      "text": "The committed Route edit changed the pattern."
+    },
 
     "objective.the_edge.hold_the_current": {
       "kind": "objective",
@@ -27,14 +30,22 @@
     "instruction.choose_form": { "kind": "instruction", "text": "Choose a Form." },
 
     "label.still_mode": { "kind": "label", "text": "Still Mode" },
+    "label.observation_view": { "kind": "label", "text": "Observation View" },
+    "label.clear_view": { "kind": "label", "text": "Clear View" },
+    "label.physical_compartment": { "kind": "label", "text": "Physical Compartment" },
+    "label.passive_free": { "kind": "label", "text": "Passive · free" },
+    "label.causal_paid": {
+      "kind": "label",
+      "text": "Causal edit · costs 1 Intervention"
+    },
     "label.anchor": { "kind": "label", "text": "Anchor" },
     "label.quick_retry": { "kind": "label", "text": "Quick Retry" },
     "label.branch_recovery": { "kind": "label", "text": "Branch Recovery" },
     "label.archive": { "kind": "label", "text": "Archive" },
     "label.why": { "kind": "label", "text": "Why?" },
-    "label.impulse": { "kind": "label", "text": "Impulse" },
+    "label.impulse": { "kind": "label", "text": "Intervention Budget" },
     "label.pulse": { "kind": "label", "text": "Pulse" },
-    "label.queue": { "kind": "label", "text": "Queued changes" },
+    "label.queue": { "kind": "label", "text": "Queued physical edits" },
     "label.cost": { "kind": "label", "text": "Cost" },
     "label.chapter_review": { "kind": "label", "text": "Chapter complete" },
     "label.continue": { "kind": "label", "text": "Continue" },
@@ -45,9 +56,9 @@
     "label.candidate_finer": { "kind": "label", "text": "Finer" },
     "label.candidate_coarser": { "kind": "label", "text": "Coarser" },
     "label.candidate_lateral": { "kind": "label", "text": "Shifted" },
-    "label.candidate_drawn": { "kind": "label", "text": "Drawn Boundary" },
+    "label.candidate_drawn": { "kind": "label", "text": "View from a drawn edge" },
     "label.candidate_clusters": { "kind": "label", "text": "Route Cluster" },
-    "label.candidate_authored": { "kind": "label", "text": "Physical Boundary" },
+    "label.candidate_authored": { "kind": "label", "text": "View from an authored region" },
     "label.candidate_responses": { "kind": "label", "text": "Shared Response" },
 
     "label.tier": { "kind": "label", "text": "Tier" },
@@ -94,8 +105,14 @@
     "form.wake": { "kind": "form", "text": "Wake" },
     "form.chorus": { "kind": "form", "text": "Chorus" },
 
-    "promise.thread": { "kind": "promise", "text": "Fast steering, weak boundary." },
-    "promise.ring": { "kind": "promise", "text": "Strong boundary, short reach." },
+    "promise.thread": {
+      "kind": "promise",
+      "text": "2× commanded steering input; 448-field-unit Route reach."
+    },
+    "promise.ring": {
+      "kind": "promise",
+      "text": "Holds up to 1,536 CU; 384-field-unit Route reach."
+    },
     "promise.relay": {
       "kind": "promise",
       "text": "Moves charge across long routes, vulnerable to cuts."
@@ -146,15 +163,15 @@
 
     "explanation.still_mode": {
       "kind": "explanation",
-      "text": "Still Mode pauses the field so routes and boundaries can be edited directly. Every committed change spends Impulse."
+      "text": "Still Mode pauses the Field. View selection is immediate and free; each committed Route or physical-compartment edit spends one Intervention."
     },
     "explanation.impulse": {
       "kind": "explanation",
-      "text": "Impulse pays for queued changes. You carry up to six and regain three after completing a layer objective."
+      "text": "The Intervention Budget pays for queued physical edits. You hold up to six Interventions and regain three after completing a layer objective."
     },
     "explanation.handoff": {
       "kind": "explanation",
-      "text": "Control moves to another Form at once, and costs no Impulse. Only one Form is steered at a time: the one you leave keeps its station in a linked set, or slows to a stop where it stands. Every Form gathers from the band it stands in whether or not you steer it, so which one you hold decides where a Pulse can reach and which pattern you can tend."
+      "text": "Control moves to another Form at once, and costs no Intervention. Only one Form is steered at a time: the one you leave keeps its station in a linked set, or slows to a stop where it stands. Every Form gathers from the band it stands in whether or not you steer it, so which one you hold decides where a Pulse can reach and which pattern you can tend."
     },
     "explanation.coordinate_profile": {
       "kind": "explanation",
@@ -162,7 +179,7 @@
     },
     "explanation.chapter_review": {
       "kind": "explanation",
-      "text": "A chapter closes when every objective it requires is complete. An Anchor is written at that step, so the run can be resumed exactly here. The next chapter establishes its own Field, currents, and pressures; what you carry across is the Form you chose, the Impulse you hold, and the objectives already behind you."
+      "text": "A chapter closes when every objective it requires is complete. An Anchor is written at that step, so the run can be resumed exactly here. The next chapter establishes its own Field, currents, and pressures; what you carry across is the Form you chose, the Interventions you hold, and the objectives already behind you."
     },
     "explanation.ending": {
       "kind": "explanation",
@@ -171,7 +188,7 @@
 
     "explanation.the_edge.hold_the_current": {
       "kind": "explanation",
-      "text": "The bright current delivers Charge each step to every Node standing in its band, and three Nodes stand in this one. Keep the Form inside it and watch what those three take: the inside of this chapter is the Nodes the current reaches, and everything after this is about where its edge stands."
+      "text": "The bright Supply Stream delivers Charge each step to all three Nodes in its band. The physical compartment is a separate object: it initially contains only the central Reserve and Module. Keep the Form in the band and compare what the stream supplies with what those two members retain."
     },
 
     "ending.the_pull": {
@@ -297,19 +314,19 @@
     },
     "objective.the_edge.hold_the_inside": {
       "kind": "objective",
-      "text": "Hold the inside steady."
+      "text": "Keep the compartment route steady."
     },
     "explanation.the_edge.hold_the_inside": {
       "kind": "explanation",
-      "text": "What the reserve at the head of the line holds rises while the bright current runs, and it stops rising at the ceiling a Node may carry. Everything past the reserve is passed straight on, so an inside is held by what arrives at its head, not by what any one Node keeps."
+      "text": "The thick material edge encloses the Reserve and Module. Each enclosed Node loses 1/1024 of its held Charge per exposed outside contact on every simulation step; Route flow and Supply can replace that loss. The thin violet View may inspect any Nodes, but moving it changes none of these quantities."
     },
     "objective.the_edge.draw_the_edge": {
       "kind": "objective",
-      "text": "Draw the edge around the inside."
+      "text": "Reshape the physical compartment."
     },
     "explanation.the_edge.draw_the_edge": {
       "kind": "explanation",
-      "text": "Space opens Still Mode and the field stands still. There are two ways to move the edge from here. The arrow keys walk the insides the field proposes, one at a time, and the one standing is the one a commit would take. Or take hold of a handle on the edge and let it go over a Node, which puts that Node inside instead. Enter commits what stands proposed and is also the way out, for one Impulse; a completed objective gives three back. Every member holding a Route or a neighbour outside the inside loses a share of what it holds each step, which is Leakage, so where the edge stands decides what the inside keeps."
+      "text": "Space opens Still Mode. Drag a handle on the thick material edge across a Node to propose new physical membership; Enter commits the edit for one Intervention and ends the retained causal trace. The thin violet View is a free measurement selection: moving, replacing, or clearing it cannot change Charge, leakage, Routes, the plan queue, or the Intervention Budget."
     },
     "objective.the_edge.take_the_depth": {
       "kind": "objective",
@@ -329,11 +346,11 @@
     },
     "objective.the_edge.hold_the_edge": {
       "kind": "objective",
-      "text": "Hold the inside through three Breaks."
+      "text": "Hold the compartment through three stops."
     },
     "explanation.the_edge.hold_the_edge": {
       "kind": "explanation",
-      "text": "The bright current stops three times, each stop longer than the one before it, and the loss every Node on this layer takes rises with each one. What the inside already holds is what carries it across: draw the edge so that it keeps more, open the outer Ports so that more arrives, or form a Route of your own in Still Mode. Between the stops the current runs again and the reserve fills, so there is time to change the answer before the next one."
+      "text": "The bright Supply Stream stops three times: for 50, 80, and 110 seconds at the 30-step-per-second simulation rate. Surface drain rises during each stop. The physical compartment carries only what its members have stored and what open Routes deliver; reshape the thick edge, open the outer Ports, or form a Route in Still Mode. Moving the View cannot rescue the system."
     },
 
     "objective.the_loop.follow_the_supply": {
@@ -366,7 +383,7 @@
     },
     "explanation.the_loop.start_the_run": {
       "kind": "explanation",
-      "text": "Charge reaches the run only along a Route you draw. Still Mode holds the field still: a handle on the Form and a handle on the intake propose one connection, and Enter commits it for one Impulse. The Form must stand inside its own reach of the Port, so bring it near before you ask."
+      "text": "Charge reaches the run only along a Route you draw. Still Mode holds the field still: a handle on the Form and a handle on the intake propose one connection, and Enter commits it for one Intervention. The Form must stand inside its own reach of the Port, so bring it near before you ask."
     },
     "objective.the_loop.hold_the_run": {
       "kind": "objective",
@@ -486,7 +503,7 @@
     },
     "explanation.the_mesh.open_the_north_store": {
       "kind": "explanation",
-      "text": "Three Forms stand on this field and only one of them is steered. The northern store is a Port, and a Pulse released beside it is what opens it \u2014 the Form already standing beside it is a press away, in Still Mode, under Hand control to the next Form. Control moves at once and costs no Impulse."
+      "text": "Three Forms stand on this field and only one of them is steered. The northern store is a Port, and a Pulse released beside it is what opens it \u2014 the Form already standing beside it is a press away, in Still Mode, under Hand control to the next Form. Control moves at once and costs no Intervention."
     },
     "objective.the_mesh.open_the_south_store": {
       "kind": "objective",
@@ -582,7 +599,7 @@
     },
     "explanation.the_break.start_the_run": {
       "kind": "explanation",
-      "text": "Charge reaches the run only along a Route you draw. Still Mode holds the field still: a handle on the intake and a handle on a line propose one connection, and Enter commits it for one Impulse. The two Nodes must stand inside the Form's own reach of each other."
+      "text": "Charge reaches the run only along a Route you draw. Still Mode holds the field still: a handle on the intake and a handle on a line propose one connection, and Enter commits it for one Intervention. The two Nodes must stand inside the Form's own reach of each other."
     },
     "objective.the_break.hold_the_run": {
       "kind": "objective",
@@ -646,7 +663,7 @@
     },
     "explanation.the_rewrite.hold_the_dependency": {
       "kind": "explanation",
-      "text": "Both Routes have to carry on the same step, and neither Node beyond them may hold more than its own threshold. Nothing takes Charge out of those two yet, so they fill in a dozen steps, carry more than they can hold, and shed a quarter of the excess every step while they do. Still Mode is where that is answered: draw a Route from each of them to the store beyond, and what arrives has somewhere to go. Each queued change costs one Impulse, and a completed objective gives three back."
+      "text": "Both Routes have to carry on the same step, and neither Node beyond them may hold more than its own threshold. Nothing takes Charge out of those two yet, so they fill in a dozen steps, carry more than they can hold, and shed a quarter of the excess every step while they do. Still Mode is where that is answered: draw a Route from each of them to the store beyond, and what arrives has somewhere to go. Each queued change costs one Intervention, and a completed objective gives three back."
     },
     "objective.the_rewrite.take_the_deep_band": {
       "kind": "objective",
@@ -678,7 +695,7 @@
     },
     "explanation.the_rewrite.rewrite_the_module": {
       "kind": "explanation",
-      "text": "The two carriers between the intake and the junction are the module, and the Route joining them breaks two minutes into this objective. From the step this objective opens, every Node on the surface loses a tenth of a unit each step as well, so nothing here holds what it held. Once the Route between the carriers is gone the junction takes nothing in at all \u2014 no Route reaches it from the intake, wherever the Form is standing \u2014 and it spends six a step, so the dependency stands about seventy steps on what it banked. What a late rewrite pays for is the waiting and nothing else. Both spares below the carriers are open and empty, the standby beside the junction is full, and one queue holds six changes: a Route drawn, one end of a Route moved, a Route cut, the boundary redrawn. What the run carries out of this chapter is the Impulse it closes with: what it had, less what the changes cost, plus the three the last completion grants, clamped at six."
+      "text": "The two carriers between the intake and the junction are the module, and the Route joining them breaks two minutes into this objective. From the step this objective opens, every Node on the surface loses a tenth of a unit each step as well, so nothing here holds what it held. Once the Route between the carriers is gone the junction takes nothing in at all \u2014 no Route reaches it from the intake, wherever the Form is standing \u2014 and it spends six a step, so the dependency stands about seventy steps on what it banked. What a late rewrite pays for is the waiting and nothing else. Both spares below the carriers are open and empty, the standby beside the junction is full, and one queue holds six changes: a Route drawn, one end of a Route moved, a Route cut, the physical compartment reshaped. What the run carries out of this chapter is the Interventions it closes with: what it had, less what the changes cost, plus the three the last completion grants, clamped at six."
     },
 
     "objective.the_quiet_edge.close_the_spare_arm": {
@@ -687,7 +704,7 @@
     },
     "explanation.the_quiet_edge.close_the_spare_arm": {
       "kind": "explanation",
-      "text": "The pattern is an intake, five arms, and a hold that carries back round to the intake. Every arm needs a Route out of it or it takes in more than it can hold. A sixth arm stands beside the five with its own way out already drawn and nothing carrying into it. Six Routes drawn is six queued changes, and only a run carrying six Impulse can afford them before anything here completes."
+      "text": "The pattern is an intake, five arms, and a hold that carries back round to the intake. Every arm needs a Route out of it or it takes in more than it can hold. A sixth arm stands beside the five with its own way out already drawn and nothing carrying into it. Six Routes drawn is six queued changes, and only a run carrying six Interventions can afford them before anything here completes."
     },
     "objective.the_quiet_edge.close_the_ring_at_once": {
       "kind": "objective",
@@ -695,7 +712,7 @@
     },
     "explanation.the_quiet_edge.close_the_ring_at_once": {
       "kind": "explanation",
-      "text": "Five Routes, one out of each arm into the hold, close the pattern; each is one queued change. A run carrying five Impulse can draw all five and hold the pattern before this stands down. A run carrying four cannot, and its way through is the relief Port on the layer below, which no queued change is spent on and which costs the time it takes to get there."
+      "text": "Five Routes, one out of each arm into the hold, close the pattern; each is one queued change. A run carrying five Interventions can draw all five and hold the pattern before this stands down. A run carrying four cannot, and its way through is the relief Port on the layer below, which no queued change is spent on and which costs the time it takes to get there."
     },
     "objective.the_quiet_edge.close_the_ring": {
       "kind": "objective",

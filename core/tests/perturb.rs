@@ -791,7 +791,7 @@ fn a_commit_that_cuts_every_crossing_route_leaves_a_boundary_severance_echo() {
 }
 
 #[test]
-fn a_committed_adoption_reads_the_adopted_candidates_evaluation_record() {
+fn passive_focus_never_queues_or_commits_an_echo() {
     let mut session = stilled();
     reviews(&mut session);
     let (ordinal, count) = {
@@ -800,48 +800,27 @@ fn a_committed_adoption_reads_the_adopted_candidates_evaluation_record() {
         (slate.ordinal, slate.candidates.len())
     };
     assert!(count >= 2, "a slate to adopt from");
-    let queued = session.command(
-        "queue_plan",
-        &format!(
-            "{{\"plan\":{{\"op\":\"set_focus\",\"position\":2,\"slate_ordinal\":{ordinal}}}}}"
-        ),
+    let focused = session.command(
+        "set_focus",
+        &format!("{{\"position\":2,\"slate_ordinal\":{ordinal}}}"),
     );
-    assert!(queued.contains("\"ok\":true"), "{queued}");
+    assert!(focused.contains("\"ok\":true"), "{focused}");
+    assert!(session.run().expect("a run").queue().is_empty(), "focus is outside the plan queue");
+    // An empty commit only exits Still Mode. It applies no causal change and
+    // therefore has no post-commit Echo to carry.
     assert!(session.command("commit_plan", "{}").contains("\"ok\":true"));
     reviews(&mut session);
     session.command("input_frame", &frame(4, 0, false, 3_000_000, "null"));
     session.command("input_frame", &frame(5, 0, false, 3_000_000 + RAMP_US, "null"));
     let raised = reviews(&mut session);
-    // Unconditional: an adoption committed over a window with recorded steps
-    // ALWAYS leaves the evaluation Echo, because the pre-commit slate is the
-    // record that evaluated the adopted candidate and its baselines are
-    // recorded. Reading the post-commit slate instead would find the clamped
-    // record whose baselines are the unassigned ones a span of 0 gives, and
-    // this highlight would never exist — which is the defect this pins out.
-    let echo = raised
-        .iter()
-        .find(|(kind, _)| kind == "echo")
-        .map(|(_, body)| body.get("echo").expect("the highlight").clone())
-        .expect("the exit raises the evaluation Echo");
-    assert_eq!(echo.get("kind").and_then(Json::as_text), Some("evaluation"));
-    // The parameter is the pre-commit slate's ordinal: the record that carries
-    // the baselines the three values were read from.
-    assert_eq!(echo.get("parameter").and_then(Json::as_int), Some(i64::from(ordinal)));
-    // No rule of version 1 draws, so the eight recorded baseline deviations of
-    // the adopted candidate are all zero, and so are the largest and the
-    // spread. The numbers are asserted, not just the shape: an unassigned
-    // baseline would have left no highlight at all.
-    assert_eq!(echo.get("excess").and_then(Json::as_int), Some(0));
-    assert_eq!(echo.get("low").and_then(Json::as_int), Some(0));
-    assert_eq!(echo.get("high").and_then(Json::as_int), Some(0));
-    assert_eq!(
-        echo.get("target").and_then(|target| target.get("t")).and_then(Json::as_text),
-        Some("none"),
+    assert!(
+        raised.iter().all(|(kind, _)| kind != "echo"),
+        "passive observation is not presented as a physical intervention",
     );
 }
 
 #[test]
-fn a_committed_reshape_matching_a_candidate_reads_that_candidates_record() {
+fn a_committed_compartment_reshape_never_borrows_a_view_candidates_record() {
     let mut session = stilled();
     reviews(&mut session);
     // The finer candidate is an inside-axis variant: a different inside under
@@ -863,7 +842,7 @@ fn a_committed_reshape_matching_a_candidate_reads_that_candidates_record() {
     let queued = session.command(
         "queue_plan",
         &format!(
-            "{{\"plan\":{{\"members\":[{}],\"op\":\"reshape_boundary\"}}}}",
+            "{{\"plan\":{{\"members\":[{}],\"op\":\"reshape_compartment\"}}}}",
             list.join(",")
         ),
     );
@@ -873,13 +852,10 @@ fn a_committed_reshape_matching_a_candidate_reads_that_candidates_record() {
     session.command("input_frame", &frame(4, 0, false, 3_000_000, "null"));
     session.command("input_frame", &frame(5, 0, false, 3_000_000 + RAMP_US, "null"));
     let raised = reviews(&mut session);
-    let echo = raised
-        .iter()
-        .find(|(kind, _)| kind == "echo")
-        .map(|(_, body)| body.get("echo").expect("the highlight").clone())
-        .expect("a reshape to an evaluated View leaves the evaluation Echo");
-    assert_eq!(echo.get("kind").and_then(Json::as_text), Some("evaluation"));
-    assert_eq!(echo.get("parameter").and_then(Json::as_int), Some(i64::from(ordinal)));
+    assert!(
+        raised.iter().all(|(kind, _)| kind != "echo"),
+        "a View evaluation is not evidence for a physical compartment edit (slate {ordinal})",
+    );
 }
 
 #[test]
@@ -903,7 +879,7 @@ fn a_committed_reshape_no_record_evaluated_leaves_no_highlight() {
     let queued = session.command(
         "queue_plan",
         &format!(
-            "{{\"plan\":{{\"members\":[{}],\"op\":\"reshape_boundary\"}}}}",
+            "{{\"plan\":{{\"members\":[{}],\"op\":\"reshape_compartment\"}}}}",
             list.join(",")
         ),
     );

@@ -9,7 +9,8 @@
 //! ```
 
 use field_game_core::field::{
-    self, BoundaryState, CurrentState, FieldLayer, FormState, NodeKind, PortState, RouteState,
+    self, BoundaryState, CurrentState, FieldLayer, FormState, NodeKind, PhysicalCompartment,
+    PortState, RouteState,
 };
 use field_game_core::fx::{Vec2, ONE_UNIT};
 use field_game_core::rng::RngState;
@@ -143,7 +144,13 @@ fn caps_field() -> FieldState {
         })
         .collect();
 
-    field.boundaries = BoundaryState { drawn: Vec::new(), authored: Vec::new(), leak_frac: 4096 };
+    // The material compartment, rather than the observational View, owns the
+    // widest 128-member leakage pass this budget fixture measures.
+    field.physical_compartment = PhysicalCompartment {
+        members: (9..=136u32).collect(),
+        leak_per_exposed_contact_per_step: 4096,
+    };
+    field.boundaries = BoundaryState { drawn: Vec::new(), authored: Vec::new() };
     // The Trail queue standing at its cap, with an entry falling due on every
     // step of the measured window: the widest delivery pass a step can ask for.
     field.pending = (0..field::PENDING_TRAILS)
@@ -190,20 +197,18 @@ fn the_prepared_pass_and_the_plain_pass_leave_the_same_bytes() {
 
     let mut plain = field.clone();
     let mut prepared = field.clone();
-    let cache = field::StepCache::of(&prepared, &inside);
+    let cache = field::StepCache::of(&prepared);
     for step in 1..=60usize {
         let control = schedule(step);
         let first = field::advance(
             &mut plain,
             control,
-            &inside,
             65_536,
             &mut field::Unstaged::default().staging(),
         );
         let second = field::advance_cached(
             &mut prepared,
             control,
-            &inside,
             65_536,
             &mut field::Unstaged::default().staging(),
             &cache,
@@ -229,7 +234,7 @@ fn recorded(step: usize, control: ControlState, outcome: field::StepOutcome) -> 
     .written()
 }
 
-fn time_slate(label: &str, field: &FieldState, inside: &[u32]) {
+fn time_slate(label: &str, field: &FieldState, _inside: &[u32]) {
     for cached in [false, true] {
         let replays = 160;
         let steps = 60;
@@ -238,7 +243,7 @@ fn time_slate(label: &str, field: &FieldState, inside: &[u32]) {
         // One preparation for the whole slate: the shape does not change
         // across the samples that share it, which is how the evaluation uses
         // it.
-        let cache = field::StepCache::of(field, inside);
+        let cache = field::StepCache::of(field);
         for _ in 0..replays {
             let mut state = field.clone();
             for _ in 0..steps {
@@ -246,7 +251,6 @@ fn time_slate(label: &str, field: &FieldState, inside: &[u32]) {
                     field::advance_cached(
                         &mut state,
                         ControlState::default(),
-                        inside,
                         65_536,
                         &mut field::Unstaged::default().staging(),
                         &cache,
@@ -255,7 +259,6 @@ fn time_slate(label: &str, field: &FieldState, inside: &[u32]) {
                     field::advance(
                         &mut state,
                         ControlState::default(),
-                        inside,
                         65_536,
                         &mut field::Unstaged::default().staging(),
                     )
@@ -298,7 +301,6 @@ fn whole_slate_job_at(window: u16) {
         let outcome = field::advance(
             &mut now,
             control,
-            &inside,
             65_536,
             &mut field::Unstaged::default().staging(),
         );
@@ -379,7 +381,6 @@ fn on_demand_jobs() {
         let outcome = field::advance(
             &mut now,
             control,
-            &inside,
             65_536,
             &mut field::Unstaged::default().staging(),
         );
@@ -466,7 +467,7 @@ fn per_rule_breakdown() {
     time_slate("no currents", &without_currents, &inside);
 
     let mut without_leak = full.clone();
-    without_leak.boundaries.leak_frac = 0;
+    without_leak.physical_compartment.leak_per_exposed_contact_per_step = 0;
     time_slate("no leakage", &without_leak, &inside);
 
     let mut without_routes = full.clone();
@@ -474,7 +475,7 @@ fn per_rule_breakdown() {
     time_slate("no routes", &without_routes, &inside);
 
     let mut bare = without_currents.clone();
-    bare.boundaries.leak_frac = 0;
+    bare.physical_compartment.leak_per_exposed_contact_per_step = 0;
     bare.routes.clear();
     time_slate("no currents/leak/routes", &bare, &inside);
 }
@@ -497,7 +498,6 @@ fn worst_case_slate_timing() {
             let outcome = field::advance(
                 &mut state,
                 ControlState::default(),
-                &inside,
                 65_536,
                 &mut field::Unstaged::default().staging(),
             );
@@ -555,7 +555,7 @@ fn pressure_effect_rows() {
     let time = |label: &str, field: &FieldState, staged: &mut field::Unstaged| {
         let replays = 160;
         let steps = 60;
-        let cache = field::StepCache::of(field, &inside);
+        let cache = field::StepCache::of(field);
         let start = std::time::Instant::now();
         let mut sink: i64 = 0;
         for _ in 0..replays {
@@ -569,7 +569,6 @@ fn pressure_effect_rows() {
                 let outcome = field::advance_cached(
                     &mut state,
                     ControlState::default(),
-                    &inside,
                     65_536,
                     &mut scratch.staging(),
                     &cache,
@@ -655,7 +654,7 @@ fn trail_entry_rows() {
     let time = |label: &str, field: &FieldState| {
         let replays = 160;
         let steps = 60;
-        let cache = field::StepCache::of(field, &inside);
+        let cache = field::StepCache::of(field);
         let start = std::time::Instant::now();
         let mut sink: i64 = 0;
         for _ in 0..replays {
@@ -664,7 +663,6 @@ fn trail_entry_rows() {
                 let outcome = field::advance_cached(
                     &mut state,
                     ControlState::default(),
-                    &inside,
                     65_536,
                     &mut field::Unstaged::default().staging(),
                     &cache,

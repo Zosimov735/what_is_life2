@@ -14,7 +14,7 @@
 import { useEffect, useRef } from 'react';
 import { create_renderer, type CandidateOutline, type PlaybackReading } from '../render';
 import type { Sound } from './sound';
-import { openStillEdits, type SlateReading } from './still-edits';
+import { openStillEdits, type SlateReading, type StillTool } from './still-edits';
 import type { CandidateSlate, FramePair, PlanCommand } from './worker-client';
 
 /** The reduced-motion setting the platform reports, until `InputConfig` crosses. */
@@ -49,6 +49,10 @@ interface FieldSurfaceProps {
    * is one undo and one queue.
    */
   undoPlan?: () => void;
+  /** The explicit Still Mode tool selected in the accessible chrome. */
+  tool?: StillTool;
+  /** Moves the passive View immediately, outside the causal queue. */
+  setFocus?: (slateOrdinal: number, position: number) => void;
   /**
    * The evaluation record the run stands under, and none before the first
    * slate is assembled.
@@ -83,6 +87,8 @@ export function FieldSurface({
   sound,
   queuePlan,
   undoPlan,
+  tool = 'view',
+  setFocus,
   slate = null,
   focused = 0,
   playback = null,
@@ -97,9 +103,12 @@ export function FieldSurface({
   // first paint must not tear the surface down and build a second one.
   const queued = useRef<((plan: PlanCommand) => void) | null>(null);
   const undone = useRef<(() => void) | null>(null);
-  // The slate and the focus the queue proposes, held in references for the
-  // same reason: they arrive between frames, and a surface rebuilt on every
-  // arrival would lose the trails and the engine with them.
+  const activeTool = useRef<StillTool>('view');
+  const focusedView = useRef<((slateOrdinal: number, position: number) => void) | null>(null);
+  const carriedTool = useRef<((tool: StillTool) => void) | null>(null);
+  // The slate and the candidate the authoritative View matches, held in
+  // references for the same reason: they arrive between frames, and a surface
+  // rebuilt on every arrival would lose the trails and the engine with them.
   const standing = useRef<CandidateSlate | null>(null);
   const focus = useRef(0);
   const carried = useRef<((candidates: readonly CandidateOutline[]) => void) | null>(null);
@@ -120,6 +129,15 @@ export function FieldSurface({
   useEffect(() => {
     undone.current = undoPlan ?? null;
   }, [undoPlan]);
+
+  useEffect(() => {
+    activeTool.current = tool;
+    carriedTool.current?.(tool);
+  }, [tool]);
+
+  useEffect(() => {
+    focusedView.current = setFocus ?? null;
+  }, [setFocus]);
 
   // The playback reading reaches the renderer on its own setter, which
   // redraws: a result arrives between frames, and a still run runs no step to
@@ -187,7 +205,9 @@ export function FieldSurface({
       surface: canvas,
       scene: () => renderer.scene(),
       paused: () => frames().next?.header.mode === 'still',
+      tool: () => activeTool.current,
       queue: (plan) => queued.current?.(plan),
+      focus: (slateOrdinal, position) => focusedView.current?.(slateOrdinal, position),
       slate: (): SlateReading | null => {
         const held = standing.current;
         if (!held) return null;
@@ -205,6 +225,8 @@ export function FieldSurface({
     // so a slate that arrived before this surface was built still reaches it.
     carriedPlayback.current = (reading) => renderer.set_playback(reading);
     carriedPlayback.current(played.current);
+    carriedTool.current = (next) => renderer.set_still_tool(next);
+    carriedTool.current(activeTool.current);
     carried.current = (candidates) => renderer.set_candidates(candidates);
     carried.current(
       (standing.current?.candidates ?? []).map((candidate) => ({
@@ -231,6 +253,7 @@ export function FieldSurface({
       cancelAnimationFrame(handle);
       carried.current = null;
       carriedPlayback.current = null;
+      carriedTool.current = null;
       edits.close();
       watcher?.disconnect();
       if (!watcher) window.removeEventListener('resize', size);

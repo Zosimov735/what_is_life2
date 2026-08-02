@@ -238,9 +238,16 @@ function portLayer(node: number, step: number): number {
   return formsAt(step)[node - FORM_NODE_FIRST].layer;
 }
 
-/** Which Node ids stand inside the standing View. */
+/** Which Node ids stand inside the authoritative physical compartment. */
 function isMember(node: number): boolean {
   return node >= CLUSTER_FIRST && node < OUTLYING_FIRST;
+}
+
+/** A deliberately different passive View, so the V2 split is visible. */
+function isViewed(node: number): boolean {
+  return (
+    (node >= CLUSTER_FIRST && node < CLUSTER_FIRST + 3) || node === OUTLYING_FIRST + 1
+  );
 }
 
 /** Which members have a Route crossing out of the inside. */
@@ -401,7 +408,7 @@ function encode(step: number): ArrayBuffer {
   const bytes = new Uint8Array(buffer);
 
   bytes.set([0x46, 0x47, 0x46, 0x31]);
-  view.setUint16(4, 1, true);
+  view.setUint16(4, 2, true);
   view.setUint16(6, 0, true);
   view.setUint32(8, step, true);
   view.setUint16(12, 65535, true);
@@ -495,9 +502,10 @@ function encode(step: number): ArrayBuffer {
     offset += 12;
   }
 
-  // The standing inside, one bit per Port record.
+  // The passive observation View, one bit per Port record and independent of
+  // the physical membership flags above.
   for (let index = 0; index < PORT_COUNT; index += 1) {
-    if (isMember(CHAIN_FIRST + index)) bytes[offset + (index >> 3)] |= 1 << (index & 7);
+    if (isViewed(CHAIN_FIRST + index)) bytes[offset + (index >> 3)] |= 1 << (index & 7);
   }
   offset += 32;
 

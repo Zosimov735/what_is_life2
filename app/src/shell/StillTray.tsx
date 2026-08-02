@@ -10,17 +10,14 @@
  * standing in the queue, which are quantities of the run rather than places in
  * it.
  *
- * It is display and nothing else. Nothing here takes focus, nothing here can
- * be clicked, and nothing here covers the surface: the tray sits in a corner
- * with the Field moving — or standing — behind it, and the three keys reach
- * the session directly. A control here would take Space and Enter out from
- * under the player the moment it had focus, which are the two keys Still Mode
- * is worked entirely through.
+ * Version 2 adds one compact, focusable tool switch. It names the causal
+ * physical compartment separately from the passive View, and candidate
+ * buttons move only that View. Keyboard input ignores interactive elements,
+ * so focusing this chrome does not leak Space or Enter into the Field.
  *
- * Not being clickable is not the same as not being read. The mode's name is a
- * status region, exactly as the one objective is, because entering Still Mode
- * is the thing a player who cannot see the Field settle most needs told — and
- * a surface hidden from the accessibility tree would tell them nothing at all.
+ * The mode's name remains a status region, exactly as the one objective is,
+ * because entering Still Mode is the thing a player who cannot see the Field
+ * settle most needs told.
  *
  * What it lists is what the worker reported: one entry per queued change, each
  * with what it costs, and the total the queue costs together. Those two numbers
@@ -36,8 +33,13 @@
 
 import { copy } from './copy';
 import type { CandidateSlate, QueueState } from './worker-client';
-import type { PrivilegeValue, SlateCandidate } from '../../../worker/src/protocol';
+import type {
+  PrivilegeValue,
+  SlateCandidate,
+  ViewDeclaration,
+} from '../../../worker/src/protocol';
 import type { FrameState } from '../../../worker/src/frame-state';
+import type { StillTool } from './still-edits';
 
 /** The raw form of 1: every value and every range bound is a fraction of it. */
 const WHOLE = 65536;
@@ -115,8 +117,16 @@ interface StillTrayProps {
   impulse: number;
   /** The evaluation record the run stands under, and none before the first. */
   slate?: CandidateSlate | null;
-  /** The candidate the queue proposes, 1-based, and 0 while none is proposed. */
+  /** The authoritative passive View, and none while no reading is available. */
+  view?: ViewDeclaration | null;
+  /** The candidate the active passive View matches, 1-based, and 0 otherwise. */
   focused?: number;
+  /** The explicit active Still Mode tool. */
+  tool?: StillTool;
+  /** Selects the causal or passive tool. */
+  setTool?: (tool: StillTool) => void;
+  /** Immediately moves the passive View to one candidate. */
+  setFocus?: (position: number) => void;
 }
 
 /**
@@ -158,18 +168,52 @@ export function StillTray({
   queue,
   impulse,
   slate = null,
+  view = null,
   focused = 0,
+  tool = 'view',
+  setTool = () => {},
+  setFocus = () => {},
 }: StillTrayProps) {
   if (!mode || !SHOWN_IN.includes(mode)) return null;
 
   return (
-    <div className="tray" data-mode={mode}>
+    <div className="tray" data-mode={mode} data-tool={tool}>
       {/* Announced when it changes, exactly as the one objective is: entering
           the mode is the thing a player who cannot see the surface settle
           most needs told, and the tray is the only place it is said. */}
       <p className="tray-name" role="status" aria-live="polite">
         {copy('label.still_mode')}
       </p>
+      <div className="tray-tools" role="group" aria-label={copy('label.still_mode')}>
+        <button
+          type="button"
+          className="tray-tool"
+          data-tool="view"
+          aria-pressed={tool === 'view'}
+          onClick={() => setTool('view')}
+        >
+          <span>{copy('label.observation_view')}</span>
+          <small>{copy('label.passive_free')}</small>
+        </button>
+        <button
+          type="button"
+          className="tray-tool"
+          data-tool="compartment"
+          aria-pressed={tool === 'compartment'}
+          onClick={() => setTool('compartment')}
+        >
+          <span>{copy('label.physical_compartment')}</span>
+          <small>{copy('label.causal_paid')}</small>
+        </button>
+      </div>
+      <button
+        type="button"
+        className="tray-clear-view"
+        disabled={!slate || tool !== 'view' || mode !== 'still' || !view || view.inside.length === 0}
+        onClick={() => setFocus(0)}
+      >
+        {copy('label.clear_view')}
+      </button>
       <p className="tray-reading">
         <span className="tray-term">{copy('label.impulse')}</span>
         <span className="tray-value">{impulse}</span>
@@ -192,10 +236,10 @@ export function StillTray({
             <span className="tray-term">{copy('label.candidates')}</span>
             <span className="tray-value">{slate.candidates.length}</span>
           </p>
-          {/* The walk's announcement: the candidate the queue proposes, said
-              when it changes, exactly as the mode's own status is. The region
-              stands whenever the list does, empty while nothing is proposed,
-              because a live region mounted mid-walk announces nothing. */}
+          {/* The active passive View, said when it changes, exactly as the
+              mode's own status is. The region stands whenever the list does,
+              empty while no candidate matches, because a live region mounted
+              mid-walk announces nothing. */}
           <p className="tray-focus" role="status" aria-live="polite">
             {focused > 0
               ? copy(
@@ -227,10 +271,18 @@ export function StillTray({
                   data-tier={candidate.tier}
                   data-focused={candidate.position === focused}
                 >
-                  <span className="tray-mark" />
-                  <span className="tray-candidate-name">
-                    {copy(candidateKey(candidate.provenance[0]?.source ?? 'standing'))}
-                  </span>
+                  <button
+                    type="button"
+                    className="tray-candidate-select"
+                    aria-pressed={candidate.position === focused}
+                    disabled={tool !== 'view' || mode !== 'still'}
+                    onClick={() => setFocus(candidate.position)}
+                  >
+                    <span className="tray-mark" />
+                    <span className="tray-candidate-name">
+                      {copy(candidateKey(candidate.provenance[0]?.source ?? 'standing'))}
+                    </span>
+                  </button>
                   <span className="tray-values">
                     {VALUES.map(([key, name]) => (
                       <ValueBar

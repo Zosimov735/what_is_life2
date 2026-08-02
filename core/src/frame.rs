@@ -16,9 +16,11 @@
 //!
 //! One of the ten section kinds stands on state a later goal owns — the
 //! camera — so this encoder writes the nine that stand on state the run
-//! already holds: Forms, Ports, Routes, currents, the standing inside's
-//! bitset, the staged pressures, the cues the step raised, the Still Mode
-//! overlay, and the flat point array the currents' paths index into.
+//! already holds: Forms, Ports, Routes, currents, the active observation
+//! View's bitset, the staged pressures, the cues the step raised, the Still
+//! Mode overlay, and the flat point array the currents' paths index into.
+//! Physical-compartment membership and its queued preview ride as independent
+//! Port flags; the View never supplies either of them.
 //!
 //! The overlay is the one section whose presence is a mode rather than a
 //! count: the document says it is present only in `still`, so it is written
@@ -41,7 +43,7 @@ use crate::state::{FieldState, Fx, InputConfig, Progress};
 pub const MAGIC: &[u8; 4] = b"FGF1";
 
 /// The snapshot format's own version, beside the protocol's.
-pub const FRAME_VERSION: u16 = 1;
+pub const FRAME_VERSION: u16 = 2;
 
 /// The header's width, in bytes. Every offset inside it is frozen.
 pub const HEADER_BYTES: usize = 32;
@@ -157,7 +159,9 @@ pub struct Snapshot<'a> {
     pub field: &'a FieldState,
     pub mode: Mode,
     pub time_scale: u16,
-    pub inside: &'a [u32],
+    /// The active passive-observation View. Physical membership is read only
+    /// from `field.physical_compartment` below.
+    pub view_inside: &'a [u32],
     pub queue: &'a PlanQueue,
     /// The cues the steps of this frame raised, oldest first.
     pub cues: &'a [Cue],
@@ -177,7 +181,11 @@ pub struct Snapshot<'a> {
 /// Encodes one snapshot.
 pub fn encode(snapshot: &Snapshot<'_>) -> Vec<u8> {
     let field = snapshot.field;
-    let members = membership(field, snapshot.inside, snapshot.queue.proposed_inside());
+    let members = physical_membership(
+        field,
+        &field.physical_compartment.members,
+        snapshot.queue.proposed_compartment_members(),
+    );
     // Every current's path, decimated once and laid end to end: a current's
     // record names where its own points start and how many it has.
     let paths: Vec<Vec<Vec2>> =
@@ -260,7 +268,8 @@ pub fn encode(snapshot: &Snapshot<'_>) -> Vec<u8> {
             KIND_CUES => cues(snapshot),
             KIND_OVERLAY => overlay(snapshot),
             KIND_CURRENT_PATH => path_points(&paths),
-            _ => view_bitset(&members),
+            KIND_VIEW => view_bitset(field, snapshot.view_inside),
+            _ => Vec::new(),
         };
         debug_assert_eq!(body.len(), count * width, "a section is its record width times its count");
         out.extend_from_slice(&body);
@@ -270,20 +279,24 @@ pub fn encode(snapshot: &Snapshot<'_>) -> Vec<u8> {
     out
 }
 
-/// Which Ports are members of the standing inside, and which of those are
-/// shell members — the same shell rule the Boundary leakage rule reads: a
-/// member with a crossing Route or a declared adjacency to a non-member.
-struct Membership {
+/// Which Ports are members of the physical compartment, which of those are
+/// exposed, and which membership a queued physical edit proposes. These are
+/// causal render flags and never read the observation View.
+struct PhysicalMembership {
     member: Vec<bool>,
     shell: Vec<bool>,
-    /// Which Ports the queue would make members, and none flagged while the
-    /// queue proposes no View.
+    /// Which Ports the queue would make physical members, and none flagged
+    /// while the queue proposes no compartment edit.
     proposed: Vec<bool>,
 }
 
-fn membership(field: &FieldState, inside: &[u32], proposed: Option<&[u32]>) -> Membership {
+fn physical_membership(
+    field: &FieldState,
+    members: &[u32],
+    proposed: Option<&[u32]>,
+) -> PhysicalMembership {
     let mut member = vec![false; field.ports.len()];
-    for node in inside {
+    for node in members {
         if let Ok(place) = field.ports.binary_search_by_key(node, |port| port.node) {
             member[place] = true;
         }
@@ -315,7 +328,7 @@ fn membership(field: &FieldState, inside: &[u32], proposed: Option<&[u32]>) -> M
             !member[other] && adjacent(pos, layer, port.pos, port.layer)
         });
     }
-    Membership { member, shell, proposed: wanted }
+    PhysicalMembership { member, shell, proposed: wanted }
 }
 
 fn forms(snapshot: &Snapshot<'_>) -> Vec<u8> {
@@ -371,7 +384,7 @@ fn forms(snapshot: &Snapshot<'_>) -> Vec<u8> {
     out
 }
 
-fn ports(snapshot: &Snapshot<'_>, members: &Membership) -> Vec<u8> {
+fn ports(snapshot: &Snapshot<'_>, members: &PhysicalMembership) -> Vec<u8> {
     let field = snapshot.field;
     // The end-of-step overload flags consult Flood's lowered threshold with
     // the staged list, which is the list this snapshot carries.
@@ -403,10 +416,10 @@ fn ports(snapshot: &Snapshot<'_>, members: &Membership) -> Vec<u8> {
         if members.shell[place] {
             flags |= 1 << 3;
         }
-        // The membership the queue proposes, which is a preview and not the
-        // standing inside: the two flags together say whether a Node would be
-        // taken in, left out, or left where it is. A frame whose queue proposes
-        // no View raises none of them.
+        // The physical membership the queue proposes, which is a preview and
+        // not standing state: the two flags together say whether a Node would
+        // be taken in, left out, or left where it is. A frame whose queue
+        // proposes no compartment edit raises none of them.
         if members.proposed[place] {
             flags |= 1 << 4;
         }
@@ -600,11 +613,12 @@ fn path_points(paths: &[Vec<Vec2>]) -> Vec<u8> {
 }
 
 /// One 32-byte bitset: bit i is set when Port record i is a member of the
-/// standing inside. The Node cap is 256, which is exactly 32 bytes of bits.
-fn view_bitset(members: &Membership) -> Vec<u8> {
+/// active passive-observation View. The Node cap is 256, which is exactly 32
+/// bytes of bits. Physical membership is deliberately not consulted here.
+fn view_bitset(field: &FieldState, inside: &[u32]) -> Vec<u8> {
     let mut out = vec![0u8; VIEW_RECORD];
-    for (place, held) in members.member.iter().enumerate() {
-        if *held {
+    for node in inside {
+        if let Ok(place) = field.ports.binary_search_by_key(node, |port| port.node) {
             out[place / 8] |= 1 << (place % 8);
         }
     }

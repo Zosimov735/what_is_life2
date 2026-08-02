@@ -3,7 +3,6 @@
   "route_reach": 41943040,
   "route_capacity": 2097152,
   "forecast_depth": 0,
-  "leak_frac": 20,
   "upkeep_rate": 4096,
   "capacity": 50331648,
   "reserve": 0,

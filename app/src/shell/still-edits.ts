@@ -1,19 +1,20 @@
 /**
  * The drags a paused Field takes, and the entries they queue.
  *
- * `docs/field-framework/SPEC.md` names four of them and the fifth is the
- * keyboard's: dragging between Ports queues a connection, dragging a Route
- * endpoint redirects it, selecting a Route and pressing Delete or Backspace
- * queues a cut, and dragging a Boundary handle reshapes the current View.
+ * The four causal variants are exposed directly: dragging between Ports queues
+ * a connection, dragging a Route endpoint redirects it, selecting a Route and
+ * pressing Delete or Backspace queues a cut, and dragging a material handle
+ * reshapes the physical compartment. Candidate keys move the passive View
+ * immediately and never enter this queue.
  *
  * What a handle is, is not decided here. `docs/field-framework/ARCHITECTURE.md`
  * calls the inspection surface the `PlanCommand` union read back as places on
  * the Field, and the renderer is what puts those places on the surface: one
  * handle per Port, one at each end of every Route, one at every vertex of the
- * standing boundary. So this reads the scene the renderer drew and takes hold
- * of the handle the pointer is over — the same handle the player can see, at
- * the place it was actually drawn, rather than a second projection that could
- * disagree with it.
+ * physical compartment. So this reads the scene the renderer drew and takes
+ * hold of the handle the pointer is over — the same handle the player can see,
+ * at the place it was actually drawn, rather than a second projection that
+ * could disagree with it.
  *
  * Nothing here validates anything. Every precondition is the core's, checked
  * against the base state with every earlier queued entry applied, so a drag
@@ -38,9 +39,8 @@ export const CUT_BINDINGS: readonly string[] = ['Delete', 'Backspace'];
  * order forward, Up and Left walk it back, and both wrap: the order is the
  * slate's own, assembly order, and every position is reachable either way.
  *
- * Tab is deliberately not used. The tray takes no focus at all, by the rule
- * that keeps Space and Enter under the player, and a key that moved focus
- * would be the one thing that could take them away.
+ * Tab remains available for the explicit tray controls; the arrow gesture is a
+ * direct Field shortcut and ignores focused interactive chrome.
  *
  * A player who rebinds the steering keys onto the arrows collides with this
  * walk; the goal that owns key remapping (Goal 31) resolves that collision, as
@@ -48,6 +48,9 @@ export const CUT_BINDINGS: readonly string[] = ['Delete', 'Backspace'];
  */
 export const CANDIDATE_FORWARD: readonly string[] = ['ArrowDown', 'ArrowRight'];
 export const CANDIDATE_BACK: readonly string[] = ['ArrowUp', 'ArrowLeft'];
+
+/** The two explicitly separate Still Mode tools. */
+export type StillTool = 'view' | 'compartment';
 
 /**
  * How far past its own radius a handle may be taken hold of, as a multiple of
@@ -89,21 +92,28 @@ export function handleAt(scene: Scene, spot: Spot): HandleMark | null {
 }
 
 /**
- * The standing inside, as the scene's own marks report it — the membership the
- * frame carried, read back in ascending Node order.
+ * The standing physical compartment, as the scene's own marks report it — the
+ * causal membership the frame carried, read back in ascending Node order.
  */
-export function standingInside(scene: Scene): number[] {
+export function standingCompartment(scene: Scene): number[] {
   return membersOf(scene, false);
 }
 
+/** Compatibility name; V2 treats this as physical compartment membership. */
+export const standingInside = standingCompartment;
+
 /**
- * The inside a queued change would leave, and none while the queue proposes no
- * View at all. The frame carries it as its own flag beside the standing one.
+ * The physical membership a queued change would leave, and none while the
+ * queue proposes no compartment edit. The frame carries it beside the standing
+ * physical membership, independently of the View bitset.
  */
-export function proposedInside(scene: Scene): number[] | null {
+export function proposedCompartment(scene: Scene): number[] | null {
   const held = membersOf(scene, true);
   return held.length > 0 ? held : null;
 }
+
+/** Compatibility name; V2 treats this as a physical causal preview. */
+export const proposedInside = proposedCompartment;
 
 function membersOf(scene: Scene, proposed: boolean): number[] {
   const held: number[] = [];
@@ -124,7 +134,7 @@ function membersOf(scene: Scene, proposed: boolean): number[] {
  * - **Port to Port** — a connection, from the one taken hold of to the one let
  *   go over.
  * - **Route end to Port** — that end of that Route, moved to the Port.
- * - **Boundary vertex to Port** — the member the vertex is drawn around,
+ * - **Compartment vertex to Port** — the member the vertex is drawn around,
  *   replaced by the Port let go over. Dropping it on a Node already inside
  *   takes the dragged member out instead, because a set with the same Node
  *   twice is the same set: the member set is what the drag leaves, and intake
@@ -153,11 +163,11 @@ export function planFromDrag(
     // is what the core validates the entry against — it projects every earlier
     // entry before it reads this one. Reading the standing inside instead would
     // propose a set that quietly undid the reshape already queued.
-    const base = proposedInside(scene) ?? standingInside(scene);
+    const base = proposedCompartment(scene) ?? standingCompartment(scene);
     const members = base.filter((node) => node !== from.node);
     if (!members.includes(to.node)) members.push(to.node);
     if (members.length === 0) return null;
-    return { op: 'reshape_boundary', members: members.sort((first, second) => first - second) };
+    return { op: 'reshape_compartment', members: members.sort((first, second) => first - second) };
   }
   return null;
 }
@@ -171,6 +181,8 @@ export interface StillEditsOptions {
   scene: () => Scene;
   /** Whether the run is paused, and so whether a drag means anything at all. */
   paused: () => boolean;
+  /** Which explicit tool is active. Compartment by default for old callers. */
+  tool?: () => StillTool;
   /** Where a proposed entry is sent. */
   queue: (plan: PlanCommand) => void;
   /**
@@ -181,16 +193,17 @@ export interface StillEditsOptions {
    */
   slate?: () => SlateReading | null;
   /**
-   * The candidate the queue proposes, 1-based, and 0 while none is proposed.
+   * The candidate the active passive View matches, 1-based, and 0 while none
+   * matches.
    *
-   * It is read from the queue rather than held here, so what the outlines show
-   * and what a commit would adopt are one fact: the shell holds no selection
-   * of its own that the worker could disagree with.
+   * It is read from the worker's active View rather than from the causal queue.
    */
   focused?: () => number;
+  /** Moves the passive View immediately, outside the causal plan queue. */
+  focus?: (slateOrdinal: number, position: number) => void;
   /**
-   * Takes the newest queued entry back, for a walk that replaces the focus it
-   * proposed rather than stacking a second one.
+   * Legacy causal undo sink retained for callers that also expose queue edits;
+   * passive View movement never calls it.
    */
   undo?: () => void;
 }
@@ -214,6 +227,7 @@ export interface StillEdits {
 /** Opens the drag source over one surface. */
 export function openStillEdits(options: StillEditsOptions): StillEdits {
   const { surface, scene, paused, queue } = options;
+  const tool = options.tool ?? (() => 'compartment');
   const keys = options.keys ?? (typeof window === 'undefined' ? null : window);
 
   /** The handle a drag started on, and none while no drag is in flight. */
@@ -235,7 +249,7 @@ export function openStillEdits(options: StillEditsOptions): StillEdits {
   }
 
   const onDown = (event: Event): void => {
-    if (!paused()) return;
+    if (!paused() || tool() !== 'compartment') return;
     const pointer = event as PointerEvent;
     // The surface keeps the pointer for the life of the drag, so a release
     // outside it still arrives here and still completes — or, landing on
@@ -260,7 +274,7 @@ export function openStillEdits(options: StillEditsOptions): StillEdits {
   const onUp = (event: Event): void => {
     const from = held;
     held = null;
-    if (!from || !paused()) return;
+    if (!from || !paused() || tool() !== 'compartment') return;
     const pointer = event as PointerEvent;
     const plan = planFromDrag(scene(), from, handleAt(scene(), spotOf(pointer)));
     if (plan) queue(plan);
@@ -281,9 +295,12 @@ export function openStillEdits(options: StillEditsOptions): StillEdits {
 
   const onKeyDown = (event: Event): void => {
     const key = event as KeyboardEvent;
+    const target = key.target as { closest?: (selector: string) => Element | null } | null;
+    if (target?.closest?.('button, input, select, textarea, [contenteditable="true"]')) return;
     if (key.metaKey || key.ctrlKey || key.altKey || key.repeat) return;
     if (!paused()) return;
     if (CUT_BINDINGS.includes(key.code)) {
+      if (tool() !== 'compartment') return;
       if (selected === 0) return;
       // Backspace navigates on some platforms and Delete does nothing; neither
       // is what the key means here, so the event is consumed where it is taken.
@@ -294,20 +311,16 @@ export function openStillEdits(options: StillEditsOptions): StillEdits {
     }
     const forward = CANDIDATE_FORWARD.includes(key.code);
     if (!forward && !CANDIDATE_BACK.includes(key.code)) return;
+    if (tool() !== 'view') return;
     walkCandidates(key, forward ? 1 : -1);
   };
 
   /**
-   * Walks the slate's presentation order by one, and proposes the candidate it
-   * lands on.
+   * Walks the slate's presentation order by one and immediately observes the
+   * candidate it lands on.
    *
-   * Proposing is what focusing a candidate *is*: `set_focus` is a queued change
-   * like any other, it costs the same one Impulse, and a commit is what adopts
-   * it. So a walk replaces the proposal rather than adding one — the newest
-   * entry is taken back first, and only when that entry is the focus this walk
-   * is replacing. A walk with anything else queued after it leaves the queue
-   * alone and proposes the next candidate beside what stands there, which the
-   * commit revalidates in order like every other queue.
+   * Focusing is passive observation: the top-level command applies immediately,
+   * costs nothing, and leaves every causal queue entry exactly where it stood.
    */
   function walkCandidates(key: KeyboardEvent, step: 1 | -1): void {
     const held = options.slate?.() ?? null;
@@ -320,8 +333,7 @@ export function openStillEdits(options: StillEditsOptions): StillEdits {
           ? 1
           : held.count
         : ((standing - 1 + step + held.count) % held.count) + 1;
-    if (standing !== 0) options.undo?.();
-    queue({ op: 'set_focus', slate_ordinal: held.ordinal, position: next });
+    options.focus?.(held.ordinal, next);
   }
 
   surface.addEventListener('pointerdown', onDown);

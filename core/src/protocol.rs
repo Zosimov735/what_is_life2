@@ -1,15 +1,15 @@
 //! The message layer of the core, in plain Rust.
 //!
 //! No binding type appears here, so `cargo test` exercises the same code the
-//! browser runs. The command set is closed at nine and the error code set at
-//! twelve, exactly as `docs/field-framework/ARCHITECTURE.md` locks them.
+//! browser runs. The version-2 command set is closed at ten and the error code
+//! set at twelve, exactly as `docs/field-framework/ARCHITECTURE.md` locks them.
 //!
 //! What this answers is the whole command surface that stands before durable
 //! persistence: the version handshake, `init_run` in both its modes,
 //! `input_frame`, `export_run`, `import_run` with the locked import
 //! validation, the two restores over the session's own record store, and the
-//! three queued-change commands, which are valid only in `still` and answer
-//! the `state` envelope everywhere else.
+//! three queued-change commands and the passive `set_focus` command, which are
+//! valid only in `still` and answer the `state` envelope everywhere else.
 //!
 //! The three queued-change commands are whole: `queue_plan` reads one entry of
 //! the locked union and hands it to the run, which validates it against the
@@ -31,8 +31,8 @@ use crate::state::{
     auto_slot, RecordKind, RunState, EXPORT_FORMAT, SAVE_PAYLOAD_CAP, SAVE_VERSION,
 };
 
-/// The protocol version this build speaks. Version 1 everywhere in version 1.
-pub const PROTOCOL_VERSION: u32 = 1;
+/// The protocol version this build speaks.
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// The lifecycle state of a session that has not loaded a run.
 const IDLE: &str = "idle";
@@ -42,14 +42,15 @@ const LOADED: &[&str] = &[
     "running", "ramp_in", "still", "ramp_out", "suspended", "ended",
 ];
 
-/// The nine commands of version 1, each with the lifecycle states it is valid
+/// The ten commands of version 2, each with the lifecycle states it is valid
 /// in. The set is closed: an unknown command is a `protocol` fault.
-const COMMANDS: [(&str, &[&str]); 9] = [
+const COMMANDS: [(&str, &[&str]); 10] = [
     ("init_run", &["idle", "ended"]),
     ("input_frame", LOADED),
     ("queue_plan", &["still"]),
     ("undo_plan", &["still"]),
     ("commit_plan", &["still"]),
+    ("set_focus", &["still"]),
     ("restore_checkpoint", LOADED),
     ("recover_branch", LOADED),
     ("export_run", LOADED),
@@ -201,6 +202,7 @@ impl Session {
             "restore_checkpoint" => self.restore_by_id(&body, false),
             "recover_branch" => self.restore_by_id(&body, true),
             "queue_plan" => self.queue_plan(&body),
+            "set_focus" => self.set_focus(&body),
             "undo_plan" => {
                 read::exact_keys(&body, "body", &[])?;
                 let run = self.loaded()?;
@@ -262,6 +264,28 @@ impl Session {
         Ok(out)
     }
 
+    /// Moves the passive observation View to one candidate of the standing
+    /// slate immediately, or clears its member selection at position 0.
+    ///
+    /// This is deliberately not a `PlanCommand`: changing what is measured
+    /// queues no causal edit, spends no Intervention, and never enters the
+    /// transaction that can reshape the physical compartment. The run owns
+    /// validation against the standing slate and returns the View it adopted.
+    fn set_focus(&mut self, body: &Json) -> Result<String, Fault> {
+        read::exact_keys(body, "body", &["position", "slate_ordinal"])?;
+        let slate_ordinal =
+            read::int(body, "slate_ordinal", 0, i64::from(u32::MAX))? as u32;
+        // Position 0 clears only the passive View's member selection. Positive
+        // positions remain 1-based seats in the standing candidate slate.
+        let position = read::int(body, "position", 0, i64::from(u8::MAX))? as u8;
+        let view = self.loaded()?.set_focus(slate_ordinal, position)?;
+        let mut out = String::new();
+        let mut object = Obj::new(&mut out);
+        object.raw("view", &view.written());
+        object.end();
+        Ok(out)
+    }
+
     /// Opens a run. A new run takes its key from the shell — the only
     /// nondeterministic input a run ever takes — and a restore names a
     /// persistence record.
@@ -298,7 +322,7 @@ impl Session {
                     state.now.step,
                     state.branch_nonce,
                 );
-                let answer = opened_body(&run, false);
+                let answer = opened_body(&run, false, None);
                 self.run = Some(run);
                 self.drain_events();
                 Ok(answer)
@@ -306,11 +330,11 @@ impl Session {
             "restore" => {
                 read::exact_keys(body, "body", &["mode", "save_key"])?;
                 let key = read::text(body, "save_key")?.to_string();
-                let (state, changed) = self.recorded(&key)?;
+                let (state, changed, migrated_from) = self.recorded(&key)?;
                 let form = self.store.row(&state.run_id).map_or(String::new(), |row| row.form.clone());
                 let run = Run::restore(state, &form)?;
                 self.note(&run);
-                let answer = opened_body(&run, changed);
+                let answer = opened_body(&run, changed, migrated_from);
                 self.run = Some(run);
                 self.reopen_chapter();
                 self.drain_events();
@@ -357,14 +381,14 @@ impl Session {
             return Err(Fault::detailed(Code::NotFound, detail));
         }
 
-        let (state, _) = self.recorded(&key)?;
+        let (state, _, migrated_from) = self.recorded(&key)?;
         let mut restored = Run::restore(state, &form)?;
         if branching {
             let nonce = self.store.nonce_high(restored.state().run_id.as_str()).saturating_add(1);
             restored.rebranch(nonce);
         }
         self.note(&restored);
-        let answer = restored_body(&restored);
+        let answer = restored_body(&restored, migrated_from);
         self.run = Some(restored);
         // A restore lands the run on a step it has already been at, and the
         // objective that stood there is the one the record carried. The shell
@@ -450,7 +474,7 @@ impl Session {
     /// version at most this build's; re-serialize through the core and compare
     /// bytes and digest; then schema, enum, range, and cap validation. Any
     /// failure marks the record invalid.
-    fn recorded(&self, key: &str) -> Result<(RunState, bool), Fault> {
+    fn recorded(&self, key: &str) -> Result<(RunState, bool, Option<i64>), Fault> {
         let Some(record) = self.store.record(key) else {
             let mut detail = String::new();
             let mut object = Obj::new(&mut detail);
@@ -462,7 +486,18 @@ impl Session {
         if record.save_version > SAVE_VERSION {
             return Err(Fault::because(Code::SaveVersion, "record"));
         }
-        read_payload(&record.payload, &record.payload_sha256, Code::SaveCorrupt, &self.content_hash())
+        let (state, changed) = read_payload(
+            &record.payload,
+            &record.payload_sha256,
+            record.save_version,
+            Code::SaveCorrupt,
+            &self.content_hash(),
+        )?;
+        // Migration provenance is a boundary fact about how these bytes were
+        // opened, never causal run state and never part of the rewritten V2
+        // payload. V2 records therefore omit it entirely.
+        let migrated_from = (record.save_version == 1).then_some(1);
+        Ok((state, changed, migrated_from))
     }
 
     /// Imports a run from an export file.
@@ -498,9 +533,7 @@ impl Session {
         if version > SAVE_VERSION {
             return Err(Fault::because(Code::SaveVersion, "import"));
         }
-        if version != SAVE_VERSION {
-            // The migration envelope dispatches on the version; version 1 is
-            // identity and no earlier version exists to migrate from.
+        if version != 1 && version != SAVE_VERSION {
             return Err(Fault::because(Code::ImportInvalid, "save_version"));
         }
         let digest = read::hex(&file, "payload_sha256", 64)
@@ -518,7 +551,13 @@ impl Session {
             return Err(crate::field::cap_fault("save_payload", SAVE_PAYLOAD_CAP as i64));
         }
 
-        let (state, _) = read_payload(&bytes, &digest, Code::ImportInvalid, &self.content_hash())?;
+        let (state, _) = read_payload(
+            &bytes,
+            &digest,
+            version,
+            Code::ImportInvalid,
+            &self.content_hash(),
+        )?;
         let form = state
             .now
             .forms
@@ -544,8 +583,12 @@ impl Session {
         let mut out = String::new();
         let mut object = Obj::new(&mut out);
         object.int("branch_nonce", i64::from(run.state().branch_nonce));
+        if version == 1 {
+            object.int("migrated_from", 1);
+        }
         object.text("run_id", &run.state().run_id);
         object.int("step", i64::from(run.state().now.step));
+        object.raw("view", &run.state().view.written());
         object.end();
         self.run = Some(run);
         self.reopen_chapter();
@@ -672,6 +715,7 @@ impl Session {
 fn read_payload(
     bytes: &str,
     digest: &str,
+    declared_version: i64,
     code: Code,
     hash: &str,
 ) -> Result<(RunState, bool), Fault> {
@@ -679,7 +723,17 @@ fn read_payload(
         return Err(Fault::because(code, "payload_sha256"));
     }
     let payload = parse(bytes).map_err(|reason| Fault::because(code, reason))?;
-    let state = RunState::read(&payload).map_err(|fault| read::recode(fault, code))?;
+    let version = read::int(&payload, "save_version", 0, i64::from(u32::MAX))
+        .map_err(|fault| read::recode(fault, code))?;
+    if version != declared_version {
+        return Err(Fault::because(code, "save_version"));
+    }
+    let state = match version {
+        1 => RunState::migrate_v1(&payload),
+        SAVE_VERSION => RunState::read(&payload),
+        _ => Err(Fault::because(Code::SaveVersion, "payload")),
+    }
+    .map_err(|fault| read::recode(fault, code))?;
     state.coherent().map_err(|fault| read::recode(fault, code))?;
     // A restore under a different content hash continues, and says so; the
     // framework reproducibility of pre-restore records is no longer claimed.
@@ -688,7 +742,7 @@ fn read_payload(
 }
 
 /// The answer `init_run` returns once a run is open.
-fn opened_body(run: &Run, content_changed: bool) -> String {
+fn opened_body(run: &Run, content_changed: bool, migrated_from: Option<i64>) -> String {
     let state = run.state();
     let mut out = String::new();
     let mut object = Obj::new(&mut out);
@@ -696,6 +750,9 @@ fn opened_body(run: &Run, content_changed: bool) -> String {
     object.int("chapter_index", i64::from(state.progress.chapter_index));
     object.bool("content_changed", content_changed);
     object.text("content_hash", &state.content_hash);
+    if let Some(version) = migrated_from {
+        object.int("migrated_from", version);
+    }
     object.int("protocol", i64::from(PROTOCOL_VERSION));
     object.text("run_id", &state.run_id);
     object.int("save_version", SAVE_VERSION);
@@ -706,11 +763,14 @@ fn opened_body(run: &Run, content_changed: bool) -> String {
 }
 
 /// The answer both restores return.
-fn restored_body(run: &Run) -> String {
+fn restored_body(run: &Run, migrated_from: Option<i64>) -> String {
     let state = run.state();
     let mut out = String::new();
     let mut object = Obj::new(&mut out);
     object.int("branch_nonce", i64::from(state.branch_nonce));
+    if let Some(version) = migrated_from {
+        object.int("migrated_from", version);
+    }
     object.int("step", i64::from(state.now.step));
     object.raw("view", &state.view.written());
     object.end();

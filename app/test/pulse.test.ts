@@ -14,6 +14,7 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import {
   neutralFrame,
+  PROTOCOL_VERSION,
   type CommandEnvelope,
   type InputFrame,
   type ResponseEnvelope,
@@ -293,7 +294,12 @@ async function pumped(
   vi.spyOn(console, 'info').mockImplementation(() => {});
 
   const client = openCore({ form: 'thread', steering: stillSteering(), pulse: source });
-  RecordingWorker.opened[0].answer({ v: 1, re: 1, ok: true, body: { protocol: 1 } });
+  RecordingWorker.opened[0].answer({
+    v: PROTOCOL_VERSION,
+    re: 1,
+    ok: true,
+    body: { protocol: PROTOCOL_VERSION },
+  });
   await client.ready;
   return {
     client,

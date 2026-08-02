@@ -16,7 +16,7 @@
 export const FRAME_MAGIC = 'FGF1';
 
 /** The snapshot format's own version. */
-export const FRAME_VERSION = 1;
+export const FRAME_VERSION = 2;
 
 /** The header's width in bytes; the section table starts right after it. */
 export const FRAME_HEADER_BYTES = 32;
@@ -101,13 +101,15 @@ export interface FramePort {
   layer: number;
   open: boolean;
   overloaded: boolean;
+  /** Member of the authoritative physical compartment. */
   member: boolean;
+  /** Exposed physical-compartment member. */
   shell: boolean;
   /**
-   * Whether a queued `reshape_boundary` or `set_focus` would make this Node a
-   * member. Read beside `member` it says whether the change would take the Node
-   * in, leave it out, or leave it where it stands; no frame raises it while the
-   * queue proposes no View.
+   * Whether a queued `reshape_compartment` would make this Node a physical
+   * member. Read beside `member` it says whether the causal edit would take the
+   * Node in, leave it out, or leave it where it stands; no frame raises it while
+   * the queue proposes no compartment edit.
    */
   proposedMember: boolean;
   /** Q0.16 of the stored-Charge cap. */
@@ -248,7 +250,10 @@ export interface FrameState {
   ports: FramePort[];
   routes: FrameRoute[];
   currents: FrameCurrent[];
-  /** One flag per Port record: a member of the standing inside. */
+  /**
+   * One flag per Port record: a member of the active passive-observation View.
+   * This bitset is independent of every physical membership flag on a Port.
+   */
   inside: boolean[];
   pressures: FramePressure[];
   cues: FrameCue[];
@@ -381,8 +386,8 @@ export function decodeFrameState(buffer: ArrayBuffer): FrameState {
     decoded.currents = readCurrents(view, currentsAt, currentsCount, bytes.length, points);
   }
 
-  // One flag per Port record: the bitset is 32 bytes whatever the Port count,
-  // and the bits past the last record stand for nothing.
+  // One passive-View flag per Port record: the bitset is 32 bytes whatever the
+  // Port count, and the bits past the last record stand for nothing.
   decoded.inside = decoded.inside.slice(0, decoded.ports.length);
   return decoded;
 }
@@ -598,7 +603,7 @@ function readOverlay(
   return found;
 }
 
-/** The 32-byte bitset: bit i is set when Port record i is a member. */
+/** The 32-byte bitset: bit i is set when Port record i is in the active View. */
 function readInside(bytes: Uint8Array, offset: number, count: number): boolean[] {
   span(offset, count, 32, bytes.length);
   if (count === 0) return [];

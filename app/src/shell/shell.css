@@ -205,11 +205,10 @@ body {
   opacity: 0.5;
 }
 
-/* The queued-change tray. Chrome, in a corner, with the field behind it: the
-   goal is that Still Mode separates inspection from committed changes without
-   leaving the main screen, so nothing here covers the surface, takes focus, or
-   waits to be dismissed. It fades with the ramp, so the 250 ms that slows the
-   field is the same 250 ms that brings the tray up and takes it away. */
+/* The Still Mode tray. Chrome, in a corner, with the field behind it: the goal
+   is that passive observation and committed changes remain visibly distinct
+   without leaving the main screen. It fades with the ramp, so the 250 ms that
+   slows the field is the same 250 ms that brings the tray up and takes it away. */
 .tray {
   position: fixed;
   top: 0;
@@ -239,6 +238,78 @@ body {
   opacity: 0.9;
 }
 
+/* The scientific split, expressed as two real controls rather than one
+   ambiguous boundary mode. Shape and copy distinguish them as well as hue. */
+.tray-tools {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+  margin: 0.15rem 0 0.3rem;
+  pointer-events: auto;
+}
+
+.tray-tool {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+  border: 1px solid rgba(215, 217, 221, 0.24);
+  border-radius: 0.35rem;
+  padding: 0.45rem 0.5rem;
+  background: rgba(11, 12, 14, 0.76);
+  color: #d7d9dd;
+  font: inherit;
+  font-size: 0.67rem;
+  line-height: 1.2;
+  letter-spacing: 0.045em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tray-tool small {
+  font-size: 0.56rem;
+  line-height: 1.25;
+  letter-spacing: 0.02em;
+  opacity: 0.58;
+}
+
+.tray-tool[data-tool='view'][aria-pressed='true'] {
+  border-color: rgba(195, 164, 255, 0.92);
+  box-shadow: inset 0 -2px rgba(195, 164, 255, 0.8);
+}
+
+.tray-tool[data-tool='compartment'][aria-pressed='true'] {
+  border-color: rgba(231, 224, 212, 0.9);
+  box-shadow: inset 0 -2px rgba(231, 224, 212, 0.8);
+}
+
+.tray-tool:focus-visible,
+.tray-clear-view:focus-visible,
+.tray-candidate-select:focus-visible {
+  outline: 2px solid rgba(244, 248, 255, 0.9);
+  outline-offset: 2px;
+}
+
+.tray-clear-view {
+  width: 100%;
+  margin: 0 0 0.35rem;
+  border: 1px dashed rgba(195, 164, 255, 0.62);
+  border-radius: 0.3rem;
+  padding: 0.35rem 0.5rem;
+  background: rgba(11, 12, 14, 0.58);
+  color: #d7d9dd;
+  font: inherit;
+  font-size: 0.62rem;
+  letter-spacing: 0.045em;
+  text-align: left;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.tray-clear-view:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+
 .tray-reading {
   display: flex;
   justify-content: space-between;
@@ -258,12 +329,9 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* One entry per queued change, in the order they were queued: a mark for the
-   change and the Impulse it costs. What the change itself is reads on the
-   field, where it is drawn. */
 /* The candidates of the standing slate, one per line, named by their source.
-   Nothing here is focusable and nothing here is a figure: the list is read,
-   and the arrows walk it. */
+   Each candidate is a focusable View choice; the four readings remain separate
+   figures below it. */
 .tray-candidates {
   display: flex;
   flex-direction: column;
@@ -272,12 +340,35 @@ body {
   padding: 0;
   list-style: none;
 }
+
+.tray[data-tool='compartment'] .tray-candidates {
+  opacity: 0.42;
+}
+
 .tray-candidate {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.35rem;
   opacity: 0.72;
+}
+
+.tray-candidate-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 0;
+  padding: 0.14rem 0.2rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.tray-candidate-select:disabled {
+  cursor: default;
+  opacity: 0.48;
 }
 
 /* The tier the candidates below it stand in. A tier is the rank of a set under

@@ -27,8 +27,8 @@
 //!
 //! | path | what it does | changes |
 //! |---|---|---|
-//! | swap by parts | replaces one member, then the other, under the authored boundary | 4 |
-//! | wholesale behind the standby | bridges with the standby, then replaces both at once and moves the boundary onto the replacements | 5 |
+//! | swap by parts | replaces one member, then the other, under the authored compartment | 4 |
+//! | wholesale behind the standby | bridges with the standby, then replaces both at once and moves physical membership onto the replacements | 5 |
 //! | relocation | leaves the module where it is and hangs the dependency on the standby | 2 |
 //!
 //! A fourth run is driven for contrast — the same swap by parts, begun after a
@@ -160,7 +160,7 @@ fn redirect(route: u32, end: &str, to: u32) -> String {
 
 fn reshape(members: &[u32]) -> String {
     let written: Vec<String> = members.iter().map(|held| held.to_string()).collect();
-    format!("{{\"plan\":{{\"members\":[{}],\"op\":\"reshape_boundary\"}}}}", written.join(","))
+    format!("{{\"plan\":{{\"members\":[{}],\"op\":\"reshape_compartment\"}}}}", written.join(","))
 }
 
 // ---------------------------------------------------------------------------
@@ -176,11 +176,11 @@ fn reshape(members: &[u32]) -> String {
 /// queued from the band the run is already holding.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Path {
-    /// Replace one carrier, then the other, leaving the authored boundary where
+    /// Replace one carrier, then the other, leaving the authored compartment where
     /// it stands. Four changes, two commits.
     ByParts,
     /// Bridge the junction with the standby, then replace both carriers in one
-    /// commit and move the boundary onto the replacements. Five changes.
+    /// commit and move physical membership onto the replacements. Five changes.
     Wholesale,
     /// Leave the module where it is and hang the dependency on the standby
     /// instead. Two changes.
@@ -244,7 +244,7 @@ struct Reading {
     turnover: Option<i64>,
     separation: Option<i64>,
     self_support: Option<i64>,
-    inside: Vec<u32>,
+    view_members: Vec<u32>,
 }
 
 /// One milestone the run reached, and the step it reached it at.
@@ -297,9 +297,9 @@ struct Driven {
     /// shorter than the gap between two readings is not counted at all.
     stopped_batches: usize,
     deep_spare_open: bool,
-    /// Charge held across the standing inside at the chapter's close, in whole
-    /// units.
-    inside_units: i64,
+    /// Charge held across the physical compartment at the chapter's close, in
+    /// whole units.
+    compartment_units: i64,
     /// Charge the standby held at the close, in whole units.
     standby_units: i64,
     /// Charge the two carriers the chapter opens with held at the close.
@@ -311,8 +311,10 @@ struct Driven {
     routes: usize,
     /// The Routes standing at the close, tail and head, ascending.
     standing_routes: Vec<(u32, u32, u32)>,
-    /// The standing inside at the close.
-    inside: Vec<u32>,
+    /// The standing Observation View at the close.
+    view_members: Vec<u32>,
+    /// The causal physical-compartment membership at the close.
+    compartment_members: Vec<u32>,
     /// Impulse the run carries into the chapter after this one — read after the
     /// transition, because the completion that ends the chapter is itself the
     /// grant that pays for it. It is the one liability reading that is progress
@@ -496,7 +498,7 @@ fn inspect(session: &mut Session, seq: &mut u32, named: &'static str) -> Reading
         turnover: value("turnover_tolerance"),
         separation: value("instruction_separation"),
         self_support: value("self_support"),
-        inside: state.view.inside.clone(),
+        view_members: state.view.inside.clone(),
     };
     frame(session, seq, 0, (0, 0), false, false, 0, opened + 2 * RAMP_US, true, "null");
     frame(session, seq, 0, (0, 0), false, false, 0, opened + 3 * RAMP_US, false, "null");
@@ -529,7 +531,7 @@ fn rewrite(path: Path) -> Vec<Vec<String>> {
         Path::Wholesale => vec![
             // The standby carries the junction while the module is replaced.
             vec![connect(11, 5)],
-            // Both members at once, and the boundary follows them.
+            // Both members at once, and the physical compartment follows them.
             vec![
                 redirect(2, "head", 9),
                 connect(9, 10),
@@ -678,7 +680,7 @@ fn drive_full(
         continuity_breaks: 0,
         stopped_batches: 0,
         deep_spare_open: false,
-        inside_units: 0,
+        compartment_units: 0,
         standby_units: 0,
         module_units: 0,
         store_units: 0,
@@ -686,7 +688,8 @@ fn drive_full(
         forms: 0,
         routes: 0,
         standing_routes: Vec::new(),
-        inside: Vec::new(),
+        view_members: Vec::new(),
+        compartment_members: Vec::new(),
         impulse: 0,
         standing: Vec::new(),
         reported: Vec::new(),
@@ -888,11 +891,11 @@ fn drive_full(
             }
             driven.deep_spare_open =
                 driven.deep_spare_open || state.now.ports.iter().any(|p| p.node == 12 && p.open);
-            driven.inside_units = state
+            driven.compartment_units = state
                 .now
                 .ports
                 .iter()
-                .filter(|port| state.view.inside.contains(&port.node))
+                .filter(|port| state.now.physical_compartment.members.contains(&port.node))
                 .map(|port| port.q / ONE_UNIT)
                 .sum();
             driven.standby_units = charge_of(state, &[11]);
@@ -908,7 +911,8 @@ fn drive_full(
             driven.routes = state.now.routes.len();
             driven.standing_routes =
                 state.now.routes.iter().map(|r| (r.route, r.tail, r.head)).collect();
-            driven.inside = state.view.inside.clone();
+            driven.view_members = state.view.inside.clone();
+            driven.compartment_members = state.now.physical_compartment.members.clone();
 
             // The reactions. A break is answered when it is read, and the two
             // of them are the only edits the chapter's back half makes.
@@ -1182,7 +1186,7 @@ fn every_starting_form_completes_the_whole_chapter() {
     println!("\nthe eight Forms through the whole chapter");
     println!(
         "{:<8} {:>10} {:>8} {:>8} {:>8} {:>6} {:>8} {:>8} {:>8}",
-        "form", "objectives", "steps", "minutes", "setbacks", "routes", "inside", "standby", "store",
+        "form", "objectives", "steps", "minutes", "setbacks", "routes", "compartment", "standby", "store",
     );
     let mut readings: Vec<(&str, i64, i64, i64)> = Vec::new();
     for form in field_game_core::run::FORMS {
@@ -1202,11 +1206,11 @@ fn every_starting_form_completes_the_whole_chapter() {
             minutes(at),
             run.setbacks.len(),
             run.routes,
-            run.inside_units,
+            run.compartment_units,
             run.standby_units,
             run.store_units,
         );
-        readings.push((form, run.inside_units, run.standby_units, run.store_units));
+        readings.push((form, run.compartment_units, run.standby_units, run.store_units));
     }
     let distinct: std::collections::BTreeSet<(i64, i64, i64)> =
         readings.iter().map(|held| (held.1, held.2, held.3)).collect();
@@ -1253,10 +1257,10 @@ fn the_dependency_cannot_be_held_by_routing_alone() {
     let run = drive_full("thread", Path::ByParts, false, true, false, true, true);
     println!(
         "\nno direct play past the outfalls: {} objectives completed, transition {:?}, \
-         inside {} store {}",
+         compartment {} store {}",
         run.completed.len(),
         run.transition_step,
-        run.inside_units,
+        run.compartment_units,
         run.store_units,
     );
     assert!(
@@ -1273,7 +1277,7 @@ fn the_dependency_cannot_be_held_by_routing_alone() {
         run.completed,
     );
     assert!(run.transition_step.is_none(), "the chapter does not complete");
-    assert_eq!(run.inside_units, 0, "the run stands empty");
+    assert_eq!(run.compartment_units, 0, "the physical compartment stands empty");
 }
 
 // ---------------------------------------------------------------------------
@@ -1294,7 +1298,7 @@ fn three_rewrite_paths_succeed_and_each_leaves_a_different_liability() {
         "routes",
         "standby",
         "module",
-        "inside",
+        "compartment",
         "breaks",
     );
     let mut readings: Vec<(Path, Driven)> = Vec::new();
@@ -1315,13 +1319,18 @@ fn three_rewrite_paths_succeed_and_each_leaves_a_different_liability() {
             run.routes,
             run.standby_units,
             run.module_units,
-            run.inside_units,
+            run.compartment_units,
             run.continuity_breaks,
         );
         readings.push((path, run));
     }
     for (path, run) in &readings {
-        println!("  {} standing inside {:?}", path.name(), run.inside);
+        println!(
+            "  {} physical compartment {:?}; View {:?}",
+            path.name(),
+            run.compartment_members,
+            run.view_members,
+        );
         println!("  {} Routes {:?}", path.name(), run.standing_routes);
     }
 
@@ -1378,7 +1387,7 @@ fn three_rewrite_paths_succeed_and_each_leaves_a_different_liability() {
     println!("\nthe liability each path leaves, read off the payload the next chapter opens on");
     println!(
         "{:<12} {:>8} {:>7} {:>8} {:>9} {:>8} {:>11} {:<16}",
-        "path", "Impulse", "routes", "standby", "abandoned", "inside", "Swap Range", "standing inside",
+        "path", "Impulse", "routes", "standby", "abandoned", "compartment", "Swap Range", "physical members",
     );
     for (path, run) in &readings {
         let swap = run
@@ -1392,9 +1401,9 @@ fn three_rewrite_paths_succeed_and_each_leaves_a_different_liability() {
             run.routes,
             run.standby_units,
             run.module_units,
-            run.inside_units,
+            run.compartment_units,
             swap,
-            run.inside,
+            run.compartment_members,
         );
     }
 
@@ -1442,39 +1451,44 @@ fn three_rewrite_paths_succeed_and_each_leaves_a_different_liability() {
         "the three paths leave different numbers of Routes standing",
     );
 
-    // **The View.** Swap Range reads the standing inside's own internal graph,
-    // so a boundary left where it was after the members under it changed reads
-    // four isolated members; the wholesale path moves the boundary onto the
-    // replacements and reads two, which is what the run read before anything
-    // broke. Only that path carries a View that still describes the run.
+    // **Compartment versus View.** The wholesale path moves physical members
+    // onto the replacements. Swap Range still reads the independently authored
+    // Observation View, so the physical intervention must not replace the
+    // member list that instrument uses.
     let swap = |run: &Driven| -> i64 {
         run.reading("the run settled").and_then(|held| held.swap_range).expect("a reading")
     };
+    let swap_values = [swap(by_parts), swap(wholesale), swap(relocation)];
+    assert!(swap_values.iter().all(|held| *held >= 0), "all fixed Views remain readable");
     assert_eq!(
-        [swap(by_parts), swap(wholesale), swap(relocation)],
-        [4, 2, 4],
-        "Swap Range at the close: only the path that moved the boundary leaves a View \
-         whose members are the ones doing the carrying",
+        wholesale.compartment_members,
+        vec![2, 5, 9, 10],
+        "the wholesale intervention moves physical membership onto the replacements",
     );
-    assert_eq!(wholesale.inside, vec![2, 5, 9, 10], "and the inside it leaves names them");
-    assert_eq!(by_parts.inside, vec![2, 3, 4, 5], "the other two leave the authored inside");
-    assert_eq!(relocation.inside, vec![2, 3, 4, 5]);
+    assert_eq!(by_parts.compartment_members, vec![2, 3, 4, 5]);
+    assert_eq!(relocation.compartment_members, vec![2, 3, 4, 5]);
+    assert_eq!(
+        wholesale.view_members, by_parts.view_members,
+        "the physical edit does not replace the Observation View",
+    );
+    assert_eq!(relocation.view_members, by_parts.view_members);
+    assert_eq!(by_parts.view_members, vec![2, 3, 4, 5]);
 
     // Every reading above is one axis, and no path is better than another on
     // every one of them at once: what the chapter offers is a choice rather
     // than a solution. The four measures are the ones the payload carries and a
     // player can read — Impulse, Routes standing, what the standby holds, what
-    // the standing inside holds — with more Impulse, fewer Routes, and more of
+    // the physical compartment holds — with more Impulse, fewer Routes, and more of
     // both stores counted as better.
     let dominates = |a: &Driven, b: &Driven| {
         a.impulse >= b.impulse
             && a.routes <= b.routes
             && a.standby_units >= b.standby_units
-            && a.inside_units >= b.inside_units
+            && a.compartment_units >= b.compartment_units
             && (a.impulse > b.impulse
                 || a.routes < b.routes
                 || a.standby_units > b.standby_units
-                || a.inside_units > b.inside_units)
+                || a.compartment_units > b.compartment_units)
     };
     for (path, run) in &readings {
         let beaten: Vec<&str> = readings
@@ -1785,7 +1799,7 @@ fn the_still_surface_reads_the_run_and_a_commit_ends_the_window_it_reads_over() 
             format!("{:?}", reading.turnover),
             format!("{:?}", reading.separation),
             format!("{:?}", reading.self_support),
-            reading.inside,
+            reading.view_members,
         );
     }
     assert_eq!(run.readings.len(), 4, "the run stopped to read four times");
@@ -1811,7 +1825,7 @@ fn the_still_surface_reads_the_run_and_a_commit_ends_the_window_it_reads_over() 
     );
     // Self-Support is unassigned only when nothing was required, so a reading
     // at all says the Nodes of the run pay upkeep. That it reads zero says the
-    // rest: what pays for the run arrives from outside the boundary, which is
+    // rest: what pays for the run arrives from outside the View, which is
     // the Form standing in the band and nothing else.
     assert_eq!(
         carrying.self_support,
@@ -1851,7 +1865,7 @@ fn the_still_surface_reads_the_run_and_a_commit_ends_the_window_it_reads_over() 
     assert_eq!(
         settled.swap_range,
         Some(4),
-        "the boundary was left where it stood while the members under it changed, so the \
+        "the Observation View was left where it stood while the components changed, so the \
          four it names are joined to each other by nothing that carries",
     );
 }

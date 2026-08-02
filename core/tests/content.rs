@@ -58,7 +58,7 @@ fn a_session_opened_without_content_answers_at_init_run() {
     // The document puts content validation at `init_run`, so a bundle that does
     // not read is held rather than refusing the session outright.
     let mut session =
-        Session::new("{\"protocol\":1,\"save_version\":1}").expect("the versions agree");
+        Session::new("{\"protocol\":2,\"save_version\":2}").expect("the versions agree");
     let answer = opened(&mut session);
     assert!(answer.contains("\"code\":\"content_invalid\""), "{answer}");
 }
@@ -109,8 +109,9 @@ fn the_chapter_establishes_a_field_that_passes_every_locked_check() {
         field::establishable_view(&view, &established).expect("the opening View stands");
         assert!(field::within_caps(&established));
         assert_eq!(
-            established.boundaries.leak_frac, form.leak_frac,
-            "the run's leakage parameter is the selected Form's own",
+            established.physical_compartment, chapter.physical_compartment,
+            "the run's physical compartment is the chapter's under {}",
+            form.id,
         );
         // One controlled Form, whatever else the Form's abilities stand beside
         // it: the linked Forms of `linked_forms` are Forms of the Field and
@@ -129,6 +130,57 @@ fn the_chapter_establishes_a_field_that_passes_every_locked_check() {
             assert_eq!(held.form, form.id);
         }
     }
+}
+
+#[test]
+fn every_chapter_explicitly_authors_a_compartment_separate_from_its_opening_view() {
+    let bundle = parse(&support::bundle_with(&support::content_hash())).expect("canonical");
+    let content = content::read_bundle(&bundle).expect("the content reads");
+    let form = content.forms.first().expect("a Form");
+
+    for chapter in &content.chapters {
+        assert!(
+            !chapter.physical_compartment.members.is_empty(),
+            "{} explicitly authors causal members",
+            chapter.id,
+        );
+        assert_eq!(
+            chapter.physical_compartment.leak_per_exposed_contact_per_step, 64,
+            "{} explicitly authors the provisional coefficient",
+            chapter.id,
+        );
+        assert_eq!(
+            chapter.physical_compartment.members, chapter.opening_view.inside,
+            "{} begins with coincident physical and observational selections",
+            chapter.id,
+        );
+
+        let (field, mut view) = content::establish(chapter, form).expect("the chapter stands");
+        let causal = field.physical_compartment.clone();
+        view.inside.clear();
+        assert!(view.inside.is_empty(), "the local analysis selection was cleared");
+        assert_eq!(
+            field.physical_compartment, causal,
+            "clearing {}'s View cannot rewrite its causal compartment",
+            chapter.id,
+        );
+    }
+}
+
+#[test]
+fn the_edge_authors_a_real_physical_reshape_condition() {
+    let bundle = parse(&support::bundle_with(&support::content_hash())).expect("canonical");
+    let content = content::read_bundle(&bundle).expect("the content reads");
+    let chapter = content.chapter(1).expect("The Edge");
+    let objective = chapter
+        .objectives
+        .iter()
+        .find(|held| held.id == "objective.the_edge.draw_the_edge")
+        .expect("the compartment objective");
+    assert!(matches!(
+        &objective.condition,
+        content::Condition::CompartmentReshaped { steps: 1 },
+    ));
 }
 
 #[test]
@@ -253,6 +305,24 @@ fn refused(from: &str, to: &str) -> String {
 fn the_authored_chapter_is_read_as_it_stands() {
     // The control for the refusals below: the same path, unedited, reads.
     assert!(edited("\"period\": 30", "\"period\": 31").is_ok());
+}
+
+#[test]
+fn a_chapter_may_author_an_opening_view_different_from_its_physical_compartment() {
+    let content = edited("\"inside\": [2, 3, 4],", "\"inside\": [2, 3],")
+        .expect("View membership is independent authored analysis data");
+    let chapter = content.chapter(0).expect("the edited chapter");
+    assert_eq!(chapter.opening_view.inside, vec![2, 3]);
+    assert_eq!(chapter.physical_compartment.members, vec![2, 3, 4]);
+}
+
+#[test]
+fn a_physical_compartment_naming_an_unplaced_node_is_refused() {
+    let detail = refused(
+        "\"physical_compartment\": {\n    \"members\": [2, 3, 4],",
+        "\"physical_compartment\": {\n    \"members\": [2, 3, 44],",
+    );
+    assert_eq!(detail, "{\"reason\":\"physical_compartment\"}");
 }
 
 #[test]

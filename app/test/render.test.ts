@@ -14,6 +14,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, expect, inject, test, vi } from 'vitest';
 import {
   decodeFrameState,
+  FRAME_VERSION,
   FRAME_PRESSURE_IDS,
   type FrameCurrent,
   type FramePort,
@@ -35,11 +36,13 @@ const HIGH = 900;
 interface Recorded {
   context: CanvasRenderingContext2D;
   calls: Map<string, number>;
+  arguments: Map<string, unknown[][]>;
   total: () => number;
 }
 
 function recordingContext(): Recorded {
   const calls = new Map<string, number>();
+  const argumentsByCall = new Map<string, unknown[][]>();
   const held: Record<string, unknown> = {};
   const gradient = { addColorStop: () => {} };
   const bump = (name: string): void => {
@@ -57,6 +60,9 @@ function recordingContext(): Recorded {
       if (name in target) return target[name];
       return (...rest: unknown[]) => {
         bump(name);
+        const held = argumentsByCall.get(name);
+        if (held) held.push(rest);
+        else argumentsByCall.set(name, [rest]);
         return rest.length === 0 ? undefined : undefined;
       };
     },
@@ -65,7 +71,12 @@ function recordingContext(): Recorded {
       return true;
     },
   }) as unknown as CanvasRenderingContext2D;
-  return { context, calls, total: () => [...calls.values()].reduce((sum, at) => sum + at, 0) };
+  return {
+    context,
+    calls,
+    arguments: argumentsByCall,
+    total: () => [...calls.values()].reduce((sum, at) => sum + at, 0),
+  };
 }
 
 let recorded: Recorded;
@@ -155,11 +166,14 @@ test('every section of a populated snapshot maps onto the scene one to one', () 
   expect(scene.routes.count).toBe(next.routes.length);
   expect(scene.currents.count).toBe(next.currents.length);
 
-  // The standing inside draws one closed boundary, and the members it holds
-  // are the members the snapshot marks.
+  // The standing physical compartment and the passive View draw independently;
+  // the material members remain the members the snapshot marks.
   expect(next.ports.filter((port) => port.member)).toHaveLength(6);
-  expect(scene.boundaries.count).toBe(1);
-  expect(scene.boundaries.items[0].points.length).toBeGreaterThanOrEqual(6);
+  expect(scene.boundaries.count).toBe(2);
+  expect(scene.boundaries.items.find((mark) => mark.role === 'compartment')?.points.length)
+    .toBeGreaterThanOrEqual(6);
+  expect(scene.boundaries.items.find((mark) => mark.role === 'view')?.points.length)
+    .toBeGreaterThanOrEqual(6);
 
   // A Field standing on more than one layer draws a plane of haze per layer
   // other than the camera's own.
@@ -437,10 +451,14 @@ function current(over: Partial<FrameCurrent> & { id: number }): FrameCurrent {
 }
 
 /** A snapshot holding exactly the Ports given, and nothing else. */
-function fieldOf(ports: FramePort[], currents: FrameCurrent[] = []): FrameState {
+function fieldOf(
+  ports: FramePort[],
+  currents: FrameCurrent[] = [],
+  viewed: readonly number[] = [],
+): FrameState {
   return {
     header: {
-      version: 1,
+      version: FRAME_VERSION,
       flags: 0,
       stillVisible: false,
       dropped: false,
@@ -458,7 +476,7 @@ function fieldOf(ports: FramePort[], currents: FrameCurrent[] = []): FrameState 
     ports,
     routes: [],
     currents,
-    inside: ports.map((one) => one.member),
+    inside: ports.map((one) => viewed.includes(one.node)),
     pressures: [],
     cues: [],
     camera: null,
@@ -482,7 +500,7 @@ function drawnBy(kind: 'webgl' | 'canvas2d', state: FrameState): number {
   return boundaries;
 }
 
-test('an inside with no area still draws a boundary, and the same one either way', () => {
+test('a physical compartment with no area still draws its edge, and the same one either way', () => {
   // Two members: the hull is a segment. Three in a line: the monotone chain
   // drops the middle one and the hull is a segment again. Both cases used to
   // vanish in one engine and draw in the other.
@@ -516,7 +534,32 @@ test('an inside with no area still draws a boundary, and the same one either way
   renderer.dispose();
 });
 
-test('an inside reaching two planes draws one boundary on each', () => {
+test('degenerate physical, proposed, View, and candidate hulls keep distinct dash registers', () => {
+  const state = fieldOf(
+    [
+      port({ node: 1, member: true, x: 1_000 * 16, y: 1_000 * 16 }),
+      port({ node: 2, proposedMember: true, x: 1_200 * 16, y: 1_000 * 16 }),
+      port({ node: 3, x: 1_400 * 16, y: 1_000 * 16 }),
+      port({ node: 4, x: 1_600 * 16, y: 1_000 * 16 }),
+    ],
+    [],
+    [3],
+  );
+  const renderer = create_renderer(surface(), 'canvas2d');
+  renderer.resize(WIDE, HIGH);
+  renderer.set_still_tool('view');
+  renderer.set_candidates([{ position: 1, members: [4], focused: false, tier: 1 }]);
+  renderer.render(state, state, 0);
+
+  const patterns = (recorded.arguments.get('setLineDash') ?? []).map(([pattern]) => pattern);
+  expect(patterns).toContainEqual([]);
+  expect(patterns).toContainEqual([4, 6]);
+  expect(patterns).toContainEqual([12, 8]);
+  expect(patterns).toContainEqual([2, 8]);
+  renderer.dispose();
+});
+
+test('a physical compartment reaching two planes draws one material edge on each', () => {
   const state = fieldOf([
     port({ node: 1, member: true, layer: 0, x: 1_000 * 16, y: 1_000 * 16 }),
     port({ node: 2, member: true, layer: 0, x: 1_300 * 16, y: 1_000 * 16 }),
@@ -925,10 +968,11 @@ test('every candidate of a slate draws its own outline, on both engines', () => 
       },
     });
     renderer.resize(WIDE, HIGH);
+    renderer.set_still_tool('view');
     renderer.set_candidates(slate);
     renderer.render(state, state, 0);
     const scene = renderer.scene();
-    // One outline per candidate, beside the one standing boundary.
+    // One outline per candidate, beside the physical compartment.
     expect(scene.candidates.count).toBe(2);
     expect(scene.boundaries.count).toBe(1);
     expect(scene.candidates.items[0].nodes).toEqual([1, 2]);
@@ -948,7 +992,8 @@ test('every candidate of a slate draws its own outline, on both engines', () => 
     expect(dashOf(scene.candidates.items[0])[1]).toBeLessThan(
       dashOf(scene.candidates.items[1])[1],
     );
-    expect(dashOf(scene.boundaries.items[0])).toEqual([10, 7]);
+    expect(scene.boundaries.items[0].role).toBe('compartment');
+    expect(dashOf(scene.boundaries.items[0])).toEqual([]);
     // And the engine drew them: both engines take the same marks.
     expect(recorded.total()).toBeGreaterThan(0);
     renderer.dispose();
@@ -966,11 +1011,38 @@ test('a slate handed over between frames reaches the surface without one', () =>
   renderer.resize(WIDE, HIGH);
   renderer.render(state, state, 0);
   expect(renderer.scene().candidates.count).toBe(0);
+  renderer.set_still_tool('view');
   renderer.set_candidates([{ position: 1, members: [1, 2], focused: false, tier: 1 }]);
   expect(renderer.scene().candidates.count).toBe(1);
   // And a slate taken away leaves nothing behind.
   renderer.set_candidates([]);
   expect(renderer.scene().candidates.count).toBe(0);
+  renderer.dispose();
+});
+
+test('physical, proposed-physical, and View hulls remain separate render registers', () => {
+  const ports = [
+    port({ node: 1, member: true, x: 1_000 * 16, y: 1_000 * 16 }),
+    port({ node: 2, member: true, proposedMember: true, x: 1_300 * 16, y: 1_000 * 16 }),
+    port({ node: 3, member: true, proposedMember: true, x: 1_150 * 16, y: 1_300 * 16 }),
+    port({ node: 4, proposedMember: true, x: 1_450 * 16, y: 1_300 * 16 }),
+  ];
+  const state = fieldOf(ports, [], [1, 2, 4]);
+  const renderer = create_renderer(surface(), 'canvas2d');
+  renderer.resize(WIDE, HIGH);
+  renderer.render(state, state, 0);
+  const marks = renderer.scene().boundaries.items.slice(0, renderer.scene().boundaries.count);
+  const physical = marks.find((mark) => mark.role === 'compartment' && !mark.proposed);
+  const proposed = marks.find((mark) => mark.role === 'compartment' && mark.proposed);
+  const view = marks.find((mark) => mark.role === 'view');
+
+  expect([...(physical?.nodes ?? [])].sort((a, b) => a - b)).toEqual([1, 2, 3]);
+  expect([...(proposed?.nodes ?? [])].sort((a, b) => a - b)).toEqual([2, 3, 4]);
+  expect([...(view?.nodes ?? [])].sort((a, b) => a - b)).toEqual([1, 2, 4]);
+  expect(physical!.width).toBeGreaterThan(view!.width);
+  expect(dashOf(physical!)).toEqual([]);
+  expect(dashOf(proposed!)).toEqual([4, 6]);
+  expect(dashOf(view!)).toEqual([12, 8]);
   renderer.dispose();
 });
 

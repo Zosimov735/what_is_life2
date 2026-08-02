@@ -15,7 +15,7 @@ import { Container, Graphics, Sprite, Texture, WebGLRenderer } from 'pixi.js';
 import {
   BACKDROP,
   BACKDROP_EDGE,
-  BOUNDARY_SHELL,
+  PHYSICAL_COMPARTMENT_SHELL,
   CHARGE_CORE,
   CURRENT_BRIGHT,
   HAZE,
@@ -152,6 +152,26 @@ function dashed(
     const end = Math.min(along + dash, span);
     graphics.moveTo(x1 + stepX * along, y1 + stepY * along);
     graphics.lineTo(x1 + stepX * end, y1 + stepY * end);
+  }
+}
+
+/** Strokes a dashed circle for a one-member hull's non-solid register. */
+function dashedCircle(
+  graphics: Graphics,
+  x: number,
+  y: number,
+  radius: number,
+  dash: number,
+  gap: number,
+): void {
+  const circumference = Math.PI * 2 * radius;
+  if (circumference <= 0) return;
+  for (let along = 0; along < circumference; along += dash + gap) {
+    const end = Math.min(along + dash, circumference);
+    const startTurn = along / radius;
+    const endTurn = end / radius;
+    graphics.moveTo(x + Math.cos(startTurn) * radius, y + Math.sin(startTurn) * radius);
+    graphics.arc(x, y, radius, startTurn, endTurn);
   }
 }
 
@@ -345,9 +365,8 @@ export class WebglEngine implements Engine {
 
   private drawBoundary(scene: Scene): void {
     const boundary = this.boundary.clear();
-    // The candidates first, so the standing boundary reads over them: they are
-    // proposals about where a boundary could stand, and the one that does
-    // stand is the one a player must be able to find at a glance.
+    // Candidates first; the material compartment and active View then remain
+    // legible over every possible observation aperture.
     this.strokeHulls(boundary, scene.candidates);
     this.strokeHulls(boundary, scene.boundaries);
   }
@@ -359,51 +378,79 @@ export class WebglEngine implements Engine {
       const pairs = mark.points.length / 2;
       if (pairs === 0) continue;
       // A hull with no area — one member, two, or three in a line — is drawn
-      // as a capsule of the boundary's own width, so the reading holds. Both
-      // engines take the same marks and treat these two cases the same way.
+      // as a capsule of the hull's own width, so the reading holds. Its dash
+      // register still applies: a small View or proposal must not turn into the
+      // same solid object as a small physical compartment.
       if (pairs <= 2) {
+        const dash = dashOf(mark);
         if (pairs === 1) {
-          boundary
-            .circle(mark.points[0], mark.points[1], mark.width)
-            .fill({ color: mark.tone, alpha: mark.alpha });
+          if (mark.role === 'compartment' && !mark.proposed) {
+            boundary
+              .circle(mark.points[0], mark.points[1], mark.width)
+              .fill({ color: mark.tone, alpha: mark.alpha * 0.07 });
+          }
+          if (dash.length === 0) {
+            boundary.circle(mark.points[0], mark.points[1], mark.width);
+          } else {
+            dashedCircle(
+              boundary,
+              mark.points[0],
+              mark.points[1],
+              mark.width,
+              dash[0],
+              dash[1],
+            );
+          }
         } else {
-          boundary.moveTo(mark.points[0], mark.points[1]);
-          boundary.lineTo(mark.points[2], mark.points[3]);
-          boundary.stroke({ width: mark.width * 2, color: mark.tone, alpha: mark.alpha, cap: 'round' });
+          if (dash.length === 0) {
+            boundary.moveTo(mark.points[0], mark.points[1]);
+            boundary.lineTo(mark.points[2], mark.points[3]);
+          } else {
+            dashed(
+              boundary,
+              mark.points[0],
+              mark.points[1],
+              mark.points[2],
+              mark.points[3],
+              dash[0],
+              dash[1],
+            );
+          }
         }
+        boundary.stroke({ width: mark.width, color: mark.tone, alpha: mark.alpha, cap: 'round' });
         continue;
       }
-      // A proposed boundary and a candidate outline are outlines and nothing
-      // more: no region under either, because no region has been declared —
-      // the inside each draws is one a commit would adopt, and a commit that is
-      // refused adopts none of it.
-      if (!mark.proposed && mark.candidate === 0) {
+      // Only the committed physical compartment owns a material interior.
+      // The passive View and every candidate remain apertures/outlines: seeing
+      // through them must never make them look like causal walls.
+      if (mark.role === 'compartment' && !mark.proposed) {
         boundary.poly(mark.points, true).fill({ color: mark.tone, alpha: mark.alpha * 0.07 });
-        // A wide, faint pass under the dashes, so the boundary reads as an edge
-        // with a hue of its own rather than as one more Route.
+        // A broad low-alpha shoulder gives the compartment physical weight.
         boundary.poly(mark.points, true);
         boundary.stroke({
-          width: mark.width * 7,
+          width: mark.width * 2.4,
           color: mark.tone,
-          alpha: mark.alpha * 0.12,
+          alpha: mark.alpha * 0.16,
           join: 'round',
         });
       }
-      // One dash pattern per register, so the three readings are told apart
-      // without a colour: the standing boundary, the change a queue proposes,
-      // and a candidate of the slate.
-      const [on, off] = dashOf(mark);
-      for (let corner = 0; corner < pairs; corner += 1) {
-        const next = (corner + 1) % pairs;
-        dashed(
-          boundary,
-          mark.points[corner * 2],
-          mark.points[corner * 2 + 1],
-          mark.points[next * 2],
-          mark.points[next * 2 + 1],
-          on,
-          off,
-        );
+      const dash = dashOf(mark);
+      if (dash.length === 0) {
+        boundary.poly(mark.points, true);
+      } else {
+        const [on, off] = dash;
+        for (let corner = 0; corner < pairs; corner += 1) {
+          const next = (corner + 1) % pairs;
+          dashed(
+            boundary,
+            mark.points[corner * 2],
+            mark.points[corner * 2 + 1],
+            mark.points[next * 2],
+            mark.points[next * 2 + 1],
+            on,
+            off,
+          );
+        }
       }
       boundary.stroke({ width: mark.width, color: mark.tone, alpha: mark.alpha, cap: 'round' });
     }
@@ -467,7 +514,11 @@ export class WebglEngine implements Engine {
       }
       if (mark.shell) {
         ports.circle(mark.x, mark.y, mark.radius * 1.9);
-        ports.stroke({ width: Math.max(1, mark.radius * 0.18), color: BOUNDARY_SHELL, alpha: 0.75 });
+        ports.stroke({
+          width: Math.max(1, mark.radius * 0.18),
+          color: PHYSICAL_COMPARTMENT_SHELL,
+          alpha: 0.75,
+        });
       }
     }
     this.bloom.close();
@@ -575,7 +626,7 @@ export class WebglEngine implements Engine {
 
   /**
    * The handles a paused Field offers. One shape per kind — a ring on a Port,
-   * a square at a Route's end, a diamond on a Boundary vertex — which is the
+   * a square at a Route's end, a diamond on a Compartment vertex — which is the
    * same three the other engine draws, at the same three sizes.
    */
   private drawHandles(scene: Scene): void {

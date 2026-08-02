@@ -20,6 +20,7 @@ import { afterEach, beforeAll, expect, inject, test, vi } from 'vitest';
 import {
   neutralFrame,
   PROTOCOL_VERSION,
+  SAVE_VERSION,
   type ErrorEnvelope,
   type EventEnvelope,
   type FrameEventBody,
@@ -164,7 +165,7 @@ test('two sessions under the same run key and the same frames export the same by
   expect(total).toBeLessThan(script.length);
   const exportedFile = JSON.parse(String(first.body.text));
   expect(exportedFile.format).toBe('field-game-run');
-  expect(exportedFile.save_version).toBe(1);
+  expect(exportedFile.save_version).toBe(SAVE_VERSION);
   expect(exportedFile.payload.field.now.step).toBe(total);
   expect(exportedFile.payload.run_id).toBe(KEY);
 
@@ -176,11 +177,12 @@ test('two sessions under the same run key and the same frames export the same by
     expect(Array.isArray(field[part])).toBe(true);
     expect(field[part].length).toBeGreaterThan(0);
   }
-  // The boundary-leakage parameter is copied from the selected Form at run
-  // start, and the authored Boundary list is the chapter's own.
+  // Candidate-Boundary seeds remain analytical, while the physical
+  // compartment carries its own regime-authored leakage law.
   expect(field.boundaries.drawn).toEqual([]);
   expect(field.boundaries.authored).toEqual([{ members: [2, 3, 4] }]);
-  expect(field.boundaries.leak_frac).toBeGreaterThan(0);
+  expect(field.physical_compartment.members).toEqual([2, 3, 4]);
+  expect(field.physical_compartment.leak_per_exposed_contact_per_step).toBeGreaterThan(0);
   // The content hash is the digest the build embedded, and the run records it.
   expect(exportedFile.payload.content_hash).toBe(CONTENT_HASH);
 });

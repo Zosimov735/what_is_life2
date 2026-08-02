@@ -142,12 +142,13 @@ const STILL_GAIN = 0.3;
 const STILL_FLOOR_SECONDS = 0.05;
 
 /**
- * The cue a change of the standing inside sounds: a View has been adopted.
+ * The cue a change of the active observation View sounds.
  *
  * It is derived from the snapshot like every other cue this module sounds —
- * the members of the standing inside are in the frame, and a commit that
- * adopts a candidate or reshapes the boundary is exactly what moves them. The
- * closed cue set carries no cue of its own for a View change, and the frame
+ * the View members are in the frame's independent bitset, and the immediate
+ * free `set_focus` command is what moves them. A physical-compartment commit
+ * does not move this reading. The closed cue set carries no cue of its own for
+ * a View change, and the frame
  * gains no field for one: this is the same reading the renderer already draws
  * the boundary from. A rising pair, briefly, in the boundary's own register
  * rather than the Pulse's or the depth pair's.
@@ -273,7 +274,7 @@ export function openSound(options: SoundOptions = {}): Sound {
   let depth: number | null = null;
   /** The mode the newest snapshot reported, and none before the first. */
   let mode: string | null = null;
-  /** The standing inside the newest snapshot carried, and none before the first. */
+  /** The active passive View the newest snapshot carried, and none before the first. */
   let inside: number | null = null;
   /** Which Form carried control, and none before the first snapshot. */
   let steering: number | null = null;
@@ -529,7 +530,7 @@ export function openSound(options: SoundOptions = {}): Sound {
   }
 
   /**
-   * Sounds a change of the standing inside: the View a commit adopted.
+   * Sounds a change of the passive observation View.
    *
    * The first snapshot sets the reading and sounds nothing, exactly as the
    * first one sets the depth and sounds nothing — standing somewhere is not
@@ -537,13 +538,13 @@ export function openSound(options: SoundOptions = {}): Sound {
    */
   function carryInside(next: FrameState): void {
     let held = 0;
-    for (const port of next.ports) {
-      if (port.member) held = (held * 31 + port.node) | 0;
+    for (let place = 0; place < next.ports.length; place += 1) {
+      if (next.inside[place]) held = (held * 31 + next.ports[place].node) | 0;
     }
     const before = inside;
     inside = held;
     if (before === null || before === held) return;
-    tone('sine', ADOPT_LOW_HZ, ADOPT_HIGH_HZ, ADOPT_SECONDS, ADOPT_GAIN);
+    pair(ADOPT_LOW_HZ, ADOPT_HIGH_HZ, ADOPT_SECONDS, ADOPT_GAIN);
   }
 
   /**
@@ -644,9 +645,9 @@ export function openSound(options: SoundOptions = {}): Sound {
       // the reading is not inside the step guard: the frame that completes a
       // ramp runs no step at all, and neither does any frame of a still run.
       carryMode(next.header.mode, next.header.timeScale);
-      // The standing inside is read on the same frames and for the same
-      // reason: a commit runs no step, so a View adopted on one would never be
-      // heard from inside the step guard below. So is the Form control stands
+      // The passive View is read on the same frames and for the same reason:
+      // `set_focus` runs no step, so its change would never be heard from
+      // inside the step guard below. So is the Form control stands
       // on: a Handoff is answered in `still`, where no step runs and no mode
       // changes, so the frame that carries one would otherwise be silent.
       carryInside(next);

@@ -13,25 +13,28 @@
 //!
 //! The locked chapter fields are the document's — `id`, `title_key`, `layers`,
 //! `ports`, `routes`, `currents`, `authored_boundaries`, `objectives`,
-//! `pressure_schedule`, `anchor_moments`, and `opening_view`. The document
+//! `pressure_schedule`, `anchor_moments`, `physical_compartment`, and
+//! `opening_view`. The document
 //! leaves the interior of those fields to the goal that first reads them; this
 //! is that goal for everything the opening sequence needs, and what it declares
-//! is below, under `content_version` 1. Two fields beyond the locked minimum are
-//! declared here for the same reason: `forms`, the chapter's placement of the
-//! controlled Form.
+//! is below, under `content_version` 2. Fields beyond the original locked
+//! minimum are declared here for the same reason, including `forms`, the
+//! chapter's placement of the controlled Form.
 //!
 //! The Form file's interior is declared here for the same reason. The document
 //! names what it holds — starting parameters, `route_reach`, `forecast_depth`
-//! (only `lens` above 0 in version 1), `leak_frac`, upkeep rates, and
-//! rule-changing abilities as data — and leaves the shape to the goal that
-//! first reads it. Version 1 is exactly eight keys: `id`, `route_reach`,
-//! `forecast_depth`, `leak_frac`, `upkeep_rate`, `capacity`, `reserve`, and
-//! `abilities`. Each of the six quantities is copied into the state the run
+//! (only `lens` above 0 in version 2), upkeep rates, and rule-changing
+//! abilities as data — and leaves the shape to the goal that first reads it.
+//! Version 2 is exactly nine keys: `id`, `route_reach`, `route_capacity`,
+//! `forecast_depth`, `upkeep_rate`, `capacity`, `reserve`, `steer_scale`, and
+//! `abilities`. Each quantity is copied into the state the run
 //! stands on when the Field is established, and nothing anywhere branches on
 //! which Form was selected: the Forms differ because their data differs, which
 //! is the whole of what makes eight Forms eight rather than eight branches.
+//! Leakage is deliberately absent: it belongs to the chapter's physical
+//! compartment, not to the selected commissioning chassis.
 //!
-//! Two of the eight decide something a chapter must be authored against, so the
+//! Two of those parameters decide something a chapter must be authored against, so the
 //! policy is stated here rather than left in the numbers:
 //!
 //! - `route_reach` is how far apart the two ends of a Route the player forms
@@ -59,7 +62,7 @@
 //! land on.
 //!
 //! The campaign is the sequence of those chapters. Three fields carry it, and
-//! all three are declared here under `content_version` 1:
+//! all three are declared here under `content_version` 2:
 //!
 //! - `optional` on an objective, which is the span an optional test stands for.
 //!   A required objective authors `null` and blocks the chapter until it is
@@ -87,9 +90,10 @@
 
 use crate::fault::{Code, Fault};
 use crate::field::{
-    self, BoundaryState, CurrentState, Cue, FieldLayer, FormState, LinkState, NodeKind, PortState,
-    RouteState, TrailState, CUE_COLLAPSE, CUE_OBJECTIVE_COMPLETE, CUE_RECOVERY,
-    CURRENTS_PER_CHAPTER, LAYERS_PER_CHAPTER, NODES_PER_RUN, ROUTES_PER_RUN,
+    self, BoundaryState, CurrentState, Cue, FieldLayer, FormState, LinkState, NodeKind,
+    PhysicalCompartment, PortState, RouteState, TrailState, CUE_COLLAPSE,
+    CUE_OBJECTIVE_COMPLETE, CUE_RECOVERY, CURRENTS_PER_CHAPTER, LAYERS_PER_CHAPTER,
+    NODES_PER_RUN, ROUTES_PER_RUN,
 };
 use crate::fx::{within, Vec2, ONE_UNIT, STORED_BOUND};
 use crate::json::{parse, Json};
@@ -101,7 +105,7 @@ use crate::state::{
 };
 
 /// The content version this build reads.
-pub const CONTENT_VERSION: i64 = 1;
+pub const CONTENT_VERSION: i64 = 2;
 
 /// The three manifest lists, in the order the concatenation reads them — the
 /// same order `tools/content-build.mjs` hashes in.
@@ -134,17 +138,17 @@ pub const CHAPTER_IDS: [&str; 8] = [
 ///
 /// Every one of them is authored per Form and copied into the state the run
 /// stands on when the Field is established: `route_reach`, `forecast_depth`,
-/// and `steer_scale` onto the Form, `leak_frac` onto the run's Boundary, and
-/// `upkeep_rate`, `capacity`, and `reserve` onto the Form's own Node. Which of
+/// and `steer_scale` onto the Form, and `upkeep_rate`, `capacity`, and
+/// `reserve` onto the Form's own Node. Which of
 /// them a rule reads is the rule's business, and `reserve` is authored here all
 /// the same though the rule that spends it is pending, because the parameter is
-/// the Form's and only its rule is.
+/// the Form's and only its rule is. Physical leakage is chapter-authored and
+/// therefore cannot change when another Form opens the same chapter.
 #[derive(Clone, Debug)]
 pub struct FormContent {
     pub id: String,
     pub route_reach: Fx,
     pub forecast_depth: u16,
-    pub leak_frac: Frac,
     pub upkeep_rate: Fx,
     pub capacity: Fx,
     pub reserve: Fx,
@@ -160,7 +164,7 @@ pub struct FormContent {
     pub abilities: Vec<Ability>,
 }
 
-/// The ability kinds version 1 knows, as their machine ids. A file naming any
+/// The ability kinds version 2 knows, as their machine ids. A file naming any
 /// other kind is content this build cannot apply, and is refused rather than
 /// ignored — an ability that reached the Field as nothing would be a promise
 /// the run does not keep.
@@ -211,6 +215,10 @@ pub enum Condition {
     /// Every named Route carried Charge and no named Node stood overloaded.
     /// The one condition whose failure is read as a recoverable setback.
     PatternHeld { routes: Vec<u32>, nodes: Vec<u32>, steps: i64 },
+    /// The physical compartment's membership no longer matches the chapter's
+    /// authored opening membership. This reads causal state, never the active
+    /// observation View, and therefore completes only after a physical edit.
+    CompartmentReshaped { steps: i64 },
 }
 
 impl Condition {
@@ -219,7 +227,8 @@ impl Condition {
         match self {
             Condition::InCurrent { steps, .. }
             | Condition::HoldPosition { steps, .. }
-            | Condition::PatternHeld { steps, .. } => *steps,
+            | Condition::PatternHeld { steps, .. }
+            | Condition::CompartmentReshaped { steps } => *steps,
             Condition::PulseReleased { count } => *count,
             Condition::PortsOpen { .. } | Condition::RoutesFlowing { .. } => 1,
         }
@@ -240,7 +249,11 @@ impl Condition {
     }
 
     /// Reads one completed step against the condition.
-    fn read_step(&self, reading: &StepReading<'_>) -> Outcome {
+    fn read_step(
+        &self,
+        reading: &StepReading<'_>,
+        opening_compartment: &PhysicalCompartment,
+    ) -> Outcome {
         match self {
             Condition::InCurrent { current, .. } => {
                 let held = reading.field.currents.iter().find(|held| held.id == *current);
@@ -284,6 +297,11 @@ impl Condition {
                 // says so, and the run carries on either way.
                 Outcome { met: flowing && !strained, setback: strained }
             }
+            Condition::CompartmentReshaped { .. } => Outcome {
+                met: reading.field.physical_compartment.members.as_slice()
+                    != opening_compartment.members.as_slice(),
+                setback: false,
+            },
         }
     }
 }
@@ -366,7 +384,7 @@ pub struct EndingMark {
     pub objective: Option<String>,
 }
 
-/// The authored-event kinds version 1 knows, as their machine ids.
+/// The authored-event kinds version 2 knows, as their machine ids.
 ///
 /// The order is the reader's own — a kind is read by its place in this list —
 /// so a kind is appended and never inserted.
@@ -533,6 +551,13 @@ pub struct Chapter {
     pub ports: Vec<PortPlacement>,
     pub routes: Vec<RoutePlacement>,
     pub currents: Vec<CurrentState>,
+    /// Authoritative causal membership and its physical leakage coefficient.
+    /// This is independent of `opening_view`; the two initially select the same
+    /// members in version 2 only as a migration-friendly authored starting
+    /// condition, never because observation owns the compartment.
+    pub physical_compartment: PhysicalCompartment,
+    /// Candidate membership sets available to analysis. These are not causal
+    /// compartment state and changing among them must not alter the Field.
     pub authored_boundaries: Vec<Vec<u32>>,
     pub objectives: Vec<Objective>,
     pub anchor_moments: Vec<String>,
@@ -862,7 +887,6 @@ fn read_form(value: &Json) -> Result<FormContent, Fault> {
             "capacity",
             "forecast_depth",
             "id",
-            "leak_frac",
             "reserve",
             "route_capacity",
             "route_reach",
@@ -881,7 +905,6 @@ fn read_form(value: &Json) -> Result<FormContent, Fault> {
         route_reach: read::int(value, "route_reach", 0, STORED_BOUND - 1).map_err(invalid)?,
         forecast_depth: read::int(value, "forecast_depth", 0, i64::from(field::FORECAST_DEPTH_CAP))
             .map_err(invalid)? as u16,
-        leak_frac: read::int(value, "leak_frac", 0, field::LEAK_FRAC_CAP).map_err(invalid)?,
         upkeep_rate: read::int(value, "upkeep_rate", 0, STORED_BOUND - 1).map_err(invalid)?,
         capacity: read::int(value, "capacity", 0, field::NODE_CHARGE_CAP).map_err(invalid)?,
         reserve: read::int(value, "reserve", 0, field::NODE_CHARGE_CAP).map_err(invalid)?,
@@ -974,7 +997,7 @@ fn read_chapter(value: &Json) -> Result<Chapter, Fault> {
     // on `ending_key` alone, which is how every chapter authored before the
     // reading behaves. Everything else is held to the shape's own keys, so a key
     // the shape never declared is still a load refusal naming the field.
-    const DECLARED: [&str; 14] = [
+    const DECLARED: [&str; 15] = [
         "anchor_moments",
         "authored_boundaries",
         "currents",
@@ -985,6 +1008,7 @@ fn read_chapter(value: &Json) -> Result<Chapter, Fault> {
         "layers",
         "objectives",
         "opening_view",
+        "physical_compartment",
         "ports",
         "pressure_schedule",
         "routes",
@@ -1075,7 +1099,7 @@ fn read_chapter(value: &Json) -> Result<Chapter, Fault> {
             pos: Vec2::read(entry, "pos").map_err(invalid)?,
         });
     }
-    // Exactly one placement carries control, at every step, in version 1: the
+    // Exactly one placement carries control, at every step, in version 2: the
     // frozen `InputFrame` carries one steer vector, one Pulse and one depth
     // intent, so simultaneous control has no input to consume. Several
     // *controllable* Forms with control moving among them is what several
@@ -1191,6 +1215,11 @@ fn read_chapter(value: &Json) -> Result<Chapter, Fault> {
         forms: &forms,
     };
 
+    let physical_compartment = read_physical_compartment(value)?;
+    if !physical_compartment.members.iter().all(|id| placed.node(*id)) {
+        return Err(unplaced("physical_compartment"));
+    }
+
     // Every schedule entry aims at something the chapter placed. The gap this
     // closes is a pressure aimed at a Node, Route, or layer that never stands:
     // a target that names nothing is not refused at the boundary, it simply
@@ -1255,6 +1284,7 @@ fn read_chapter(value: &Json) -> Result<Chapter, Fault> {
         ports,
         routes,
         currents,
+        physical_compartment,
         authored_boundaries,
         objectives,
         anchor_moments,
@@ -1449,6 +1479,30 @@ fn read_view(value: &Json) -> Result<ViewDeclaration, Fault> {
     })
 }
 
+/// Reads the chapter-authored causal compartment independently of its opening
+/// observation View. Keeping this reader separate prevents a future content
+/// migration from silently deriving one object from the other again.
+fn read_physical_compartment(value: &Json) -> Result<PhysicalCompartment, Fault> {
+    let found = read::map(value, "physical_compartment").map_err(invalid)?;
+    read::exact_keys(
+        found,
+        "physical_compartment",
+        &["leak_per_exposed_contact_per_step", "members"],
+    )
+    .map_err(invalid)?;
+    Ok(PhysicalCompartment {
+        members: read::ids(found, "members", NODES_PER_RUN, i64::from(u32::MAX))
+            .map_err(invalid)?,
+        leak_per_exposed_contact_per_step: read::int(
+            found,
+            "leak_per_exposed_contact_per_step",
+            0,
+            field::LEAK_FRAC_CAP,
+        )
+        .map_err(invalid)?,
+    })
+}
+
 /// What a chapter has placed, for the cross-checks a condition is held to.
 ///
 /// Every identifier a condition names is checked against these at read time, so
@@ -1515,7 +1569,7 @@ fn unplaced(field: &str) -> Fault {
     Fault::because(Code::ContentInvalid, field)
 }
 
-/// The closed condition set of `content_version` 1.
+/// The closed condition set of `content_version` 2.
 fn read_condition(value: &Json, placed: &Placements<'_>) -> Result<Condition, Fault> {
     let kind = read::text(value, "kind").map_err(invalid)?;
     let steps = |value: &Json| read::int(value, "steps", 1, FRAC_ONE).map_err(invalid);
@@ -1584,6 +1638,10 @@ fn read_condition(value: &Json, placed: &Placements<'_>) -> Result<Condition, Fa
                 return Err(unplaced("nodes"));
             }
             Ok(Condition::PatternHeld { routes, nodes, steps: steps(value)? })
+        }
+        "compartment_reshaped" => {
+            read::exact_keys(value, "condition", &["kind", "steps"]).map_err(invalid)?;
+            Ok(Condition::CompartmentReshaped { steps: steps(value)? })
         }
         _ => Err(Fault::because(Code::ContentInvalid, "kind")),
     }
@@ -1853,13 +1911,10 @@ pub fn establish(
         routes,
         forms,
         currents,
+        physical_compartment: chapter.physical_compartment.clone(),
         boundaries: BoundaryState {
             drawn: Vec::new(),
             authored: chapter.authored_boundaries.clone(),
-            // The run's boundary-leakage parameter is copied from the selected
-            // Form at run start, which is what makes the boundary a Form's own
-            // promise rather than a layer's.
-            leak_frac: form.leak_frac,
         },
         // A run opens with no Trail standing: the first entry is left by the
         // first step whose count the authored period names.
@@ -1959,7 +2014,9 @@ pub fn advance_objectives(
         outcome.changed.push((progress.objective.clone(), previous));
     }
 
-    let read = objective.condition.read_step(reading);
+    let read = objective
+        .condition
+        .read_step(reading, &chapter.physical_compartment);
     let held = &mut progress.objective;
     if read.met {
         held.progress = (held.progress + objective.condition.share()).min(FRAC_ONE);
@@ -2158,4 +2215,3 @@ pub fn effective_steps(condition: &Condition) -> i64 {
     let share = condition.share();
     (FRAC_ONE + share - 1) / share
 }
-

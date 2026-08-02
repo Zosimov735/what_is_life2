@@ -28,6 +28,7 @@ import {
   type MotionProfile,
   type PlaybackReading,
   type Scene,
+  type StillSurfaceTool,
   type Viewport,
 } from './scene';
 import type { Engine, RendererKind } from './engine';
@@ -39,6 +40,7 @@ export type {
   MotionProfile,
   PlaybackReading,
   Scene,
+  StillSurfaceTool,
   Viewport,
 } from './scene';
 export { HANDLE_KIND } from './scene';
@@ -54,7 +56,7 @@ export interface Renderer {
   set_motion_profile(profile: MotionProfile): void;
   /**
    * Takes the candidates of the standing slate, each as its inside and whether
-   * the queue proposes it.
+   * the active passive View matches it.
    *
    * A slate record crosses on demand rather than per frame — the frame carries
    * only what the renderer needs every frame — so the shell holds it and hands
@@ -63,6 +65,8 @@ export interface Renderer {
    * and where a Node stands is the frame's own.
    */
   set_candidates(candidates: readonly CandidateOutline[]): void;
+  /** Selects which nonauthoritative Still Mode handles are exposed. */
+  set_still_tool(tool: StillSurfaceTool): void;
   /**
    * Takes one perturbation result's compact playback series, or null to take
    * it away.
@@ -135,6 +139,7 @@ export function create_renderer(
   let engine: Engine | null = null;
   let disposed = false;
   let profile: MotionProfile = FULL_MOTION;
+  let stillTool: StillSurfaceTool = 'compartment';
   /** The standing slate's candidates, as the shell last handed them over. */
   let candidates: readonly CandidateOutline[] = [];
   /** The playback reading the shell last handed over, and none between. */
@@ -218,6 +223,7 @@ export function create_renderer(
       candidates,
       playback,
       playbackClock,
+      stillTool,
     );
     engine.draw(scene);
   }
@@ -253,6 +259,10 @@ export function create_renderer(
       // A slate arrives between frames — a still run runs no step, so no
       // snapshot need follow it — and the outlines have to reach the surface
       // all the same.
+      redraw();
+    },
+    set_still_tool(next) {
+      stillTool = next;
       redraw();
     },
     set_playback(next) {

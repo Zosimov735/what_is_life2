@@ -16,8 +16,8 @@
 //! them.
 
 use field_game_core::field::{
-    BoundaryState, DrawnBoundary, FieldLayer, FormState, NodeKind, PortState, RouteState,
-    StepRecords, NODES_PER_RUN, ROUTES_PER_RUN,
+    BoundaryState, DrawnBoundary, FieldLayer, FormState, NodeKind, PhysicalCompartment,
+    PortState, RouteState, StepRecords, NODES_PER_RUN, ROUTES_PER_RUN,
 };
 use field_game_core::fx::{Vec2, ONE_UNIT};
 use field_game_core::json::{parse, write_text, Json};
@@ -103,7 +103,11 @@ fn spread_field() -> FieldState {
         link: None,
         trail: None,
     }];
-    field.boundaries = BoundaryState { drawn: Vec::new(), authored: Vec::new(), leak_frac: 0 };
+    field.physical_compartment = PhysicalCompartment {
+        members: vec![2, 3],
+        leak_per_exposed_contact_per_step: 0,
+    };
+    field.boundaries = BoundaryState { drawn: Vec::new(), authored: Vec::new() };
     field
 }
 
@@ -402,7 +406,7 @@ fn dragged_and_committed() -> Session {
     let mut session = played_into_still(state);
     body(&session.command(
         "queue_plan",
-        "{\"plan\":{\"members\":[5,6],\"op\":\"reshape_boundary\"}}",
+        "{\"plan\":{\"members\":[5,6],\"op\":\"reshape_compartment\"}}",
     ));
     body(&session.command("undo_plan", "{}"));
     body(&session.command("queue_plan", "{\"plan\":{\"op\":\"cut\",\"route\":4}}"));
@@ -683,6 +687,19 @@ fn the_standing_inside_passes_intake_and_falls_back_when_it_vanishes() {
     assert_eq!(provenance(&gone, 1), vec![("standing".to_string(), None)]);
     assert_eq!(gone.candidates[0].view.resolution, 1, "and keeps the other three components");
     assert_eq!(gone.candidates[0].view.window, 45);
+
+    // A deliberately cleared passive View uses that same whole-Field fallback
+    // as an evaluation seed, but assembly does not silently reselect it. The
+    // active View remains cleared until the player chooses a candidate.
+    let cleared_state = state_of(spread_field(), view_of(&[]), recorded_steps());
+    let cleared = slate::assemble(&cleared_state);
+    assert_eq!(insides(&cleared)[0], vec![1, 2, 3, 4, 5, 6, 7, 8]);
+    assert_eq!(cleared.standing_removed, 0);
+    assert!(cleared.standing_fallback);
+    assert!(
+        cleared_state.view.inside.is_empty(),
+        "the fallback is local to the slate"
+    );
 }
 
 #[test]
@@ -966,7 +983,7 @@ fn stilled() -> Session {
 }
 
 #[test]
-fn entering_still_raises_the_slate_and_adopting_a_candidate_commits_it() {
+fn entering_still_raises_the_slate_and_focus_adopts_a_candidate_passively() {
     let mut session = stilled();
 
     // The entry ramp reaching scale 0 assembles the Run's first slate and
@@ -985,29 +1002,26 @@ fn entering_still_raises_the_slate_and_adopting_a_candidate_commits_it() {
     let adopted = standing.candidates[1].view.clone();
     assert_ne!(adopted.inside, standing.candidates[0].view.inside);
 
-    // Adoption is a queued change like any other, and the commit installs the
-    // candidate's whole View.
-    let queued = session.command(
-        "queue_plan",
-        "{\"plan\":{\"op\":\"set_focus\",\"position\":2,\"slate_ordinal\":0}}",
-    );
-    assert!(queued.contains("\"ok\":true"), "{queued}");
-    let committed = body(&session.command("commit_plan", "{}"));
-    assert_eq!(committed.get("applied").and_then(Json::as_int), Some(1));
+    // Focus is immediate observation metadata: no plan, cost, window boundary,
+    // reassembly, or mode transition participates.
+    let before_field = session.run().expect("a run").state().now.written();
+    let before_span = session.run().expect("a run").state().retained_span();
+    let before_impulse = session.run().expect("a run").state().progress.impulse;
+    let focused = body(&session.command(
+        "set_focus",
+        "{\"position\":2,\"slate_ordinal\":0}",
+    ));
+    assert_eq!(focused.get("view"), Some(&parse(&adopted.written()).expect("canonical View")));
 
     let run = session.run().expect("a run is loaded");
     assert_eq!(run.state().view.inside, adopted.inside, "the standing View is the candidate's");
-    assert_eq!(run.state().retained_span(), 0, "the commit ended the active window");
-    assert_eq!(run.state().effective_window(45), 0, "so the clamp reads nothing");
-
-    // The commit reassembled the slate under that clamp: a new ordinal, the
-    // adopted inside in seat 1, and an empty window.
-    let reassembled = run.standing_slate().expect("a slate stands");
-    assert_eq!(reassembled.ordinal, 1);
-    assert_eq!(reassembled.step, run.state().now.step);
-    assert_eq!(reassembled.window_effective, 0);
-    assert_eq!(reassembled.candidates[0].view.inside, adopted.inside);
-    assert_eq!(committed.get("slate_ordinal").and_then(Json::as_int), Some(1));
+    assert_eq!(run.state().now.written(), before_field, "the Field did not move");
+    assert_eq!(run.state().retained_span(), before_span, "the active window did not end");
+    assert_eq!(run.state().progress.impulse, before_impulse, "focus is free");
+    assert!(run.queue().is_empty(), "focus never enters the causal queue");
+    assert_eq!(run.standing_slate().expect("the same slate stands").ordinal, 0);
+    assert_eq!(session.lifecycle(), "still");
+    assert!(reviews(&mut session).is_empty(), "focus does not reassemble a slate");
 }
 
 #[test]
@@ -1042,10 +1056,9 @@ fn an_empty_commit_reassembles_nothing_and_names_the_slate_that_stands() {
 fn a_run_that_assembled_and_adopted_replays_byte_for_byte() {
     let mut session = stilled();
     session.command(
-        "queue_plan",
-        "{\"plan\":{\"op\":\"set_focus\",\"position\":2,\"slate_ordinal\":0}}",
+        "set_focus",
+        "{\"position\":2,\"slate_ordinal\":0}",
     );
-    session.command("commit_plan", "{}");
 
     let first = body(&session.command("export_run", "{}"));
     let file = first.get("text").and_then(Json::as_text).expect("the file").to_string();
@@ -1104,6 +1117,10 @@ fn at_every_cap() -> RunState {
         })
         .collect();
     field.boundaries.authored = vec![(2..=64).collect()];
+    field.physical_compartment = PhysicalCompartment {
+        members: (2..=128).collect(),
+        leak_per_exposed_contact_per_step: 0,
+    };
     field.step = 60;
 
     let steps: Vec<TraceStep> = (1..=60)

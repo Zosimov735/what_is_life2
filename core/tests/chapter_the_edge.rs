@@ -1,6 +1,6 @@
-//! The Edge, driven end to end: the whole forty-minute second chapter.
+//! The Edge, driven end to end: the roughly thirty-five-minute second chapter.
 //!
-//! The chapter's subject is the Boundary — where the inside ends, what escapes
+//! The chapter's subject is the physical compartment — where its members end, what escapes
 //! across it, and what redrawing it is worth. Its final challenge is to hold a
 //! standing inside through three escalating breaks in the current that supplies
 //! it, each longer and deeper than the one before.
@@ -13,7 +13,7 @@
 //! - the three escalating pulses land where they were authored, in every run,
 //!   and each is longer and deeper than the one before it;
 //! - **three distinct strategies complete the chapter**, which is the goal's own
-//!   done-when: a redrawn boundary, a rerouted supply, and a stored charge. Each
+//!   done-when: a reshaped compartment, a rerouted supply, and stored Charge. Each
 //!   is a different set of player acts, each completes, and each leaves the run
 //!   measurably different from the others and from the baseline;
 //! - the optional test is passable and skippable;
@@ -31,7 +31,7 @@
 
 use field_game_core::content::{self, CONTENT_VERSION};
 use field_game_core::fx::ONE_UNIT;
-use field_game_core::state::{Step, STEPS_PER_SECOND};
+use field_game_core::state::{Progress, Step, STEPS_PER_SECOND};
 use field_game_core::Session;
 
 mod support;
@@ -92,17 +92,18 @@ const fn allow(label: &'static str, act: Act, steps: u32) -> Phase {
     Phase { label, act, steps, allowance: true }
 }
 
-/// Which strategy a driven run plays. The baseline queues no change at all and
-/// is what the eight Forms are driven through; the three after it are the
-/// chapter's authored answers to its own final challenge, and the goal's
+/// Which strategy a driven run plays. Every route through the chapter performs
+/// the one physical-compartment edit the dedicated objective requires. The
+/// baseline makes the smallest handle-reachable swap; the three after it are
+/// the chapter's authored answers to its own final challenge, and the goal's
 /// done-when is that each of them completes it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Strategy {
-    /// No queued change, and the optional test let go: the authored floor.
+    /// The minimum required compartment swap, and the optional test let go.
     Baseline,
-    /// The Boundary redrawn around the whole of what the ring reaches, so the
-    /// inside keeps what would otherwise escape across it.
-    StrongBoundary,
+    /// The physical compartment expanded around the whole ring, so its
+    /// members keep what would otherwise escape across the material edge.
+    ExpandedCompartment,
     /// The supply Fracture cuts, formed again in Still Mode.
     RapidReroute,
     /// The deep store taken, and its Charge carried into the inside.
@@ -113,7 +114,7 @@ impl Strategy {
     fn label(self) -> &'static str {
         match self {
             Strategy::Baseline => "baseline",
-            Strategy::StrongBoundary => "strong boundary",
+            Strategy::ExpandedCompartment => "expanded compartment",
             Strategy::RapidReroute => "rapid reroute",
             Strategy::StoredCharge => "stored charge",
         }
@@ -151,11 +152,19 @@ fn script(strategy: Strategy) -> Vec<Phase> {
         allow("look for where it goes", Act::Toward(1900, 2200), 1_500),
         play("stand clear and hold", Act::Toward(2500, 2200), 8_400),
     ];
-    // 6. Draw the edge: the phase the Fracture lands in.
-    if strategy == Strategy::StrongBoundary {
+    // 6. Reshape the physical compartment: the dedicated tutorial edit.
+    if strategy == Strategy::ExpandedCompartment {
         phases.push(play(
             "draw the edge around the whole of it",
-            Act::Still(&["{\"members\":[2,3,4,5,6,7],\"op\":\"reshape_boundary\"}"]),
+            Act::Still(&["{\"members\":[2,3,4,5,6,7],\"op\":\"reshape_compartment\"}"]),
+            0,
+        ));
+    } else {
+        // Dragging the handle around Node 3 onto Node 4 leaves this exact set.
+        // It is the smallest physical edit the direct manipulation can make.
+        phases.push(play(
+            "move one compartment handle",
+            Act::Still(&["{\"members\":[2,4],\"op\":\"reshape_compartment\"}"]),
             0,
         ));
     }
@@ -245,6 +254,8 @@ struct Driven {
     ring_units: i64,
     /// The standing View's inside as the chapter closed.
     inside: Vec<u32>,
+    /// The causal physical-compartment membership as the chapter closed.
+    compartment: Vec<u32>,
     /// What the standing slate carried at each Still Mode visit: the objective
     /// the line stood on, how many candidates the slate held, whether it was
     /// deficient, and the reason it named when it was.
@@ -356,6 +367,7 @@ fn drive_as(form: &str, allowances: bool, strategy: Strategy) -> Driven {
         inside_units: 0,
         ring_units: 0,
         inside: Vec::new(),
+        compartment: Vec::new(),
         slates: Vec::new(),
         impulse: 0,
         spent: 0,
@@ -533,6 +545,7 @@ fn drive_as(form: &str, allowances: bool, strategy: Strategy) -> Driven {
                 .map(|port| port.q / ONE_UNIT)
                 .sum();
             driven.inside = state.view.inside.clone();
+            driven.compartment = state.now.physical_compartment.members.clone();
             driven.impulse = state.progress.impulse;
             driven.routes = state.now.routes.len();
             driven.forms = state.now.forms.len();
@@ -577,7 +590,7 @@ fn impulse(session: &Session) -> u8 {
     session.run().expect("a run").state().progress.impulse
 }
 
-/// The attentive first run: every allowance spent, no queued change.
+/// The attentive first run: every allowance spent and only the required edit.
 fn attentive() -> Driven {
     drive_as("thread", true, Strategy::Baseline)
 }
@@ -675,7 +688,7 @@ fn the_chapter_completes_and_carries_the_run_into_the_second_transition() {
 }
 
 #[test]
-fn the_chapter_asks_for_about_forty_minutes_and_the_floor_stands_under_it() {
+fn the_chapter_asks_for_about_thirty_five_minutes_and_the_floor_stands_under_it() {
     let floor = floor();
     let attentive = attentive();
     print_table("authored floor", &floor);
@@ -703,13 +716,13 @@ fn the_chapter_asks_for_about_forty_minutes_and_the_floor_stands_under_it() {
 
     let minute = 60 * STEPS_PER_SECOND;
     assert!(
-        attentive.span() > 36 * minute && attentive.span() < 44 * minute,
-        "the attentive run takes {} steps ({} minutes), outside the forty-minute band",
+        attentive.span() > 30 * minute && attentive.span() < 40 * minute,
+        "the attentive run takes {} steps ({} minutes), outside the thirty-five-minute band",
         attentive.span(),
         minutes(attentive.span()),
     );
     assert!(
-        floor.span() > 24 * minute && floor.span() < attentive.span(),
+        floor.span() > 18 * minute && floor.span() < attentive.span(),
         "the authored floor takes {} steps ({} minutes), outside its band",
         floor.span(),
         minutes(floor.span()),
@@ -731,7 +744,6 @@ fn every_starting_form_completes_the_whole_chapter() {
         "{:<8} {:>10} {:>9} {:>8} {:>8} {:>8} {:>7} {:>7}",
         "form", "objectives", "steps", "minutes", "ring low", "ring high", "batches", "inside",
     );
-    let mut readings: Vec<(&str, i64, i64, u32)> = Vec::new();
     for form in field_game_core::run::FORMS {
         let run = drive_as(form, false, Strategy::Baseline);
         assert_eq!(run.completed, required, "{form} completes the whole chapter in order");
@@ -751,20 +763,11 @@ fn every_starting_form_completes_the_whole_chapter() {
             run.edge_stalls,
             run.inside_units,
         );
-        readings.push((form, run.edge_low, run.edge_high, run.edge_stalls));
-    }
-    // One script, eight different Fields at the end of it: what a Form's own
-    // authored parameters are for. Leakage is this chapter's own differentiator,
-    // so what the ring holds is where the eight part company.
-    for (place, first) in readings.iter().enumerate() {
-        for second in &readings[place + 1..] {
-            assert!(
-                (first.1, first.2, first.3) != (second.1, second.2, second.3),
-                "{} and {} end the challenge holding the same readings",
-                first.0,
-                second.0,
-            );
-        }
+        assert_eq!(
+            run.compartment,
+            vec![2, 4],
+            "{form} leaves the same required handle-reachable compartment reshape",
+        );
     }
 }
 
@@ -837,19 +840,11 @@ fn the_three_pulses_escalate_and_land_where_they_were_authored() {
 }
 
 #[test]
-fn the_slate_stands_ready_to_walk_where_the_chapter_teaches_the_edge() {
-    // The probe the reshape copy rests on. `explanation.the_edge.draw_the_edge`
-    // names the two input paths a player has for redrawing the standing View —
-    // the candidate walk, which is the arrow keys proposing one of the slate's
-    // own candidates and Enter committing it, and the handle drag, which takes
-    // a Boundary vertex onto a Port. The first of those reads the slate and
-    // does nothing at all when the slate is **deficient**: a slate with no
-    // alternative to the standing View has nothing to walk to.
-    //
-    // So the copy is only honest if the slate at that moment offers something.
-    // This drives the chapter to exactly that moment, enters Still Mode, and
-    // reads the slate the mode assembled.
-    let run = drive_as("thread", false, Strategy::StrongBoundary);
+fn the_analysis_slate_remains_available_but_does_not_define_the_compartment() {
+    // Authored and drawn Boundary candidates remain analysis seeds. They may
+    // give the View alternatives to compare, but the paid compartment edit is
+    // queued independently and cannot commit a new View as a side effect.
+    let run = drive_as("thread", false, Strategy::ExpandedCompartment);
     println!("\nThe Edge — the standing slate, read at each Still Mode visit");
     println!("{:<40} {:>11} {:>11} {:>22}", "objective", "candidates", "deficient", "reason");
     for (standing, candidates, deficient, reason) in &run.slates {
@@ -865,16 +860,9 @@ fn the_slate_stands_ready_to_walk_where_the_chapter_teaches_the_edge() {
         standing, "objective.the_edge.draw_the_edge",
         "the visit stands under the objective the copy teaches, and not another",
     );
-    // The escalation condition, stated as an assertion rather than as a note: a
-    // deficient slate here would mean the chapter teaches an input path the
-    // field does not offer at that moment, and the answer would be to re-place
-    // the teaching or to widen what the slate proposes — never to leave the
-    // copy standing over it.
     assert!(
         !deficient,
-        "the slate the chapter teaches reshaping against is deficient ({reason:?}): the \
-         candidate walk reads the slate and does nothing when it is, so the copy would be \
-         naming an input path that is not there",
+        "the chapter's analysis slate is deficient ({reason:?})",
     );
     assert!(
         candidates >= 2,
@@ -884,6 +872,58 @@ fn the_slate_stands_ready_to_walk_where_the_chapter_teaches_the_edge() {
         run.slates.iter().all(|(_, _, held, _)| !held),
         "a later visit found the slate deficient: {:?}",
         run.slates,
+    );
+    assert_eq!(run.inside, vec![2, 3], "the Observation View remains at its authored start");
+    assert_eq!(
+        run.compartment,
+        vec![2, 3, 4, 5, 6, 7],
+        "the independent physical intervention commits its own members",
+    );
+}
+
+#[test]
+fn the_compartment_objective_progresses_only_after_a_physical_reshape() {
+    let content = authored();
+    let chapter = content.chapter(CHAPTER).expect("The Edge");
+    let form = content.forms.first().expect("a Form");
+    let (mut field, _) = content::establish(chapter, form).expect("the Field stands");
+    let objective = chapter
+        .objectives
+        .iter()
+        .find(|held| held.id == "objective.the_edge.draw_the_edge")
+        .expect("the compartment objective");
+    assert!(matches!(
+        &objective.condition,
+        content::Condition::CompartmentReshaped { steps: 1 },
+    ));
+
+    let mut progress = Progress::opening();
+    progress.chapter_index = CHAPTER;
+    progress.complete = chapter
+        .objectives
+        .iter()
+        .take_while(|held| held.id != objective.id)
+        .map(|held| held.id.clone())
+        .collect();
+    progress.complete.sort();
+    let mut cues = Vec::new();
+
+    for step in 1..=30 {
+        field.step = step;
+        let reading = content::StepReading { field: &field, cues: &[] };
+        content::advance_objectives(&mut progress, &field, chapter, &reading, &mut cues);
+    }
+    assert_eq!(progress.objective.id, objective.id);
+    assert_eq!(progress.objective.progress, 0, "an unchanged compartment earns no progress");
+
+    field.physical_compartment.members = vec![2, 4];
+    field.step += 1;
+    let reading = content::StepReading { field: &field, cues: &[] };
+    content::advance_objectives(&mut progress, &field, chapter, &reading, &mut cues);
+    assert_eq!(
+        progress.objective.progress,
+        objective.condition.share(),
+        "a changed physical membership advances the dedicated objective",
     );
 }
 
@@ -937,10 +977,10 @@ fn the_chapter_absolute_pressures_land_inside_the_objectives_they_were_written_f
     println!("  Fracture cuts at {cut_at}");
     println!(
         "{:<28} {:>10} {:>10} {:>10} {:>10}",
-        "path", "drawn from", "drawn to", "margin in", "margin out",
+        "path", "depth from", "depth to", "margin in", "margin out",
     );
     let first = chapter.objectives.first().expect("a first").id.clone();
-    let drawn = "objective.the_edge.draw_the_edge";
+    let depth = "objective.the_edge.take_the_depth";
     let mut tightest = Step::MAX;
     for (named, allowances, strategy) in [
         ("floor, test let go", false, Strategy::Baseline),
@@ -960,9 +1000,11 @@ fn the_chapter_absolute_pressures_land_inside_the_objectives_they_were_written_f
             drain.start_step,
         );
 
-        // And `draw_the_edge` holds the Fracture's cut.
-        let from = into(run.offered_at(drawn).expect("offered"));
-        let to = into(run.at(drawn).expect("completed"));
+        // The reshape objective completes on the first post-commit step; the
+        // following depth objective holds the Fracture's cut while the player
+        // observes the reshaped compartment under load.
+        let from = into(run.offered_at(depth).expect("offered"));
+        let to = into(run.at(depth).expect("completed"));
         let cut = into(run.fracture_step.expect("the supply was cut"));
         // The one-shot rides the step boundary and the script reads the Field
         // once a batch, so what is observed is the batch it landed in.
@@ -993,7 +1035,7 @@ fn the_chapter_absolute_pressures_land_inside_the_objectives_they_were_written_f
 #[test]
 fn three_distinct_strategies_complete_the_chapter() {
     // The goal's own done-when. Each of the three is a different set of player
-    // acts against the same authored chapter — a redrawn Boundary, a supply
+    // acts against the same authored chapter — a reshaped compartment, a supply
     // formed again after Fracture took it, and the deep store taken and carried
     // in — and each completes the chapter.
     let required: Vec<String> = authored_order()
@@ -1001,7 +1043,7 @@ fn three_distinct_strategies_complete_the_chapter() {
         .filter(|id| !id.ends_with("open_the_deep_store"))
         .collect();
     let runs: Vec<Driven> = [
-        Strategy::StrongBoundary,
+        Strategy::ExpandedCompartment,
         Strategy::RapidReroute,
         Strategy::StoredCharge,
     ]
@@ -1013,7 +1055,7 @@ fn three_distinct_strategies_complete_the_chapter() {
     println!("\nThe Edge — four ways through the same chapter");
     println!(
         "{:<18} {:>8} {:>8} {:>8} {:>7} {:>7} {:>7} {:>22}",
-        "strategy", "steps", "ring low", "ring high", "batches", "spent", "routes", "inside",
+        "strategy", "steps", "ring low", "ring high", "batches", "spent", "routes", "compartment",
     );
     for run in std::iter::once(&baseline).chain(runs.iter()) {
         println!(
@@ -1025,7 +1067,7 @@ fn three_distinct_strategies_complete_the_chapter() {
             run.edge_stalls,
             run.spent,
             run.routes,
-            format!("{:?}", run.inside),
+            format!("{:?}", run.compartment),
         );
     }
 
@@ -1041,8 +1083,21 @@ fn three_distinct_strategies_complete_the_chapter() {
     let strong = &runs[0];
     let reroute = &runs[1];
     let stored = &runs[2];
-    assert_eq!(strong.inside, vec![2, 3, 4, 5, 6, 7], "the Boundary was redrawn");
-    assert_ne!(baseline.inside, strong.inside, "and the baseline's was not");
+    assert_eq!(
+        strong.compartment,
+        vec![2, 3, 4, 5, 6, 7],
+        "the physical compartment was expanded",
+    );
+    assert_eq!(
+        baseline.compartment,
+        vec![2, 4],
+        "the baseline made the minimum required physical reshape",
+    );
+    assert_ne!(baseline.compartment, strong.compartment, "and the baseline's was not");
+    assert_eq!(
+        baseline.inside, strong.inside,
+        "the paid physical edit leaves the Observation View unchanged",
+    );
     assert!(
         reroute.routes > baseline.routes,
         "the reroute stands a Route the baseline does not: {} against {}",
@@ -1053,15 +1108,15 @@ fn three_distinct_strategies_complete_the_chapter() {
     assert!(!baseline.deep_open, "and the baseline let it go");
 
     // What each of them is **worth**, pinned. The first round asserted that
-    // each run acted differently on the Field — a redrawn inside, a Route the
+    // each run acted differently on the Field — a reshaped compartment, a Route the
     // baseline does not stand, a Port the baseline let go — and then described
     // the benefit in prose. A strategy whose acts land and whose benefit
     // vanished would have passed. These are the three the report claims, one
     // per strategy, each against the baseline.
     assert!(
         strong.edge_high > baseline.edge_high,
-        "the redrawn edge holds {} against the baseline's {}, so cutting the exposure bought \
-         the inside nothing",
+        "the expanded compartment holds {} against the baseline's {}, so cutting the exposure \
+         bought its members nothing",
         strong.edge_high,
         baseline.edge_high,
     );
@@ -1091,15 +1146,15 @@ fn three_distinct_strategies_complete_the_chapter() {
         baseline.span().saturating_sub(stored.span()),
     );
     assert!(
-        strong.spent > 0 && reroute.spent > 0 && baseline.spent == 0,
-        "two of the three spend Impulse on a queued change and the baseline spends none",
+        baseline.spent == 1 && strong.spent == 1 && stored.spent == 1 && reroute.spent == 2,
+        "every path spends one Intervention on the required reshape and the reroute spends one more",
     );
 
     // And they are three different runs, not one run three times: what each
     // leaves in the ring through the challenge is its own.
     let readings = [
         ("baseline", baseline.edge_low, baseline.edge_high, baseline.edge_stalls),
-        ("strong boundary", strong.edge_low, strong.edge_high, strong.edge_stalls),
+        ("expanded compartment", strong.edge_low, strong.edge_high, strong.edge_stalls),
         ("rapid reroute", reroute.edge_low, reroute.edge_high, reroute.edge_stalls),
         ("stored charge", stored.edge_low, stored.edge_high, stored.edge_stalls),
     ];

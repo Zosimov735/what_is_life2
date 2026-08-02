@@ -10,7 +10,12 @@ import '@vitest/web-worker';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, beforeAll, expect, inject, test, vi } from 'vitest';
-import { PROTOCOL_VERSION, type CommandEnvelope, type ResponseEnvelope } from '../src/protocol';
+import {
+  PROTOCOL_VERSION,
+  SAVE_VERSION,
+  type CommandEnvelope,
+  type ResponseEnvelope,
+} from '../src/protocol';
 
 const WORKER_ENTRY = new URL('../src/entry.ts', import.meta.url);
 const WORKSPACE = inject('workspace');
@@ -65,12 +70,19 @@ test('the worker loads the module and opens a run on the run key it is given', a
   expect(response.ok).toBe(true);
   if (!response.ok) return;
   expect(response.body.protocol).toBe(PROTOCOL_VERSION);
-  expect(response.body.save_version).toBe(1);
+  expect(response.body.save_version).toBe(SAVE_VERSION);
   expect(response.body.run_id).toBe('00112233445566aa');
   expect(response.body.step).toBe(0);
   expect(response.body.branch_nonce).toBe(0);
   expect(response.body.content_changed).toBe(false);
   expect(response.body.content_hash).toMatch(/^[0-9a-f]{64}$/);
+  expect(response.body.view).toMatchObject({
+    inside: expect.any(Array),
+    resolution: expect.any(Number),
+    window: expect.any(Number),
+    surround: expect.any(String),
+  });
+  expect(response.body).not.toHaveProperty('migrated_from');
 });
 
 test('a run key the core does not read is refused', async () => {
@@ -105,7 +117,12 @@ test('a command outside its lifecycle states is answered by the core', async () 
 
 test('a message in another protocol version is refused, with its id echoed', async () => {
   const worker = openWorker();
-  const response = await answerOf(worker, { v: 2, id: 7, cmd: 'init_run', body: {} });
+  const response = await answerOf(worker, {
+    v: PROTOCOL_VERSION + 1,
+    id: 7,
+    cmd: 'init_run',
+    body: {},
+  });
 
   expect(response.v).toBe(PROTOCOL_VERSION);
   expect(response.re).toBe(7);

@@ -1,6 +1,6 @@
 //! The bounded queue of proposed changes, and the transaction around it.
 //!
-//! `docs/field-framework/ARCHITECTURE.md` locks the tagged union of five
+//! The V2 paid-plan union has four
 //! variants, the payload of each, the preconditions each is validated against,
 //! the cost of one entry, the queue depth of 6 entries, the conflict rules, and
 //! the caps rule: a locked cap that would be crossed is the `capacity` error,
@@ -8,8 +8,8 @@
 //! rather than pushing an earlier entry out.
 //!
 //! Two readings of the state matter here and are kept apart by name. The **base
-//! state** is the Field and the standing View as they stand; the
-//! **projection** is the base state with every earlier queued entry applied in
+//! state** is the causal Field as it stands; the **projection** is the base
+//! state with every earlier queued entry applied in
 //! order, which is what an entry is validated against at queue time. A commit
 //! rebuilds the projection from the base state and revalidates every entry into
 //! it, so the transaction is all-or-nothing by construction: nothing reaches
@@ -26,7 +26,7 @@ use crate::field::{self, RouteState, ROUTES_PER_RUN};
 use crate::fx::ONE_UNIT;
 use crate::json::{Json, Obj};
 use crate::read;
-use crate::state::{FieldState, Fx, ViewDeclaration};
+use crate::state::{FieldState, Fx};
 
 /// How many entries the queue holds at once.
 pub const PLAN_QUEUE_DEPTH: usize = 6;
@@ -70,8 +70,7 @@ pub enum PlanCommand {
     Connect { from: u32, to: u32 },
     Redirect { route: u32, end: RouteEnd, to: u32 },
     Cut { route: u32 },
-    ReshapeBoundary { members: Vec<u32> },
-    SetFocus { slate_ordinal: u32, position: u8 },
+    ReshapeCompartment { members: Vec<u32> },
 }
 
 impl PlanCommand {
@@ -109,7 +108,7 @@ impl PlanCommand {
                 read::exact_keys(value, "plan", &["op", "route"])?;
                 Ok(PlanCommand::Cut { route: node_id(value, "route")? })
             }
-            "reshape_boundary" => {
+            "reshape_compartment" => {
                 read::exact_keys(value, "plan", &["members", "op"])?;
                 // Ascending with no repeats is a precondition of the variant
                 // rather than a shape rule, but `read::ids` holds both here
@@ -119,14 +118,7 @@ impl PlanCommand {
                 if members.is_empty() {
                     return Err(Fault::field("members"));
                 }
-                Ok(PlanCommand::ReshapeBoundary { members })
-            }
-            "set_focus" => {
-                read::exact_keys(value, "plan", &["op", "position", "slate_ordinal"])?;
-                Ok(PlanCommand::SetFocus {
-                    slate_ordinal: read::int(value, "slate_ordinal", 0, i64::from(u32::MAX))? as u32,
-                    position: read::int(value, "position", 0, i64::from(u8::MAX))? as u8,
-                })
+                Ok(PlanCommand::ReshapeCompartment { members })
             }
             _ => Err(Fault::field("op")),
         }
@@ -153,16 +145,11 @@ impl PlanCommand {
                 object.text("op", "cut");
                 object.int("route", i64::from(*route));
             }
-            PlanCommand::ReshapeBoundary { members } => {
+            PlanCommand::ReshapeCompartment { members } => {
                 let written: Vec<String> =
                     members.iter().map(|member| member.to_string()).collect();
                 object.raw("members", &format!("[{}]", written.join(",")));
-                object.text("op", "reshape_boundary");
-            }
-            PlanCommand::SetFocus { slate_ordinal, position } => {
-                object.text("op", "set_focus");
-                object.int("position", i64::from(*position));
-                object.int("slate_ordinal", i64::from(*slate_ordinal));
+                object.text("op", "reshape_compartment");
             }
         }
         object.end();
@@ -193,11 +180,11 @@ impl Refusal {
         Refusal { code, reason }
     }
 
-    fn missing(reason: &'static str) -> Self {
+    pub(crate) fn missing(reason: &'static str) -> Self {
         Refusal::of(Code::NotFound, reason)
     }
 
-    fn invalid(reason: &'static str) -> Self {
+    pub(crate) fn invalid(reason: &'static str) -> Self {
         Refusal::of(Code::Validation, reason)
     }
 
@@ -221,35 +208,17 @@ impl Refusal {
     }
 }
 
-/// The evaluation record a `set_focus` is validated against.
-///
-/// `set_focus` is the one variant whose preconditions read something other than
-/// the Field: it names a position in the standing slate, and the slate is the
-/// goal that assembles candidates. This is the seam that goal fills — until it
-/// does, a run stands under no slate, every `set_focus` is refused with
-/// `not_found`, and the refusal is the honest one rather than a silent
-/// acceptance of a position that names nothing.
-#[derive(Clone, Debug)]
-pub struct StandingSlate {
-    pub ordinal: u32,
-    pub deficient: bool,
-    /// The View each candidate declares, in assembly order — which is
-    /// presentation order, so a position is an index into this list, 1-based.
-    pub candidates: Vec<ViewDeclaration>,
-}
-
 /// The base state with some number of queued entries applied: what an entry is
 /// validated against, and what a commit builds before it installs anything.
 #[derive(Clone, Debug)]
 pub struct Projection {
     pub field: FieldState,
-    pub view: ViewDeclaration,
 }
 
 impl Projection {
     /// The projection that has nothing applied to it yet.
-    pub fn of(field: &FieldState, view: &ViewDeclaration) -> Self {
-        Projection { field: field.clone(), view: view.clone() }
+    pub fn of(field: &FieldState) -> Self {
+        Projection { field: field.clone() }
     }
 
     fn route(&self, route: u32) -> Option<&RouteState> {
@@ -294,7 +263,6 @@ impl Projection {
 pub fn check(
     plan: &PlanCommand,
     projected: &Projection,
-    slate: Option<&StandingSlate>,
 ) -> Result<(), Refusal> {
     match plan {
         PlanCommand::Connect { from, to } => {
@@ -338,7 +306,7 @@ pub fn check(
             Some(_) => Ok(()),
             None => Err(Refusal::missing("route")),
         },
-        PlanCommand::ReshapeBoundary { members } => {
+        PlanCommand::ReshapeCompartment { members } => {
             if members.is_empty() || !read::ascending(members) {
                 return Err(Refusal::invalid("members"));
             }
@@ -351,21 +319,6 @@ pub fn check(
             }
             Ok(())
         }
-        PlanCommand::SetFocus { slate_ordinal, position } => {
-            let Some(slate) = slate else {
-                return Err(Refusal::missing("slate"));
-            };
-            if *slate_ordinal != slate.ordinal {
-                return Err(Refusal::missing("slate"));
-            }
-            if slate.deficient {
-                return Err(Refusal::invalid("deficient"));
-            }
-            if *position == 0 || usize::from(*position) > slate.candidates.len() {
-                return Err(Refusal::invalid("position"));
-            }
-            Ok(())
-        }
     }
 }
 
@@ -374,7 +327,6 @@ pub fn check(
 pub fn apply(
     plan: &PlanCommand,
     projected: &mut Projection,
-    slate: Option<&StandingSlate>,
 ) -> Result<(), Refusal> {
     match plan {
         PlanCommand::Connect { from, to } => {
@@ -430,36 +382,21 @@ pub fn apply(
             // cut leaves no gap to fill.
             Ok(())
         }
-        PlanCommand::ReshapeBoundary { members } => {
-            // The standing inside is replaced by the member set after intake,
-            // keeping resolution, window, and surround.
+        PlanCommand::ReshapeCompartment { members } => {
+            // The material compartment is replaced by the member set after
+            // intake. Observation View state is not part of this projection.
             let taken = intake(members, &projected.field);
             if taken.is_empty() {
                 return Err(Refusal::invalid("members"));
             }
-            projected.view.inside = taken;
-            Ok(())
-        }
-        PlanCommand::SetFocus { position, .. } => {
-            let Some(slate) = slate else {
-                return Err(Refusal::missing("slate"));
-            };
-            // The candidate's View becomes the standing View, whole: a
-            // candidate inherits resolution, window, and surround from the View
-            // it was generated under, and adopting it adopts the tuple it
-            // declared. Reading one out of the slate is the goal that assembles
-            // candidates, and the seam it fills is this one.
-            let Some(view) = slate.candidates.get(usize::from(*position) - 1) else {
-                return Err(Refusal::invalid("position"));
-            };
-            projected.view = view.clone();
+            projected.field.physical_compartment.members = taken;
             Ok(())
         }
     }
 }
 
-/// The framework's intake, as every proposed inside passes it: the intersection
-/// with the current Node set, ascending.
+/// Compartment intake: the proposed material set intersected with the current
+/// Node set, ascending.
 fn intake(members: &[u32], field: &FieldState) -> Vec<u32> {
     members
         .iter()
@@ -494,21 +431,21 @@ pub struct QueuedPlan {
 #[derive(Clone, Debug, Default)]
 pub struct PlanQueue {
     entries: Vec<QueuedPlan>,
-    /// The inside the queue proposes, and none while no entry of it changes the
-    /// standing View. Resolved beside the entries' own keys, and for the same
-    /// reason: it is a reading of the projection rather than of any one entry.
-    inside: Option<Vec<u32>>,
+    /// The physical member set the queue proposes, and none while no entry
+    /// reshapes the material compartment. Resolved beside the entries' own
+    /// keys because it is a reading of the whole projection.
+    proposed_compartment_members: Option<Vec<u32>>,
 }
 
 impl PlanQueue {
     pub fn new() -> Self {
-        PlanQueue { entries: Vec::new(), inside: None }
+        PlanQueue { entries: Vec::new(), proposed_compartment_members: None }
     }
 
-    /// The standing inside as the queue would leave it, and none while the
-    /// queue proposes no View at all.
-    pub fn proposed_inside(&self) -> Option<&[u32]> {
-        self.inside.as_deref()
+    /// The material members the queue would leave, and none while it proposes
+    /// no compartment reshape.
+    pub fn proposed_compartment_members(&self) -> Option<&[u32]> {
+        self.proposed_compartment_members.as_deref()
     }
 
     /// Queues one entry. A full queue refuses the entry with the `capacity`
@@ -535,7 +472,7 @@ impl PlanQueue {
     /// Empties the queue, as a commit and every state restore do.
     pub fn clear(&mut self) {
         self.entries.clear();
-        self.inside = None;
+        self.proposed_compartment_members = None;
     }
 
     pub fn len(&self) -> usize {
@@ -562,15 +499,13 @@ impl PlanQueue {
     pub fn projected(
         &self,
         field: &FieldState,
-        view: &ViewDeclaration,
-        slate: Option<&StandingSlate>,
     ) -> Projection {
-        let mut held = Projection::of(field, view);
+        let mut held = Projection::of(field);
         for entry in &self.entries {
             // An entry in the queue passed this same apply when it was queued,
             // and nothing moves the base state while the run is still, so a
             // refusal here is a defect rather than a fault in any input.
-            let _ = apply(&entry.plan, &mut held, slate);
+            let _ = apply(&entry.plan, &mut held);
         }
         held
     }
@@ -584,10 +519,8 @@ impl PlanQueue {
     pub fn rebuild(
         &mut self,
         field: &FieldState,
-        view: &ViewDeclaration,
-        slate: Option<&StandingSlate>,
     ) {
-        let mut held = Projection::of(field, view);
+        let mut held = Projection::of(field);
         for place in 0..self.entries.len() {
             let plan = self.entries[place].plan.clone();
             let (route, pair, cut) = match &plan {
@@ -603,22 +536,19 @@ impl PlanQueue {
                     (Some(*route), pair, false)
                 }
                 PlanCommand::Cut { route } => (Some(*route), None, true),
-                PlanCommand::ReshapeBoundary { .. } | PlanCommand::SetFocus { .. } => {
-                    (None, None, false)
-                }
+                PlanCommand::ReshapeCompartment { .. } => (None, None, false),
             };
             self.entries[place].route = route;
             self.entries[place].pair = pair;
             self.entries[place].cut = cut;
-            let _ = apply(&plan, &mut held, slate);
+            let _ = apply(&plan, &mut held);
         }
-        let proposes_a_view = self.entries.iter().any(|entry| {
-            matches!(
-                entry.plan,
-                PlanCommand::ReshapeBoundary { .. } | PlanCommand::SetFocus { .. }
-            )
-        });
-        self.inside = proposes_a_view.then_some(held.view.inside);
+        let proposes_a_compartment = self
+            .entries
+            .iter()
+            .any(|entry| matches!(entry.plan, PlanCommand::ReshapeCompartment { .. }));
+        self.proposed_compartment_members = proposes_a_compartment
+            .then_some(held.field.physical_compartment.members);
     }
 
     /// Which entries stand in conflict with another entry of the queue.

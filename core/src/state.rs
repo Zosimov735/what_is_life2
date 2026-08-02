@@ -1,15 +1,17 @@
 //! The authoritative state and its serialized form.
 //!
-//! `docs/field-framework/ARCHITECTURE.md` locks `RunState`'s serialized form
-//! as exactly `SavePayloadV1` — one shape, so the byte-equivalence contract
-//! and the save format can never drift apart. Everything here writes through
+//! `RunState`'s serialized form is the canonical V2 save payload — one live
+//! shape, so the byte-equivalence contract and the save format cannot drift
+//! apart. The V1 reader exists only as a verified one-way migration.
+//! Everything here writes through
 //! `crate::json`, so the canonical rules are applied in one place.
 //!
 //! What this holds is the runtime and the Field: the run key, the branch nonce,
 //! the content hash, the live random state, the completed-step counter, the
 //! retained trajectory, and the Field's own contents — layers, ports, routes,
-//! forms, currents, and the two Boundary lists, whose shapes and step belong to
-//! [`crate::field`]. The View, progress, slate, pressures, and Anchor records
+//! forms, currents, the physical compartment, and the two candidate-Boundary
+//! lists, whose shapes and step belong to [`crate::field`]. The View, progress,
+//! slate, pressures, and Anchor records
 //! belong to the modules that own them; the slate is [`crate::slate`]'s and
 //! the staged pressures are [`crate::pressure`]'s. Every declared field is
 //! present either way, because canonical JSON has no absent-versus-null
@@ -17,9 +19,9 @@
 
 use crate::fault::Fault;
 use crate::field::{
-    BoundaryState, CurrentState, FieldLayer, FormState, PendingTrail, PortState, RouteState,
-    StepRecords, UpkeepRecord, CURRENTS_PER_CHAPTER, FORMS_PER_RUN, LAYERS_PER_CHAPTER,
-    NODES_PER_RUN, PENDING_TRAILS, ROUTES_PER_RUN, UPKEEP_PURPOSES,
+    BoundaryState, CurrentState, FieldLayer, FormState, PendingTrail, PhysicalCompartment,
+    PortState, RouteState, StepRecords, UpkeepRecord, CURRENTS_PER_CHAPTER, FORMS_PER_RUN,
+    LAYERS_PER_CHAPTER, NODES_PER_RUN, PENDING_TRAILS, ROUTES_PER_RUN, UPKEEP_PURPOSES,
 };
 use crate::json::{Json, Obj};
 use crate::read;
@@ -37,7 +39,7 @@ pub type Frac = i64;
 pub type Step = u32;
 
 /// The save version this build reads and writes.
-pub const SAVE_VERSION: i64 = 1;
+pub const SAVE_VERSION: i64 = 2;
 
 /// The save payload's cap: 8 MiB of canonical bytes, validated at every write
 /// and every export.
@@ -320,6 +322,9 @@ pub struct FieldState {
     pub routes: Vec<RouteState>,
     pub forms: Vec<FormState>,
     pub currents: Vec<CurrentState>,
+    /// The material compartment used by leakage and every other causal edge
+    /// rule. Observation Views are serialized separately on [`RunState`].
+    pub physical_compartment: PhysicalCompartment,
     pub boundaries: BoundaryState,
     /// The Trail entries standing until they fall due, in deposit order —
     /// the one list of the Field whose order is not its identifiers', because
@@ -346,6 +351,7 @@ impl FieldState {
             routes: Vec::new(),
             forms: Vec::new(),
             currents: Vec::new(),
+            physical_compartment: PhysicalCompartment::default(),
             boundaries: BoundaryState::default(),
             pending: Vec::new(),
         }
@@ -356,10 +362,23 @@ impl FieldState {
     /// [`crate::field::validate`] afterwards, so a restored Field passes
     /// exactly the checks a live one does.
     fn read(value: &Json, key: &str) -> Result<Self, Fault> {
+        Self::read_version(value, key, None)
+    }
+
+    /// Reads the old V1 Field shape during the single supported migration.
+    /// The then-active View supplies the physical members because V1 had no
+    /// independent material-compartment object.
+    fn read_v1(value: &Json, key: &str, legacy_inside: &[u32]) -> Result<Self, Fault> {
+        Self::read_version(value, key, Some(legacy_inside))
+    }
+
+    fn read_version(
+        value: &Json,
+        key: &str,
+        legacy_inside: Option<&[u32]>,
+    ) -> Result<Self, Fault> {
         let found = read::map(value, key)?;
-        read::exact_keys(
-            found,
-            key,
+        let keys: &[&str] = if legacy_inside.is_some() {
             &[
                 "assembly_ordinal",
                 "boundaries",
@@ -375,8 +394,27 @@ impl FieldState {
                 "routes",
                 "step",
                 "wheel_accum",
-            ],
-        )?;
+            ]
+        } else {
+            &[
+                "assembly_ordinal",
+                "boundaries",
+                "currents",
+                "depth_cooldown",
+                "forms",
+                "layers",
+                "next_node_id",
+                "next_route_id",
+                "pending",
+                "physical_compartment",
+                "ports",
+                "prev_assembly_step",
+                "routes",
+                "step",
+                "wheel_accum",
+            ]
+        };
+        read::exact_keys(found, key, keys)?;
         let mut layers = Vec::new();
         for entry in read::list(found, "layers", LAYERS_PER_CHAPTER)? {
             layers.push(FieldLayer::read(entry)?);
@@ -401,6 +439,22 @@ impl FieldState {
         for entry in read::list(found, "pending", PENDING_TRAILS)? {
             pending.push(PendingTrail::read(entry)?);
         }
+        let (boundaries, physical_compartment) = match legacy_inside {
+            Some(members) => {
+                let (boundaries, leak_frac) = BoundaryState::read_v1(found, "boundaries")?;
+                (
+                    boundaries,
+                    PhysicalCompartment {
+                        members: members.to_vec(),
+                        leak_per_exposed_contact_per_step: leak_frac,
+                    },
+                )
+            }
+            None => (
+                BoundaryState::read(found, "boundaries")?,
+                PhysicalCompartment::read(found, "physical_compartment")?,
+            ),
+        };
         Ok(FieldState {
             pending,
             step: read::int(found, "step", 0, i64::from(u32::MAX))? as Step,
@@ -421,7 +475,8 @@ impl FieldState {
             routes,
             forms,
             currents,
-            boundaries: BoundaryState::read(found, "boundaries")?,
+            physical_compartment,
+            boundaries,
         })
     }
 
@@ -471,6 +526,11 @@ impl FieldState {
                 pending.raw(&written);
             }
             pending.end();
+        }
+        {
+            let mut physical_compartment = String::new();
+            self.physical_compartment.write(&mut physical_compartment);
+            object.raw("physical_compartment", &physical_compartment);
         }
         {
             let mut ports = object.list("ports");
@@ -542,6 +602,18 @@ impl Trace {
 
     /// Reads the retained trajectory out of a payload.
     fn read(value: &Json, key: &str) -> Result<Self, Fault> {
+        Self::read_version(value, key, None)
+    }
+
+    fn read_v1(value: &Json, key: &str, legacy_inside: &[u32]) -> Result<Self, Fault> {
+        Self::read_version(value, key, Some(legacy_inside))
+    }
+
+    fn read_version(
+        value: &Json,
+        key: &str,
+        legacy_inside: Option<&[u32]>,
+    ) -> Result<Self, Fault> {
         let found = read::map(value, key)?;
         read::exact_keys(found, key, &["keyframe", "start_step", "steps"])?;
         let mut steps = std::collections::VecDeque::new();
@@ -550,7 +622,10 @@ impl Trace {
         }
         Ok(Trace {
             start_step: read::int(found, "start_step", 0, i64::from(u32::MAX))? as Step,
-            keyframe: FieldState::read(found, "keyframe")?,
+            keyframe: match legacy_inside {
+                Some(inside) => FieldState::read_v1(found, "keyframe", inside)?,
+                None => FieldState::read(found, "keyframe")?,
+            },
             steps,
         })
     }
@@ -589,8 +664,9 @@ impl ViewDeclaration {
     /// The View a run stands on before a chapter is loaded, which the
     /// document locks exactly:
     /// `{ "inside": [], "resolution": 1, "window": 45, "surround":
-    /// "adjacent" }` — the only case where the inside may be empty, and one
-    /// in which no evaluation may run.
+    /// "adjacent" }`. A player-cleared live View may also have an empty inside;
+    /// unlike this opening placeholder, it retains the live View's other three
+    /// measurement parameters.
     pub fn opening() -> Self {
         ViewDeclaration {
             inside: Vec::new(),
@@ -953,7 +1029,7 @@ impl CheckpointState {
 }
 
 /// The root authoritative aggregate, whose serialized form is exactly the
-/// version 1 save payload.
+/// current save payload.
 #[derive(Clone, Debug)]
 pub struct RunState {
     pub run_id: String,
@@ -1003,6 +1079,21 @@ impl RunState {
     /// null before the first assembly, and otherwise the evaluation record,
     /// itself held to the parts this build computes.
     pub fn read(payload: &Json) -> Result<Self, Fault> {
+        Self::read_version(payload, SAVE_VERSION)
+    }
+
+    /// Deterministically migrates one verified canonical V1 payload into the
+    /// V2 in-memory model. The importer verifies the original bytes and digest
+    /// before calling this; this reader then holds the entire V1 shape to its
+    /// schema, moves each Field's former boundary coefficient plus the active
+    /// View's members into an authoritative physical compartment, and discards
+    /// the legacy slate after validating it because its readings were produced
+    /// under the superseded causal model.
+    pub fn migrate_v1(payload: &Json) -> Result<Self, Fault> {
+        Self::read_version(payload, 1)
+    }
+
+    fn read_version(payload: &Json, version: i64) -> Result<Self, Fault> {
         read::exact_keys(
             payload,
             "payload",
@@ -1021,14 +1112,16 @@ impl RunState {
                 "view",
             ],
         )?;
-        if read::int(payload, "save_version", SAVE_VERSION, SAVE_VERSION)? != SAVE_VERSION {
+        if read::int(payload, "save_version", version, version)? != version {
             return Err(Fault::field("save_version"));
         }
-        let slate = match read::at(payload, "slate")? {
+        let parsed_slate = match read::at(payload, "slate")? {
             Json::Null => None,
             _ => Some(CandidateSlate::read(payload, "slate")?),
         };
+        let slate = if version == 1 { None } else { parsed_slate };
         let pressures = crate::pressure::read_list(payload, "pressures")?;
+        let view = ViewDeclaration::read(payload, "view")?;
 
         let field = read::map(payload, "field")?;
         read::exact_keys(field, "field", &["now", "trace"])?;
@@ -1045,15 +1138,24 @@ impl RunState {
             return Err(Fault::field("anchors"));
         }
 
+        let (now, trace) = if version == 1 {
+            (
+                FieldState::read_v1(field, "now", &view.inside)?,
+                Trace::read_v1(field, "trace", &view.inside)?,
+            )
+        } else {
+            (FieldState::read(field, "now")?, Trace::read(field, "trace")?)
+        };
+
         Ok(RunState {
             run_id: read::hex(payload, "run_id", 16)?.to_string(),
             rng: RngState::read(payload, "rng")?,
             content_hash: read::hex(payload, "content_hash", 64)?.to_string(),
             branch_nonce: read::int(payload, "branch_nonce", 0, i64::from(u32::MAX))? as u32,
             progress: Progress::read(payload, "progress")?,
-            now: FieldState::read(field, "now")?,
-            trace: Trace::read(field, "trace")?,
-            view: ViewDeclaration::read(payload, "view")?,
+            now,
+            trace,
+            view,
             slate,
             input_config: InputConfig::read(payload, "input_config")?,
             pressures,
@@ -1127,11 +1229,14 @@ impl RunState {
     /// the parts: the Field and the trajectory's keyframe each pass the whole
     /// Field validation, the keyframe sits exactly where the retained span puts
     /// it, the recorded steps run contiguously from it to the completed step,
-    /// and the standing View's inside is empty only in the one case the document
-    /// allows — before a chapter is loaded.
+    /// and the standing View is a valid passive measurement protocol, including
+    /// the empty selection a player-cleared View carries.
     pub fn coherent(&self) -> Result<(), Fault> {
         crate::field::validate(&self.now)?;
         crate::field::validate(&self.trace.keyframe)?;
+        if self.now.physical_compartment != self.trace.keyframe.physical_compartment {
+            return Err(Fault::field("physical_compartment"));
+        }
         // The keyframe sits where the retained span puts it, or later: a commit
         // that applied a change restarted the trajectory at its own step, and
         // the span grows back from there.
@@ -1151,13 +1256,11 @@ impl RunState {
                 return Err(Fault::field("steps"));
             }
         }
-        if self.view.inside.is_empty() {
-            if !self.now.ports.is_empty() {
-                return Err(Fault::field("inside"));
-            }
-        } else {
-            crate::field::establishable_view(&self.view, &self.now)?;
-        }
+        // A live View may be cleared: no selected Node is still a complete
+        // passive measurement protocol once resolution, window, and surround
+        // are retained. Chapter establishment has the separate, stricter rule
+        // that authored opening Views are nonempty.
+        crate::field::validate_view(&self.view, &self.now)?;
         // The two locked pressure invariants and the ordering that carries
         // them. A payload read through `RunState::read` has passed these
         // already; a state built by playing forward passes them because the

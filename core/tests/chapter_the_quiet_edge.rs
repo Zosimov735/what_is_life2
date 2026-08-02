@@ -46,7 +46,7 @@
 //!   chapter a resting run completes in about a thousand steps, then the finale.
 //!   That leaves the run at the finale's opening carrying six Impulse, and an
 //!   arrival of five or four is reached by committing one or two **no-op
-//!   boundary reshapes** — a committed change that spends one Impulse and names
+//!   compartment reshapes** — a committed change that spends one Impulse and names
 //!   exactly the members already standing, so the Field it leaves is the Field
 //!   it found. It is an instrument, and it is used because twenty-four runs of
 //!   the whole campaign would spend the suite's time on the seven chapters this
@@ -55,7 +55,8 @@
 use field_game_core::content::{self, Chapter, CONTENT_VERSION};
 use field_game_core::fx::ONE_UNIT;
 use field_game_core::json::Json;
-use field_game_core::state::{Step, STEPS_PER_SECOND};
+use field_game_core::protocol::PROTOCOL_VERSION;
+use field_game_core::state::{Step, SAVE_VERSION, STEPS_PER_SECOND};
 use field_game_core::Session;
 
 mod support;
@@ -187,7 +188,7 @@ impl Arrival {
 // ---------------------------------------------------------------------------
 
 fn finale_manifest() -> String {
-    "{\"chapters\":[\"the_pull\",\"the_quiet_edge\"],\"content_version\":1,\
+    "{\"chapters\":[\"the_pull\",\"the_quiet_edge\"],\"content_version\":2,\
      \"forms\":[\"thread\",\"ring\",\"relay\",\"vault\",\"lens\",\"knot\",\"wake\",\"chorus\"],\
      \"pressures\":[\"drain\",\"noise\",\"fracture\",\"flood\",\"interference\",\"drift\"]}"
         .to_string()
@@ -225,7 +226,7 @@ fn finale_files() -> Vec<String> {
 
 fn finale_init() -> String {
     format!(
-        "{{\"content\":{},\"protocol\":1,\"save_version\":1}}",
+        "{{\"content\":{},\"protocol\":{PROTOCOL_VERSION},\"save_version\":{SAVE_VERSION}}}",
         support::bundle_of(&finale_manifest(), &finale_files()),
     )
 }
@@ -256,11 +257,11 @@ fn connect(from: u32, to: u32) -> String {
     format!("{{\"plan\":{{\"from\":{from},\"op\":\"connect\",\"to\":{to}}}}}")
 }
 
-/// A boundary reshape naming exactly the members already standing: a committed
-/// change that spends one Impulse and leaves the Field it found.
+/// A physical-compartment reshape naming exactly the members already standing:
+/// a committed change that spends one Impulse and leaves the Field it found.
 fn no_op_reshape() -> String {
     let written: Vec<String> = EVERY_NODE.iter().map(|held| held.to_string()).collect();
-    format!("{{\"plan\":{{\"members\":[{}],\"op\":\"reshape_boundary\"}}}}", written.join(","))
+    format!("{{\"plan\":{{\"members\":[{}],\"op\":\"reshape_compartment\"}}}}", written.join(","))
 }
 
 /// One Route out of each arm into the hold, in arm order.
@@ -635,13 +636,15 @@ fn at_the_finale(form: &'static str, arrival: Arrival) -> Run {
         run.commit(&[no_op_reshape()]);
     }
     assert_eq!(run.impulse(), arrival.impulse(), "the arrival {}", arrival.name());
-    // The instrument changed nothing: the standing inside is the one the
-    // chapter opened with.
+    // The instrument changed neither independent object: physical membership
+    // and the Observation View both remain at their authored starting data.
+    let state = run.session.run().expect("a run").state();
     assert_eq!(
-        run.session.run().expect("a run").state().view.inside,
+        state.now.physical_compartment.members,
         EVERY_NODE.to_vec(),
-        "a no-op reshape leaves the inside it found",
+        "a no-op compartment reshape leaves physical membership unchanged",
     );
+    assert_eq!(state.view.inside, EVERY_NODE.to_vec(), "and cannot replace the View");
     run
 }
 
@@ -1002,7 +1005,7 @@ fn the_three_rewrite_paths_carry_three_arrivals_into_the_finale() {
     // `core/tests/chapter_the_rewrite.rs`, which pins the ladder `[5, 4, 6]`
     // there. The shared campaign arm takes the relocation, so a run played by it
     // arrives carrying six; the other two arrivals are reached by the same
-    // instrument the rest of this file uses — a no-op boundary reshape, spent
+    // instrument the rest of this file uses — a no-op compartment reshape, spent
     // at the finale's opening, before anything here completes.
     let content = authored();
     let mut arrivals = Vec::new();

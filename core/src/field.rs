@@ -1,9 +1,9 @@
 //! The Field model: its parts, its locked caps, and one step of it.
 //!
 //! `docs/field-framework/ARCHITECTURE.md` locks the six parts field by field —
-//! `FieldLayer`, `FormState`, `CurrentState`, `PortState`, `RouteState`, and
-//! `BoundaryState` — together with the capacity table every quantity is held
-//! to, the Node-kind set and its starting Charge, and the distance and
+//! `FieldLayer`, `FormState`, `CurrentState`, `PortState`, `RouteState`,
+//! `PhysicalCompartment`, and `BoundaryState` — together with the capacity
+//! table every quantity is held to, the Node-kind set and its starting Charge, and the distance and
 //! adjacency rules of `crate::fx`. `docs/field-framework/FRAMEWORK.md` item 6
 //! locks the records a completed step carries and the identity they satisfy:
 //!
@@ -23,9 +23,9 @@
 //! order gives it: the Pulse, the one player-triggered rule, charging and
 //! emitting from where the Form now stands; Route flow as one ascending pass
 //! with an `open` gate, a source-shortfall term and a destination-headroom term;
-//! Boundary leakage over the standing View's shell members by exposure and
-//! `leak_frac`; Node overload as an inflow throttle and a quarter-of-the-excess
-//! decay with memoryless recovery; and Current delivery split across the Nodes
+//! physical-compartment leakage over material shell members by exposure and
+//! `leak_per_exposed_contact_per_step`; Node overload as an inflow throttle and
+//! a quarter-of-the-excess decay with memoryless recovery; and Current delivery split across the Nodes
 //! standing in a current with an exact remainder. The Pressure effects scale
 //! and steer these five and add no sixth mover; the Noise flow scale among
 //! them is the one drawing rule, at its locked drawing point — the start of
@@ -154,11 +154,10 @@ pub struct Cue {
 /// authored tables the stage machine reads, and the trajectory stream position
 /// the step draws from.
 ///
-/// The pressure list is a step input exactly as the standing View's inside is,
-/// and what keeps a regeneration exact is locked in [`crate::pressure`]'s own
-/// header: membership is immutable inside a window and every rule that changes
-/// it ends the window, while `stage` and `level` are pure functions of
-/// `step - start_step` and the authored table, recomputed at the step being
+/// What keeps pressure regeneration exact is locked in
+/// [`crate::pressure`]'s own header: membership is immutable inside a window
+/// and every rule that changes it ends the window, while `stage` and `level`
+/// are pure functions of `step - start_step` and the authored table, recomputed at the step being
 /// replayed. So a replay hands this the live list and reproduces the recorded
 /// window byte for byte.
 ///
@@ -777,27 +776,38 @@ pub struct DrawnBoundary {
     pub step: Step,
 }
 
-/// The two Boundary lists — drawn entries most recent first, capped at the
-/// retained count, and the authored list in authored order — and the run's
-/// boundary-leakage parameter.
+/// The two candidate-Boundary lists — drawn entries most recent first, capped
+/// at the retained count, and the authored list in authored order.
 ///
-/// `leak_frac` is the Charge fraction that escapes per exposed link per step. It
-/// is copied at run start from the selected Form's authored value, which is why
-/// it lives here rather than on a layer: exposure and this parameter are the
-/// boundary levers, and Drain is the depth lever.
+/// These lists are observation metadata and candidate seeds. They do not
+/// determine physical membership or leakage; [`PhysicalCompartment`] does.
 #[derive(Clone, Debug, Default)]
 pub struct BoundaryState {
     pub drawn: Vec<DrawnBoundary>,
     pub authored: Vec<Vec<u32>>,
-    pub leak_frac: Frac,
 }
 
 impl BoundaryState {
-    /// Reads the two Boundary lists and the leakage parameter out of a payload.
+    /// Reads the two candidate-Boundary lists out of a payload.
     pub fn read(value: &Json, key: &str) -> Result<Self, Fault> {
         let found = read::map(value, key)?;
-        read::exact_keys(found, key, &["authored", "drawn", "leak_frac"])?;
+        read::exact_keys(found, key, &["authored", "drawn"])?;
 
+        Self::read_lists(found)
+    }
+
+    /// Reads the version-1 candidate lists and returns the causal leakage value
+    /// that used to be stored beside them. Save migration moves that value to
+    /// [`PhysicalCompartment`] and never exposes this shape to live V2 state.
+    pub(crate) fn read_v1(value: &Json, key: &str) -> Result<(Self, Frac), Fault> {
+        let found = read::map(value, key)?;
+        read::exact_keys(found, key, &["authored", "drawn", "leak_frac"])?;
+        let boundaries = Self::read_lists(found)?;
+        let leak_frac = read::int(found, "leak_frac", i64::MIN, i64::MAX)?;
+        Ok((boundaries, leak_frac))
+    }
+
+    fn read_lists(found: &Json) -> Result<Self, Fault> {
         let mut authored = Vec::new();
         for entry in read::list(found, "authored", NODES_PER_RUN)? {
             read::exact_keys(entry, "authored", &["members"])?;
@@ -813,11 +823,7 @@ impl BoundaryState {
             });
         }
 
-        Ok(BoundaryState {
-            drawn,
-            authored,
-            leak_frac: read::int(found, "leak_frac", i64::MIN, i64::MAX)?,
-        })
+        Ok(BoundaryState { drawn, authored })
     }
 
     /// Appends a completed drag to the front, dropping the oldest entry past
@@ -858,7 +864,54 @@ impl BoundaryState {
             }
             drawn.end();
         }
-        object.int("leak_frac", self.leak_frac);
+        object.end();
+    }
+}
+
+/// The material compartment that participates in the Field's causal rules.
+///
+/// `members` is the ascending set of Nodes physically contained by the
+/// compartment. `leak_per_exposed_contact_per_step` is a raw [`Frac`]: each
+/// distinct crossing contact earns this fraction of a member's held Charge per
+/// step, capped at the whole. Neither value is derived from the active View.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PhysicalCompartment {
+    pub members: Vec<u32>,
+    pub leak_per_exposed_contact_per_step: Frac,
+}
+
+impl PhysicalCompartment {
+    pub fn read(value: &Json, key: &str) -> Result<Self, Fault> {
+        let found = read::map(value, key)?;
+        read::exact_keys(
+            found,
+            key,
+            &["leak_per_exposed_contact_per_step", "members"],
+        )?;
+        Ok(PhysicalCompartment {
+            members: read::ids(found, "members", NODES_PER_RUN, i64::from(u32::MAX))?,
+            leak_per_exposed_contact_per_step: read::int(
+                found,
+                "leak_per_exposed_contact_per_step",
+                i64::MIN,
+                i64::MAX,
+            )?,
+        })
+    }
+
+    pub fn write(&self, out: &mut String) {
+        let mut object = Obj::new(out);
+        object.int(
+            "leak_per_exposed_contact_per_step",
+            self.leak_per_exposed_contact_per_step,
+        );
+        {
+            let mut members = object.list("members");
+            for member in &self.members {
+                members.int(i64::from(*member));
+            }
+            members.end();
+        }
         object.end();
     }
 }
@@ -899,7 +952,7 @@ pub struct Ledger {
     pub upkeep: Fx,
     /// Charge removed by a layer's Drain: a sink.
     pub drain: Fx,
-    /// Charge that escaped across the standing View's boundary: a sink.
+    /// Charge that escaped across the physical compartment's edge: a sink.
     pub leakage: Fx,
     /// Charge an overloaded Node shed from its excess: a sink.
     pub overload: Fx,
@@ -994,8 +1047,8 @@ pub struct StepOutcome {
 ///
 /// A cache is valid exactly while the Field's shape stands: the Node list, the
 /// Route list, the current list, the non-moving positions, and the standing
-/// inside it was built against. A commit changes the shape, so a commit builds
-/// a fresh one; a replay never changes it, because every edit a replay applies
+/// physical-compartment membership it was built against. A commit changes the
+/// shape, so a commit builds a fresh one; a replay never changes it, because every edit a replay applies
 /// is applied before the first replayed step.
 #[derive(Clone, Debug)]
 pub struct StepCache {
@@ -1013,7 +1066,7 @@ pub struct StepCache {
     /// outside every path point's width, because a squared distance below
     /// `(width + 1)^2` puts each axis inside `width + 1` on its own.
     current_box: Vec<(Fx, Fx, Fx, Fx)>,
-    /// The Boundary leakage pass, prepared.
+    /// The physical-compartment leakage pass, prepared.
     leak: LeakCache,
 }
 
@@ -1032,9 +1085,9 @@ struct LeakCache {
 }
 
 impl StepCache {
-    /// Prepares the three passes for a Field and the standing inside the
-    /// Boundary leakage rule reads.
-    pub fn of(field: &FieldState, inside: &[u32]) -> Self {
+    /// Prepares the three passes for a Field, including its material
+    /// compartment's leakage relations.
+    pub fn of(field: &FieldState) -> Self {
         let count = field.ports.len();
         let route_ends = field
             .routes
@@ -1080,7 +1133,7 @@ impl StepCache {
         }
 
         StepCache {
-            leak: prepare_leakage(field, inside, &moves),
+            leak: prepare_leakage(field, &moves),
             route_ends,
             form_places,
             moving,
@@ -1140,11 +1193,15 @@ fn stands_in(port: &PortState, current: &CurrentState) -> bool {
 /// ways is still counted once — the rule counts distinct non-member neighbours,
 /// and that is what makes the cached exposure the same number as the uncached
 /// one.
-fn prepare_leakage(field: &FieldState, inside: &[u32], moves: &[bool]) -> LeakCache {
+fn prepare_leakage(field: &FieldState, moves: &[bool]) -> LeakCache {
     let count = field.ports.len();
     let members: Vec<usize> = {
-        let mut found: Vec<usize> =
-            inside.iter().filter_map(|node| place_of(field, *node)).collect();
+        let mut found: Vec<usize> = field
+            .physical_compartment
+            .members
+            .iter()
+            .filter_map(|node| place_of(field, *node))
+            .collect();
         found.sort_unstable();
         found.dedup();
         found
@@ -1208,15 +1265,12 @@ fn prepare_leakage(field: &FieldState, inside: &[u32], moves: &[bool]) -> LeakCa
 }
 
 /// Advances the Field one step under the control state the step consumes, the
-/// standing View's inside that the Boundary leakage rule reads, and the
 /// [`Staging`] that carries the standing pressures and the stream.
 ///
-/// The standing inside and the staged pressures are the step's two inputs
-/// beside the Field itself, and each is exact under a rule of its own:
-/// the inside is immutable between View commits, and the pressure list is
-/// immutable in membership between the boundaries [`crate::pressure`] names,
-/// with `stage` and `level` derived at the step being replayed. Neither is
-/// recorded per step, and neither has to be.
+/// The material compartment is part of the Field itself. The staged pressure
+/// list is immutable in membership between the boundaries
+/// [`crate::pressure`] names, with `stage` and `level` derived at the step being
+/// replayed; it is not recorded per step and does not have to be.
 ///
 /// The nine phases are the locked step order, and draws occur at the one
 /// locked drawing point of version 1 — the Noise flow scale, at the Route
@@ -1232,7 +1286,7 @@ fn prepare_leakage(field: &FieldState, inside: &[u32], moves: &[bool]) -> LeakCa
 ///    attribution of upkeep across its five locked purposes is locked nowhere,
 ///    and the trace cannot record an upkeep entry without it;
 /// 6. the Route phase: one ascending pass of Route flow;
-/// 7. the pressure phase: Drain, then Boundary leakage, then overload decay,
+/// 7. the pressure phase: Drain, then compartment leakage, then overload decay,
 ///    each reading the Charge the previous rule left;
 /// 8. the current phase: delivery, then every phase counter advances;
 /// 9. the records and the ledger.
@@ -1242,15 +1296,13 @@ fn prepare_leakage(field: &FieldState, inside: &[u32], moves: &[bool]) -> LeakCa
 pub fn advance(
     field: &mut FieldState,
     control: ControlState,
-    inside: &[u32],
     pointer_speed: Frac,
     staging: &mut Staging<'_>,
 ) -> StepOutcome {
-    advance_over(field, control, inside, pointer_speed, staging, None)
+    advance_over(field, control, pointer_speed, staging, None)
 }
 
-/// The same step, over a [`StepCache`] prepared for this Field's shape and this
-/// standing inside.
+/// The same step, over a [`StepCache`] prepared for this Field's causal shape.
 ///
 /// It is the same rules reading the same relations, told rather than recomputed
 /// — the results are identical by construction and pinned as identical by test.
@@ -1259,18 +1311,16 @@ pub fn advance(
 pub fn advance_cached(
     field: &mut FieldState,
     control: ControlState,
-    inside: &[u32],
     pointer_speed: Frac,
     staging: &mut Staging<'_>,
     cache: &StepCache,
 ) -> StepOutcome {
-    advance_over(field, control, inside, pointer_speed, staging, Some(cache))
+    advance_over(field, control, pointer_speed, staging, Some(cache))
 }
 
 fn advance_over(
     field: &mut FieldState,
     control: ControlState,
-    inside: &[u32],
     pointer_speed: Frac,
     staging: &mut Staging<'_>,
     cache: Option<&StepCache>,
@@ -1324,7 +1374,7 @@ fn advance_over(
     let mut staged = pressure::advance_pressures(staging.pressures, staging.schedule, field.step);
     staged.pressed = pressed;
     apply_drain(field, &mut ledger, staging.pressures);
-    apply_leakage(field, inside, &mut ledger, cache);
+    apply_leakage(field, &mut ledger, cache);
     decay_overload(field, &mut ledger, &pressure::FloodPress::of(staging.pressures));
     deliver_currents(
         field,
@@ -2036,33 +2086,28 @@ fn move_route_charge(
     }
 }
 
-/// Leaks Charge across the standing View's boundary.
+/// Leaks Charge across the material compartment's physical edge.
 ///
-/// The standing inside arrives as a step input rather than out of the Field,
-/// because it belongs to the View. ARCHITECTURE.md's Boundary leakage rule locks
-/// what makes that reproducible: the standing inside is immutable between View
-/// commits, and a commit ends the active window, so a regeneration inside any one
-/// window reads one fixed inside and the trace carries no inside of its own.
-///
-/// Every member of the standing inside that is a shell member — one with a
+/// Every physical member that is a shell member — one with a
 /// crossing Route or a declared adjacency to a non-member — loses the fraction
-/// its exposure earns: `x(n)` distinct non-member neighbors at `leak_frac` each,
-/// held at the whole of what it holds. Because the rate never passes 65536, the
-/// flooring `fixed_mul` cannot take more than the Node has, so no clamp stands
-/// between the two. An empty inside and an inside equal to the whole of N both
-/// leak nothing, by construction: the first has no members and the second no
-/// non-members.
+/// its exposure earns: `x(n)` distinct non-member neighbors at
+/// `leak_per_exposed_contact_per_step` each, held at the whole of what it
+/// holds. Because the rate never passes 65536, the flooring `fixed_mul` cannot
+/// take more than the Node has, so no clamp stands between the two. An empty
+/// compartment and one equal to the whole of N both leak nothing.
 ///
 /// What leaks is recorded as part of the Node's exogenous term, which is how the
 /// framework's Boundary Sufficiency already accounts for it.
 fn apply_leakage(
     field: &mut FieldState,
-    inside: &[u32],
     ledger: &mut Ledger,
     cache: Option<&StepCache>,
 ) {
-    let leak_frac = field.boundaries.leak_frac;
-    if leak_frac == 0 || inside.is_empty() || field.ports.is_empty() {
+    let leak_frac = field.physical_compartment.leak_per_exposed_contact_per_step;
+    if leak_frac == 0
+        || field.physical_compartment.members.is_empty()
+        || field.ports.is_empty()
+    {
         return;
     }
     if let Some(held) = cache {
@@ -2092,9 +2137,14 @@ fn apply_leakage(
         }
         return;
     }
-    // The inside may name a Node that has since vanished; intake is what
-    // reconciles that, and a name that stands for nothing leaks nothing.
-    let members: Vec<usize> = inside.iter().filter_map(|node| place_of(field, *node)).collect();
+    // A compartment may name a Node that has since vanished; intake reconciles
+    // that, and a name that stands for nothing leaks nothing.
+    let members: Vec<usize> = field
+        .physical_compartment
+        .members
+        .iter()
+        .filter_map(|node| place_of(field, *node))
+        .collect();
     if members.is_empty() {
         return;
     }
@@ -2143,8 +2193,8 @@ fn apply_leakage(
         }
     }
 
-    // Ascending Node order: the inside is ascending, and a Node's place in the
-    // Port list ascends with its identifier.
+    // Ascending Node order: the compartment is ascending, and a Node's place in
+    // the Port list ascends with its identifier.
     let mut ordered: Vec<(usize, usize)> = members.iter().copied().enumerate().collect();
     ordered.sort_by_key(|(_, place)| *place);
     for (slot, place) in ordered {
@@ -2614,8 +2664,13 @@ pub fn validate(field: &FieldState) -> Result<(), Fault> {
     if field.boundaries.drawn.len() > DRAWN_RETAINED {
         return Err(cap_fault("drawn_boundaries_retained", DRAWN_RETAINED as i64));
     }
-    // The boundary-leakage parameter is a range rather than a capacity row.
-    ranged(field.boundaries.leak_frac, 0, LEAK_FRAC_CAP, "leak_frac")?;
+    // The physical leakage parameter is a range rather than a capacity row.
+    ranged(
+        field.physical_compartment.leak_per_exposed_contact_per_step,
+        0,
+        LEAK_FRAC_CAP,
+        "leak_per_exposed_contact_per_step",
+    )?;
 
     // The layer list is contiguous from 0: a chapter declaring n layers declares
     // exactly the layers 0 through n − 1. A depth change moves a Form one layer
@@ -2640,6 +2695,20 @@ pub fn validate(field: &FieldState) -> Result<(), Fault> {
     let node_ids: Vec<u32> = field.ports.iter().map(|port| port.node).collect();
     if !ascending(&node_ids) {
         return Err(Fault::field("ports"));
+    }
+    if field.physical_compartment.members.len() > NODES_PER_RUN {
+        return Err(cap_fault("nodes_per_run", NODES_PER_RUN as i64));
+    }
+    if !ascending(&field.physical_compartment.members) {
+        return Err(Fault::field("physical_compartment"));
+    }
+    if !field.ports.is_empty() && field.physical_compartment.members.is_empty() {
+        return Err(Fault::field("physical_compartment"));
+    }
+    for member in &field.physical_compartment.members {
+        if !node_ids.contains(member) {
+            return Err(missing("node", *member));
+        }
     }
     for port in &field.ports {
         if port.node == 0 || i64::from(port.node) >= i64::from(field.next_node_id) {
@@ -2833,19 +2902,18 @@ pub const RESOLUTION_LADDER: [u16; 9] = [1, 2, 4, 8, 16, 32, 64, 128, 256];
 /// The declared window's range, in steps.
 pub const WINDOW_RANGE: std::ops::RangeInclusive<u16> = 1..=60;
 
-/// Checks the View a chapter opens with against the Field it declares an inside
-/// of. The inside is nonempty and ascending once a chapter is loaded — the empty
-/// inside belongs to the standing View a run holds before one is — and at
-/// establishment nothing has vanished yet, so every member names a Node.
+/// Checks any passive View against the Field it observes.
 ///
-/// Resolution and the declared window restate rows of the locked capacity table,
-/// so crossing either is the `capacity` envelope; `inside` has no row of its own
-/// and fails as `validation`.
-pub fn establishable_view(
+/// An empty inside is a valid cleared observation: it selects no Node and has no
+/// physical consequence. Nonempty member lists remain ascending and every
+/// member must name a Node. Resolution and window are valid whether or not the
+/// observation currently selects anything, so a cleared View can be saved and
+/// restored without losing the rest of its measurement protocol.
+pub fn validate_view(
     view: &crate::state::ViewDeclaration,
     field: &FieldState,
 ) -> Result<(), Fault> {
-    if view.inside.is_empty() || !ascending(&view.inside) {
+    if !ascending(&view.inside) {
         return Err(Fault::field("inside"));
     }
     for member in &view.inside {
@@ -2860,6 +2928,24 @@ pub fn establishable_view(
         return Err(cap_fault("declared_window", i64::from(*WINDOW_RANGE.end())));
     }
     Ok(())
+}
+
+/// Checks the View a chapter opens with against the Field it declares an inside
+/// of. Chapter authors must provide a nonempty opening selection even though a
+/// player may later clear that passive selection. At establishment nothing has
+/// vanished yet, so every member names a Node.
+///
+/// Resolution and the declared window restate rows of the locked capacity table,
+/// so crossing either is the `capacity` envelope; `inside` has no row of its own
+/// and fails as `validation`.
+pub fn establishable_view(
+    view: &crate::state::ViewDeclaration,
+    field: &FieldState,
+) -> Result<(), Fault> {
+    if view.inside.is_empty() {
+        return Err(Fault::field("inside"));
+    }
+    validate_view(view, field)
 }
 
 /// Checks the caps a step could cross, which nothing in a valid Field's step

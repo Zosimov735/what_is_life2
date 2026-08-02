@@ -77,6 +77,10 @@
     }
   ],
   "authored_boundaries": [{ "members": [2, 3] }],
+  "physical_compartment": {
+    "members": [2, 3],
+    "leak_per_exposed_contact_per_step": 64
+  },
   "objectives": [
     {
       "id": "objective.the_edge.hold_the_current",
@@ -105,12 +109,7 @@
     },
     {
       "id": "objective.the_edge.draw_the_edge",
-      "condition": {
-        "kind": "pattern_held",
-        "routes": [2, 3, 4],
-        "nodes": [2, 3, 4],
-        "steps": 10923
-      },
+      "condition": { "kind": "compartment_reshaped", "steps": 1 },
       "optional": null
     },
     {

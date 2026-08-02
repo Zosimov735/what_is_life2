@@ -1085,9 +1085,10 @@ pub fn assemble(state: &RunState) -> CandidateSlate {
         .collect();
     let tables = Tables::build(field, &window, TAU_DEFAULT);
 
-    // The standing inside passes intake first. When it empties, the standing
-    // View has vanished and the fallback `<N, rho0, w0, u0>` replaces it before
-    // anything else.
+    // The standing inside passes intake first. When it empties, either because
+    // the player cleared it or because every named Node vanished, the local
+    // fallback `<N, rho0, w0, u0>` seeds this evaluation before anything else.
+    // This never writes the fallback back into the active View.
     let taken = intake(&state.view.inside, &tables.nodes);
     let standing_removed = (state.view.inside.len() - taken.len()) as u16;
     let standing_fallback = taken.is_empty();

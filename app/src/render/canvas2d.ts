@@ -13,7 +13,7 @@
  */
 
 import {
-  BOUNDARY_SHELL,
+  PHYSICAL_COMPARTMENT_SHELL,
   CHARGE_CORE,
   CURRENT_BRIGHT,
   HAZE,
@@ -194,9 +194,8 @@ class Canvas2dEngine implements Engine {
   }
 
   private boundary(scene: Scene): void {
-    // The candidates first, so the standing boundary reads over them: they are
-    // proposals about where a boundary could stand, and the one that does
-    // stand is the one a player must be able to find at a glance.
+    // Candidates first; the material compartment and active View then remain
+    // legible over every possible observation aperture.
     this.strokeHulls(scene.candidates);
     this.strokeHulls(scene.boundaries);
   }
@@ -209,16 +208,21 @@ class Canvas2dEngine implements Engine {
       const pairs = mark.points.length / 2;
       if (pairs === 0) continue;
       // A hull with no area — one member, two, or three in a line — is drawn
-      // as a capsule of the boundary's own width, so the reading holds. Both
-      // engines take the same marks and treat these two cases the same way.
+      // as a capsule of the hull's own width, so the reading holds. Its dash
+      // register still applies: a small View or proposal must not turn into the
+      // same solid object as a small physical compartment.
       if (pairs <= 2) {
         context.lineCap = 'round';
+        context.setLineDash(dashOf(mark));
         context.strokeStyle = alphaText(mark.tone, mark.alpha);
-        context.lineWidth = mark.width * 2;
+        context.lineWidth = mark.width;
         if (pairs === 1) {
           context.beginPath();
           context.arc(mark.points[0], mark.points[1], mark.width, 0, Math.PI * 2);
-          context.fill();
+          if (mark.role === 'compartment' && !mark.proposed) {
+            context.fillStyle = alphaText(mark.tone, mark.alpha * 0.07);
+            context.fill();
+          }
           context.stroke();
         } else {
           context.beginPath();
@@ -226,6 +230,7 @@ class Canvas2dEngine implements Engine {
           context.lineTo(mark.points[2], mark.points[3]);
           context.stroke();
         }
+        context.setLineDash([]);
         continue;
       }
       context.beginPath();
@@ -234,17 +239,14 @@ class Canvas2dEngine implements Engine {
         context.lineTo(mark.points[point], mark.points[point + 1]);
       }
       context.closePath();
-      // A proposed boundary and a candidate outline are outlines and nothing
-      // more: no region under either, because no region has been declared —
-      // the inside each draws is one a commit would adopt, and a commit that is
-      // refused adopts none of it.
-      if (!mark.proposed && mark.candidate === 0) {
+      // Only the committed physical compartment owns a material interior.
+      // The passive View and candidates remain apertures/outlines.
+      if (mark.role === 'compartment' && !mark.proposed) {
         context.fillStyle = alphaText(mark.tone, mark.alpha * 0.07);
         context.fill();
-        // A wide, faint pass under the dashes, so the boundary reads as an edge
-        // with a hue of its own rather than as one more Route.
+        // A broad low-alpha shoulder gives the compartment physical weight.
         context.strokeStyle = alphaText(mark.tone, mark.alpha * 0.12);
-        context.lineWidth = mark.width * 7;
+        context.lineWidth = mark.width * 2.4;
         context.lineJoin = 'round';
         context.stroke();
       }
@@ -296,7 +298,7 @@ class Canvas2dEngine implements Engine {
         context.stroke();
       }
       if (mark.shell) {
-        context.strokeStyle = alphaText(BOUNDARY_SHELL, 0.75);
+        context.strokeStyle = alphaText(PHYSICAL_COMPARTMENT_SHELL, 0.75);
         context.lineWidth = Math.max(1, mark.radius * 0.18);
         context.beginPath();
         context.arc(mark.x, mark.y, mark.radius * 1.9, 0, Math.PI * 2);
@@ -440,7 +442,7 @@ class Canvas2dEngine implements Engine {
   /**
    * The handles a paused Field offers. One shape per kind, so what a handle
    * takes hold of reads without a word for it: a ring on a Port, a square at a
-   * Route's end, a diamond on a Boundary vertex. Both engines draw the same
+   * Route's end, a diamond on a Compartment vertex. Both engines draw the same
    * three shapes at the same three sizes.
    */
   private handles(scene: Scene): void {

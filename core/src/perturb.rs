@@ -455,12 +455,11 @@ impl Recorded {
 }
 
 /// A Field prepared for replay: the state a replay starts from, the pass
-/// prepared for its shape, the standing inside the Boundary leakage rule reads,
-/// and the member identifiers the reading's series is summed over.
+/// prepared for its causal shape, and the member identifiers the observation's
+/// series is summed over.
 pub(crate) struct Prepared {
     pub start: FieldState,
     pub cache: StepCache,
-    pub inside: Vec<u32>,
     pub members: Vec<u32>,
 }
 
@@ -470,7 +469,6 @@ impl Prepared {
         Prepared {
             start: window.start.clone(),
             cache: window.cache.clone(),
-            inside: window.inside.clone(),
             members: sets.members.clone(),
         }
     }
@@ -480,11 +478,10 @@ impl Prepared {
     pub(crate) fn without(window: &Window<'_>, sets: &Sets, routes: &[u32]) -> Self {
         let mut start = window.start.clone();
         start.routes.retain(|held| !routes.contains(&held.route));
-        let cache = StepCache::of(&start, &window.inside);
+        let cache = StepCache::of(&start);
         Prepared {
             start,
             cache,
-            inside: window.inside.clone(),
             members: sets.members.clone(),
         }
     }
@@ -548,6 +545,11 @@ impl Prepared {
                 }
                 layer.port_ids.sort_unstable();
             }
+            for member in start.physical_compartment.members.iter_mut() {
+                if member == old {
+                    *member = *new;
+                }
+            }
         }
         // Every list a Field declares is ascending by identifier, and a fresh
         // identifier does not land where the one it replaced stood.
@@ -567,27 +569,13 @@ impl Prepared {
             held.sort_unstable();
             held
         };
-        // The Boundary leakage rule reads the standing inside, and the standing
-        // inside is the recorded one with each replacement in its member's
-        // place: a replay proposes a reading of the window, never a different
-        // history of it.
-        let inside: Vec<u32> = {
-            let mut held: Vec<u32> = window
-                .inside
-                .iter()
-                .map(|node| {
-                    fresh
-                        .iter()
-                        .find(|(old, _)| old == node)
-                        .map(|(_, new)| *new)
-                        .unwrap_or(*node)
-                })
-                .collect();
-            held.sort_unstable();
-            held
-        };
-        let cache = StepCache::of(&start, &inside);
-        Prepared { start, cache, inside, members }
+        // Component substitution is an explicit cloned intervention. If the
+        // replaced material stood inside the physical compartment, its fresh
+        // identifier takes that same physical seat; the observation set above
+        // is remapped independently.
+        start.physical_compartment.members.sort_unstable();
+        let cache = StepCache::of(&start);
+        Prepared { start, cache, members }
     }
 }
 
@@ -616,7 +604,6 @@ pub(crate) fn replay_series(
         let outcome = field::advance_cached(
             &mut state,
             recorded.ctl,
-            &prepared.inside,
             window.pointer_speed,
             &mut field::Staging {
                 pressures: &mut scratch,

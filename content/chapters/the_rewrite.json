@@ -373,6 +373,10 @@
       ]
     }
   ],
+  "physical_compartment": {
+    "members": [2, 3, 4, 5],
+    "leak_per_exposed_contact_per_step": 64
+  },
   "objectives": [
     {
       "id": "objective.the_rewrite.follow_the_band",

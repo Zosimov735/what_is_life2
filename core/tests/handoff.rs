@@ -28,7 +28,7 @@
 //! `core/tests/chapter_the_mesh.rs` against the chapter that authors them.
 
 use field_game_core::field::{
-    self, FieldLayer, FormState, LinkState, NodeKind, PortState,
+    self, FieldLayer, FormState, LinkState, NodeKind, PhysicalCompartment, PortState,
 };
 use field_game_core::fx::{Vec2, ONE_UNIT};
 use field_game_core::json::{parse, Json};
@@ -491,6 +491,10 @@ fn two_layers(controlled: u8) -> FieldState {
         },
     ];
     field.next_node_id = 3;
+    field.physical_compartment = PhysicalCompartment {
+        members: vec![1, 2],
+        leak_per_exposed_contact_per_step: 0,
+    };
     field
 }
 
@@ -510,7 +514,7 @@ fn the_frames_camera_layer_follows_the_form_control_moved_to() {
             cues: &[],
             pressures: &[],
             queue: &field_game_core::plan::PlanQueue::new(),
-            inside: &[],
+            view_inside: &[],
             forecast: &[],
         });
         encoded[15]

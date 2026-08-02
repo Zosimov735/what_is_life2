@@ -13,7 +13,8 @@
 //! no edit reproduces it exactly and a deviation is a reading of the edit.
 
 use field_game_core::field::{
-    self, BoundaryState, FieldLayer, FormState, NodeKind, PortState, RouteState,
+    self, BoundaryState, FieldLayer, FormState, NodeKind, PhysicalCompartment, PortState,
+    RouteState,
 };
 use field_game_core::fx::{Vec2, ONE_UNIT};
 use field_game_core::rank;
@@ -201,9 +202,13 @@ fn fixture_field() -> FieldState {
         })
         .collect();
 
-    // No leakage: the standing View's boundary is not a source of exogenous
-    // terms in this fixture, so every `e` a value reads is the layer's Drain.
-    field.boundaries = BoundaryState { drawn: Vec::new(), authored: Vec::new(), leak_frac: 0 };
+    // No leakage: the physical compartment has a zero coefficient, so every
+    // `e` a value reads is the layer's Drain. The View remains observational.
+    field.physical_compartment = PhysicalCompartment {
+        members: field.ports.iter().map(|port| port.node).collect(),
+        leak_per_exposed_contact_per_step: 0,
+    };
+    field.boundaries = BoundaryState { drawn: Vec::new(), authored: Vec::new() };
     field
 }
 
@@ -218,7 +223,6 @@ fn played(steps: usize, view: ViewDeclaration) -> RunState {
         let outcome = field::advance(
             &mut now,
             ControlState::default(),
-            &view.inside,
             FRAC_ONE,
             &mut field::Unstaged::default().staging(),
         );

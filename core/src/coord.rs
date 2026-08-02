@@ -896,8 +896,11 @@ fn descriptor_context(window: &Window<'_>, structure: &Structure, sets: &Sets) -
         layer.port_ids.retain(|node| member_of(*node));
     }
     let members = sets.members.clone();
-    let cache = StepCache::of(&start, &members);
-    Prepared { start, cache, inside: members.clone(), members }
+    // This is a physically cleared synthetic context, not a changed View: its
+    // material compartment is explicitly the set of remaining Components.
+    start.physical_compartment.members = members.clone();
+    let cache = StepCache::of(&start);
+    Prepared { start, cache, members }
 }
 
 // ---------------------------------------------------------------------------

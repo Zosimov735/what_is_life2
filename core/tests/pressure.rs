@@ -720,7 +720,8 @@ fn a_drawing_noise_pressure_spreads_the_confidence_ranges() {
     // whose level stands on top of a zero authored base — the pressure alone
     // is what makes the layer draw.
     use field_game_core::field::{
-        BoundaryState, FieldLayer, FormState, PortState, RouteState, Unstaged,
+        BoundaryState, FieldLayer, FormState, PhysicalCompartment, PortState, RouteState,
+        Unstaged,
     };
     use field_game_core::fx::{Vec2, ONE_UNIT};
     use field_game_core::rng::RngState;
@@ -761,8 +762,11 @@ fn a_drawing_noise_pressure_spreads_the_confidence_ranges() {
         RouteState { route: 4, tail: 3, head: 1, capacity: 16 * ONE_UNIT, flow: 0, formed_step: 0 },
     ];
     keyframe.forms = Vec::<FormState>::new();
-    keyframe.boundaries =
-        BoundaryState { drawn: Vec::new(), authored: Vec::new(), leak_frac: 0 };
+    keyframe.physical_compartment = PhysicalCompartment {
+        members: vec![1, 2],
+        leak_per_exposed_contact_per_step: 0,
+    };
+    keyframe.boundaries = BoundaryState { drawn: Vec::new(), authored: Vec::new() };
     keyframe.next_node_id = 4;
     keyframe.next_route_id = 5;
     field_game_core::field::validate(&keyframe).expect("the fixture is a valid Field");
@@ -801,7 +805,6 @@ fn a_drawing_noise_pressure_spreads_the_confidence_ranges() {
         let outcome = field_game_core::field::advance(
             &mut now,
             ControlState::default(),
-            &view.inside,
             FRAC_ONE,
             &mut staged.staging(),
         );
@@ -871,8 +874,8 @@ fn a_drawing_noise_pressure_spreads_the_confidence_ranges() {
 // ---------------------------------------------------------------------------
 
 use field_game_core::field::{
-    self as field_mod, BoundaryState, CurrentState, FieldLayer, NodeKind, PortState, RouteState,
-    Unstaged,
+    self as field_mod, BoundaryState, CurrentState, FieldLayer, NodeKind, PhysicalCompartment,
+    PortState, RouteState, Unstaged,
 };
 use field_game_core::fx::{fixed_mul, Vec2, ONE_UNIT};
 use field_game_core::rng::RngState;
@@ -916,7 +919,11 @@ fn effect_field(
             formed_step: 0,
         })
         .collect();
-    field.boundaries = BoundaryState { drawn: Vec::new(), authored: Vec::new(), leak_frac: 0 };
+    field.physical_compartment = PhysicalCompartment {
+        members: field.ports.iter().map(|port| port.node).collect(),
+        leak_per_exposed_contact_per_step: 0,
+    };
+    field.boundaries = BoundaryState { drawn: Vec::new(), authored: Vec::new() };
     field.next_node_id = holds.iter().map(|(node, ..)| *node).max().unwrap_or(0) + 1;
     field.next_route_id = routes.iter().map(|(route, ..)| *route).max().unwrap_or(0) + 1;
     field_game_core::field::validate(&field).expect("the fixture is a valid Field");
@@ -1073,7 +1080,7 @@ fn flood_lowers_the_targeted_threshold_for_decay_and_the_throttle() {
         field: &field,
         mode: field_game_core::run::Mode::Running,
         time_scale: 65_535,
-        inside: &[],
+        view_inside: &[],
         queue: &field_game_core::plan::PlanQueue::new(),
         cues: &[],
         config: &field_game_core::state::InputConfig::default_config(),

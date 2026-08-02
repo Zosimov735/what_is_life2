@@ -40,6 +40,10 @@
     }
   ],
   "authored_boundaries": [],
+  "physical_compartment": {
+    "members": [2],
+    "leak_per_exposed_contact_per_step": 64
+  },
   "objectives": [
     {
       "id": "objective.the_pull.stand_in_the_band",

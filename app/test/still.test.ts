@@ -19,7 +19,12 @@ import {
 import { create_renderer } from '../src/render';
 import { startCanvas2dEngine } from '../src/render/canvas2d';
 import { HANDLE_KIND } from '../src/render/scene';
-import type { FrameMode, FramePort, FrameState } from '../../worker/src/frame-state';
+import {
+  FRAME_VERSION,
+  type FrameMode,
+  type FramePort,
+  type FrameState,
+} from '../../worker/src/frame-state';
 
 /** The reference viewport the surface is sized to for these tests. */
 const WIDE = 1440;
@@ -193,7 +198,7 @@ function fieldIn(
 ): FrameState {
   return {
     header: {
-      version: 1,
+      version: FRAME_VERSION,
       flags: mode === 'still' ? 1 : 0,
       stillVisible: mode === 'still',
       dropped: false,

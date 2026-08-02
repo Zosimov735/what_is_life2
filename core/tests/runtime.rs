@@ -361,7 +361,7 @@ fn the_render_snapshot_carries_the_locked_header() {
     let view = session.frame_view();
 
     assert_eq!(&view[0..4], b"FGF1");
-    assert_eq!(u16::from_le_bytes([view[4], view[5]]), 1);
+    assert_eq!(u16::from_le_bytes([view[4], view[5]]), field_game_core::frame::FRAME_VERSION);
     assert_eq!(u32::from_le_bytes([view[8], view[9], view[10], view[11]]), 3);
     assert_eq!(
         u16::from_le_bytes([view[12], view[13]]),

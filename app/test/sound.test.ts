@@ -12,7 +12,7 @@
  */
 
 import { afterEach, expect, test, vi } from 'vitest';
-import { decodeFrameState, type FrameState } from '../../worker/src/frame-state';
+import { decodeFrameState, FRAME_VERSION, type FramePort, type FrameState } from '../../worker/src/frame-state';
 import { fixtureSnapshot } from '../src/shell/dev-frames';
 import { FULL_SOUND, openSound, type Sound } from '../src/shell/sound';
 
@@ -186,7 +186,7 @@ function framed(
   const view = new DataView(buffer);
   const bytes = new Uint8Array(buffer);
   bytes.set([0x46, 0x47, 0x46, 0x31]);
-  view.setUint16(4, 1, true);
+  view.setUint16(4, FRAME_VERSION, true);
   view.setUint16(6, reduced ? 4 : 0, true);
   view.setUint32(8, step, true);
   view.setUint16(12, scale, true);
@@ -218,6 +218,32 @@ function framed(
     offset += 8;
   }
   return decodeFrameState(buffer);
+}
+
+/** Gives a decoded frame independent physical-compartment and View members. */
+function withRegisters(
+  state: FrameState,
+  physical: readonly number[],
+  observed: readonly number[],
+): FrameState {
+  state.ports = [1, 2, 3].map(
+    (node): FramePort => ({
+      node,
+      kind: 0,
+      layer: 0,
+      open: true,
+      overloaded: false,
+      member: physical.includes(node),
+      shell: false,
+      proposedMember: false,
+      charge: 1_000,
+      x: node * 16,
+      y: node * 16,
+      reserve: 0,
+    }),
+  );
+  state.inside = state.ports.map((port) => observed.includes(port.node));
+  return state;
 }
 
 /** Every oscillator built, by the shape it was given. */
@@ -515,6 +541,24 @@ test('entering and leaving Still Mode each sound, and neither is a depth change'
   // And a completed exit announces nothing either.
   sound.observe(framed(5, []));
   expect(sound.scheduled()).toBe(4);
+});
+
+test('only the passive View cue follows View membership, not the physical compartment', () => {
+  const { sound, target } = sounding();
+  gesture(target);
+
+  sound.observe(withRegisters(framed(1, []), [1, 2], [1]));
+  expect(sound.scheduled()).toBe(0);
+
+  // A causal compartment commit may change physical members on the same step,
+  // but the observation aperture did not move and therefore sounds nothing.
+  sound.observe(withRegisters(framed(1, []), [2, 3], [1]));
+  expect(sound.scheduled()).toBe(0);
+
+  // `set_focus` also runs no step. Its independent View bitset still produces
+  // the brief observation cue immediately.
+  sound.observe(withRegisters(framed(1, []), [2, 3], [2]));
+  expect(sound.scheduled()).toBe(2);
 });
 
 test('a Handoff sounds once, rising, in a register no other cue uses', () => {

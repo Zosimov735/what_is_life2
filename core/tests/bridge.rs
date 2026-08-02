@@ -16,15 +16,20 @@
 use field_game_core::fault::Code;
 use field_game_core::field::{
     pulse_radius, reach_ticks,
-    BoundaryState, CurrentState, FieldLayer, FormState, NodeKind, PortState, RouteState,
+    BoundaryState, CurrentState, FieldLayer, FormState, NodeKind, PhysicalCompartment,
+    PortState, RouteState,
 };
-use field_game_core::frame::{FRAME_BUFFER_CAP, HEADER_BYTES, MAGIC, SECTION_ENTRY_BYTES};
+use field_game_core::frame::{
+    self, FRAME_BUFFER_CAP, FRAME_VERSION, HEADER_BYTES, MAGIC, SECTION_ENTRY_BYTES,
+};
 use field_game_core::fx::{Vec2, ONE_UNIT};
 use field_game_core::json::{canonicalize, parse, Json};
-use field_game_core::run::Run;
+use field_game_core::plan::{PlanCommand, PlanQueue};
+use field_game_core::run::{Mode, Run};
 use field_game_core::state::{
-    auto_slot, CheckpointState, FieldState, RecordKind, RunState, Step, Surround, ViewDeclaration,
-    ANCHORS_PER_RUN, AUTOSAVE_STEPS, FRAC_ONE, OPENING_IMPULSE, SAVE_PAYLOAD_CAP,
+    auto_slot, CheckpointState, FieldState, InputConfig, Progress, RecordKind, RunState, Step,
+    Surround, ViewDeclaration, ANCHORS_PER_RUN, AUTOSAVE_STEPS, FRAC_ONE, OPENING_IMPULSE,
+    SAVE_PAYLOAD_CAP,
 };
 use field_game_core::Session;
 
@@ -188,6 +193,110 @@ fn normalize_prev_assembly(file: &Json, step: i64) -> Json {
     rebuilt
 }
 
+/// Rewrites a current export into the one legacy shape the V2 loader supports.
+/// This is test-fixture construction, not a second migration implementation:
+/// it only reverses the two schema moves (version and compartment location),
+/// then recomputes the wrapper digest over those exact canonical bytes.
+fn as_v1_export(v2: &str) -> String {
+    fn field_as_v1(value: &mut Json) {
+        let Json::Map(field) = value else { panic!("a Field is an object") };
+        let at = field
+            .iter()
+            .position(|(key, _)| key == "physical_compartment")
+            .expect("V2 carries a physical compartment");
+        let Json::Map(compartment) = field.remove(at).1 else {
+            panic!("the physical compartment is an object")
+        };
+        let coefficient = compartment
+            .iter()
+            .find(|(key, _)| key == "leak_per_exposed_contact_per_step")
+            .map(|(_, value)| value.clone())
+            .expect("the compartment carries its coefficient");
+        let boundaries = field
+            .iter_mut()
+            .find(|(key, _)| key == "boundaries")
+            .map(|(_, value)| value)
+            .expect("the Field carries observation boundaries");
+        let Json::Map(boundaries) = boundaries else { panic!("boundaries is an object") };
+        boundaries.push(("leak_frac".to_string(), coefficient));
+    }
+
+    let mut file = parse(v2).expect("the V2 export is canonical");
+    let Json::Map(wrapper) = &mut file else { panic!("an export is an object") };
+    let payload = wrapper
+        .iter_mut()
+        .find(|(key, _)| key == "payload")
+        .map(|(_, value)| value)
+        .expect("an export carries a payload");
+    let Json::Map(payload_map) = payload else { panic!("the payload is an object") };
+    for (key, value) in payload_map.iter_mut() {
+        if key == "save_version" {
+            *value = Json::Int(1);
+        } else if key == "field" {
+            let Json::Map(field) = value else { panic!("field is an object") };
+            for (which, state) in field.iter_mut() {
+                if which == "now" {
+                    field_as_v1(state);
+                } else if which == "trace" {
+                    let Json::Map(trace) = state else { panic!("trace is an object") };
+                    let keyframe = trace
+                        .iter_mut()
+                        .find(|(name, _)| name == "keyframe")
+                        .map(|(_, value)| value)
+                        .expect("trace carries its keyframe");
+                    field_as_v1(keyframe);
+                }
+            }
+        }
+    }
+    let mut payload_bytes = String::new();
+    field_game_core::json::write_value(&mut payload_bytes, payload).expect("canonical payload");
+    let digest =
+        field_game_core::json::hex_bytes(&field_game_core::sha256::digest(payload_bytes.as_bytes()));
+    for (key, value) in wrapper.iter_mut() {
+        match key.as_str() {
+            "payload_sha256" => *value = Json::Text(digest.clone()),
+            "save_version" => *value = Json::Int(1),
+            _ => {}
+        }
+    }
+    let mut written = String::new();
+    field_game_core::json::write_value(&mut written, &file).expect("canonical V1 export");
+    written
+}
+
+#[test]
+fn v1_migration_is_deterministic_and_its_v2_output_is_canonical() {
+    let mut source = opened(KEY);
+    source.command("input_frame", &frame(1, 3));
+    let legacy = as_v1_export(&exported(&mut source));
+    assert_eq!(canonicalize(&legacy).expect("the synthetic V1 file is canonical"), legacy);
+
+    let legacy_file = parse(&legacy).expect("canonical V1 wrapper");
+    let legacy_payload = legacy_file.get("payload").expect("a legacy payload");
+    let first = RunState::migrate_v1(legacy_payload).expect("V1 migrates");
+    let second = RunState::migrate_v1(legacy_payload).expect("the same V1 migrates again");
+    assert_eq!(first.payload(), second.payload(), "migration is byte-deterministic");
+    assert_eq!(first.now.physical_compartment.members, first.view.inside);
+    assert_eq!(first.trace.keyframe.physical_compartment.members, first.view.inside);
+    assert_eq!(canonicalize(&first.payload()).expect("V2 payload is canonical"), first.payload());
+    let reread = RunState::read(&parse(&first.payload()).expect("canonical V2"))
+        .expect("canonical V2 reads");
+    assert_eq!(reread.payload(), first.payload(), "V2 is its own canonical round trip");
+
+    let mut imported = Session::new(&support::worker_init()).expect("versions agree");
+    let answer = body(&imported.command("import_run", &import_body(&legacy)));
+    assert_eq!(int_of(&answer, "migrated_from"), 1, "the boundary reports provenance");
+    let rewritten = exported(&mut imported);
+    assert!(rewritten.contains("\"save_version\":2"));
+    assert!(rewritten.contains("\"physical_compartment\":"));
+    assert!(!rewritten.contains("\"leak_frac\":"), "legacy causal storage is gone");
+
+    let mut current = Session::new(&support::worker_init()).expect("versions agree");
+    let current_answer = body(&current.command("import_run", &import_body(&rewritten)));
+    assert_eq!(current_answer.get("migrated_from"), None, "native V2 has no migration marker");
+}
+
 #[test]
 fn an_export_file_is_canonical_and_carries_the_locked_wrapper() {
     let mut session = opened(KEY);
@@ -197,7 +306,7 @@ fn an_export_file_is_canonical_and_carries_the_locked_wrapper() {
     assert_eq!(canonicalize(&file).expect("the export file is canonical"), file);
     let parsed = parse(&file).expect("canonical");
     assert_eq!(text_of(&parsed, "format"), "field-game-run");
-    assert_eq!(int_of(&parsed, "save_version"), 1);
+    assert_eq!(int_of(&parsed, "save_version"), 2);
     let mut bytes = String::new();
     field_game_core::json::write_value(&mut bytes, parsed.get("payload").expect("a payload"))
         .expect("canonical");
@@ -218,8 +327,8 @@ fn an_import_is_refused_for_every_locked_reason() {
     // above its own — which is refused as a version rather than guessed at.
     // The file's own version is its last key; the payload carries one of its
     // own, which the digest covers.
-    let newer = file.replace(",\"save_version\":1}", ",\"save_version\":2}");
-    let older = file.replace(",\"save_version\":1}", ",\"save_version\":0}");
+    let newer = file.replace(",\"save_version\":2}", ",\"save_version\":3}");
+    let older = file.replace(",\"save_version\":2}", ",\"save_version\":0}");
     assert_ne!(newer, file);
     assert_ne!(older, file);
 
@@ -231,9 +340,9 @@ fn an_import_is_refused_for_every_locked_reason() {
         (
             "reordered",
             format!(
-                "{{\"save_version\":1,{}",
+                "{{\"save_version\":2,{}",
                 file.trim_start_matches("{\"format\":\"field-game-run\",")
-                    .replace(",\"save_version\":1}", "}")
+                    .replace(",\"save_version\":2}", "}")
             ),
             "import_invalid",
         ),
@@ -895,7 +1004,14 @@ fn fixture_field() -> FieldState {
         bright: true,
         active: true,
     }];
-    field.boundaries = BoundaryState { drawn: Vec::new(), authored: Vec::new(), leak_frac: 4096 };
+    // This fixture keeps the legacy member set so the V2 byte change is the
+    // format version itself; the independent-flags test below deliberately
+    // separates physical membership from the passive View.
+    field.physical_compartment = PhysicalCompartment {
+        members: vec![1, 3],
+        leak_per_exposed_contact_per_step: 4096,
+    };
+    field.boundaries = BoundaryState { drawn: Vec::new(), authored: Vec::new() };
     field
 }
 
@@ -937,7 +1053,7 @@ fn the_render_snapshot_carries_the_locked_header_and_section_table() {
     let view = run.frame_view();
 
     assert_eq!(&view[0..4], MAGIC);
-    assert_eq!(u16::from_le_bytes([view[4], view[5]]), 1);
+    assert_eq!(u16::from_le_bytes([view[4], view[5]]), FRAME_VERSION);
     assert_eq!(u32::from_le_bytes([view[8], view[9], view[10], view[11]]), 1, "one step ran");
     assert_eq!(u16::from_le_bytes([view[12], view[13]]), 65535, "full speed saturates");
     assert_eq!(view[14], 0, "the mode is running");
@@ -998,16 +1114,21 @@ fn the_render_snapshot_reads_the_field_the_model_holds() {
     let vx = f32::from_le_bytes([view[at + 12], view[at + 13], view[at + 14], view[at + 15]]);
     assert_eq!(vx, 0.375, "the velocity the damper left, one way into f32");
 
-    // Ports: the second Node holds more Charge than its threshold, so it is
-    // flagged overloaded; the first and third are members of the inside.
+    // Ports: physical membership is carried here rather than inferred from the
+    // View. This compatibility fixture gives both the same set; the next test
+    // pulls all three notions apart.
     let (at, count) = section(2);
     assert_eq!(count, 4);
     let port = |place: usize| &view[at + place * 16..at + (place + 1) * 16];
     assert_eq!(u32::from_le_bytes(port(0)[0..4].try_into().expect("four bytes")), 1);
     assert_eq!(port(0)[4], 0, "a Port is first in the closed kind set");
-    assert_eq!(port(0)[5] & 0b0100, 0b0100, "a member of the standing inside");
+    assert_eq!(port(0)[5] & 0b0100, 0b0100, "a physical member");
+    assert_eq!(port(0)[5] & 0b1000, 0b1000, "an exposed physical member");
     assert_eq!(port(1)[5] & 0b0010, 0b0010, "overloaded");
-    assert_eq!(port(1)[5] & 0b0100, 0, "not a member");
+    assert_eq!(port(1)[5] & 0b0100, 0, "not a physical member");
+    assert_eq!(port(2)[5] & 0b0100, 0b0100, "the other physical member");
+    assert_eq!(port(2)[5] & 0b1000, 0b1000, "also on the exposed shell");
+    assert_eq!(port(0)[5] & 0b1_0000, 0, "no queued compartment proposal");
     assert_eq!(port(3)[4], 2, "a module is third in the closed kind set");
     // Position in units times 16.
     assert_eq!(u16::from_le_bytes(port(0)[8..10].try_into().expect("two bytes")), 100 * 16);
@@ -1055,6 +1176,61 @@ fn the_render_snapshot_reads_the_field_the_model_holds() {
     assert_eq!(count, 1);
     assert_eq!(view[at], 0b0101, "Port records 0 and 2 are members");
     assert_eq!(&view[at + 1..at + 32], &[0u8; 31]);
+}
+
+#[test]
+fn frame_v2_keeps_physical_proposed_and_view_membership_independent() {
+    let mut field = fixture_field();
+    field.physical_compartment.members = vec![1, 2];
+    let view = fixture_view();
+    let mut queue = PlanQueue::new();
+    queue
+        .push(PlanCommand::ReshapeCompartment { members: vec![2, 4] })
+        .expect("the proposal fits");
+    queue.rebuild(&field);
+    let config = InputConfig::default_config();
+    let progress = Progress::opening();
+    let encoded = frame::encode(&frame::Snapshot {
+        field: &field,
+        mode: Mode::Running,
+        time_scale: u16::MAX,
+        view_inside: &view.inside,
+        queue: &queue,
+        cues: &[],
+        config: &config,
+        progress: &progress,
+        pressures: &[],
+        objective_ordinal: 0,
+        forecast: &[],
+    });
+    let section = |kind: u8| -> (usize, usize) {
+        for place in 0..usize::from(encoded[20]) {
+            let at = HEADER_BYTES + place * SECTION_ENTRY_BYTES;
+            if encoded[at] == kind {
+                let count = u16::from_le_bytes([encoded[at + 2], encoded[at + 3]]) as usize;
+                let offset = u32::from_le_bytes([
+                    encoded[at + 4],
+                    encoded[at + 5],
+                    encoded[at + 6],
+                    encoded[at + 7],
+                ]) as usize;
+                return (offset, count);
+            }
+        }
+        panic!("frame carries section {kind}");
+    };
+
+    let (ports, count) = section(2);
+    assert_eq!(count, 4);
+    let flags = |place: usize| encoded[ports + place * 16 + 5];
+    assert_eq!(flags(0) & 0b1_0100, 0b0_0100, "Node 1: physical only");
+    assert_eq!(flags(1) & 0b1_0100, 0b1_0100, "Node 2: physical and proposed");
+    assert_eq!(flags(2) & 0b1_0100, 0, "Node 3: View only, so no physical flags");
+    assert_eq!(flags(3) & 0b1_0100, 0b1_0000, "Node 4: proposed only");
+
+    let (view_bits, count) = section(5);
+    assert_eq!(count, 1);
+    assert_eq!(encoded[view_bits], 0b0101, "the passive View remains Nodes 1 and 3");
 }
 
 #[test]

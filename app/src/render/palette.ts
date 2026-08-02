@@ -16,7 +16,8 @@
  * | The controlled Form | near-white, the brightest thing on the surface |
  * | Every other Form | cool graphite |
  * | Route | graphite, warmed by flow, red under overload |
- * | Boundary | pale violet |
+ * | Physical compartment | warm mineral grey |
+ * | Observation View | pale violet |
  * | Pressure | one hue per pressure of the closed set |
  *
  * Colours are technical values rather than player-facing copy, so they are
@@ -82,21 +83,26 @@ export const FORM_CONTROLLED_RING: Tone = 0x9fd2ff;
 /** Every Form the player does not steer. */
 export const FORM_PLAIN: Tone = 0x76828f;
 
-/** The standing View's boundary, and the members standing on its shell. */
-export const BOUNDARY: Tone = 0xc3a4ff;
-export const BOUNDARY_SHELL: Tone = 0xe0d0ff;
+/** The material edge that determines physical membership and leakage. */
+export const PHYSICAL_COMPARTMENT: Tone = 0xb8b3aa;
+export const PHYSICAL_COMPARTMENT_SHELL: Tone = 0xe7e0d4;
 
-/** The boundary a queued change proposes, in the queue's own register. */
-export const BOUNDARY_PROPOSED: Tone = 0x67d6b0;
+/** A queued causal compartment edit, in the queue's mint register. */
+export const PHYSICAL_COMPARTMENT_PROPOSED: Tone = 0x67d6b0;
+
+/** The passive aperture that determines what the instruments measure. */
+export const OBSERVATION_VIEW: Tone = 0xc3a4ff;
+
+/** Compatibility names for consumers that have not adopted the split yet. */
+export const BOUNDARY: Tone = OBSERVATION_VIEW;
+export const BOUNDARY_SHELL: Tone = PHYSICAL_COMPARTMENT_SHELL;
+export const BOUNDARY_PROPOSED: Tone = PHYSICAL_COMPARTMENT_PROPOSED;
 
 /**
- * A candidate of the standing slate, and the one the queue proposes adopting.
+ * A candidate of the standing slate, and the one the active View matches.
  *
- * Both sit in the boundary's own family and below it in weight: a candidate is
- * a proposal about where a boundary could stand, so it reads as the same kind
- * of thing as the standing boundary and never as brightly. Nothing here ranks
- * them — the slate this goal emits is unranked, and a tone that said otherwise
- * would be a reading the record does not carry.
+ * Both sit in the observation family and below the active View in weight: a
+ * candidate is a possible measurement aperture, never a material edge.
  */
 export const CANDIDATE: Tone = 0x8f86b8;
 export const CANDIDATE_FOCUSED: Tone = 0xe6dcff;
@@ -116,14 +122,14 @@ export const PRESSURE_TONES: readonly Tone[] = [
  *
  * Three handles, three hues, and three shapes, so what a handle is answers
  * without a word for it: a Port keeps the Port's own hue, a Route's two ends
- * take the hue a Route carries flow in, and a Boundary vertex takes the
+ * take the hue a Route carries flow in, and a Compartment vertex takes the
  * boundary's. The forecast strip is drawn in the boundary's hue too, because
  * what it reads is the standing View's own forward reading.
  */
 export const HANDLE_PORT: Tone = 0x9fb2c8;
 export const HANDLE_ROUTE: Tone = 0xa9c2d6;
-export const HANDLE_BOUNDARY: Tone = 0xe0d0ff;
-export const FORECAST: Tone = 0xc3a4ff;
+export const HANDLE_BOUNDARY: Tone = PHYSICAL_COMPARTMENT_SHELL;
+export const FORECAST: Tone = OBSERVATION_VIEW;
 
 /** The hue a cue that reports something wrong opens with. */
 export const CUE_HARD: Tone = 0xff8a6b;

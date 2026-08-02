@@ -146,7 +146,11 @@ test('opening a run raises the chapter and the objective it stands on', async ()
 
   const raised = session.events();
   const chapter = raised.find((event) => event.ev === 'chapter_changed');
-  expect(chapter?.body).toEqual({ chapter_index: 0, title_key: 'chapter.the_pull' });
+  expect(chapter?.body).toEqual({
+    chapter_index: 0,
+    title_key: 'chapter.the_pull',
+    view: { inside: [2, 3, 4], resolution: 1, surround: 'adjacent', window: 45 },
+  });
 
   const offered = raised.find((event) => event.ev === 'objective_changed');
   expect(offered).toBeDefined();

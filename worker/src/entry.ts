@@ -93,13 +93,17 @@ const MODE_SUSPENDED = 4;
 const DROPPED_FLAG = 1 << 1;
 
 /**
- * The three queued-change commands. A run that is still runs no step and does
- * not change mode, so nothing else would make the next frame carry a snapshot —
- * and the queue is drawn on the surface, as the previews the frame's own
- * sections hold. A successful one of these therefore marks the next frame as
- * one that carries its buffer, exactly as a mode change does.
+ * The commands that change a still surface without running a step. The three
+ * queue commands move causal previews; `set_focus` moves only the passive View.
+ * A successful one therefore marks the next frame as one that carries its
+ * buffer, exactly as a mode change does.
  */
-const QUEUE_COMMANDS: readonly string[] = ['queue_plan', 'undo_plan', 'commit_plan'];
+const SNAPSHOT_COMMANDS: readonly string[] = [
+  'queue_plan',
+  'undo_plan',
+  'commit_plan',
+  'set_focus',
+];
 
 /**
  * The commands that put a run somewhere other than where the scheduler last
@@ -145,11 +149,12 @@ let lastStep = 0;
 let lastMode = -1;
 
 /**
- * Whether the queue of proposed changes has moved since the last frame carried
- * a snapshot. A still run runs no step, so this is what puts the preview of a
- * queued change in front of the renderer.
+ * Whether a command changed something the render snapshot carries since the
+ * last frame carried a buffer. A still run runs no step, so this is what puts
+ * both causal previews and a newly selected passive View in front of the
+ * renderer.
  */
-let queueMoved = false;
+let snapshotMoved = false;
 
 /**
  * The time scale the most recent snapshot's header reported, Q0.16.
@@ -216,8 +221,8 @@ async function answer(message: unknown): Promise<void> {
     if (RESCHEDULING.includes(command.cmd)) {
       restart(core);
     }
-    if (QUEUE_COMMANDS.includes(command.cmd)) {
-      queueMoved = true;
+    if (SNAPSHOT_COMMANDS.includes(command.cmd)) {
+      snapshotMoved = true;
     }
     post({ v: PROTOCOL_VERSION, re: command.id, ok: true, body: answered.body });
     // Events follow the response their cause stands behind, which is the order
@@ -351,8 +356,8 @@ function raiseFrame(core: Core, frame: InputFrame, schedule: Schedule, ran: numb
   // `controlled` flag would carry no buffer and the renderer would draw the
   // Form control had left until the next thing to happen happened.
   const handoff = frame.inspect != null && frame.inspect.target === 'handoff';
-  if (ran > 0 || changed || queueMoved || handoff) {
-    queueMoved = false;
+  if (ran > 0 || changed || snapshotMoved || handoff) {
+    snapshotMoved = false;
     body.buffer = view.buffer as ArrayBuffer;
     raise('frame', step, body, [body.buffer]);
     return;
@@ -385,7 +390,7 @@ function restart(core: Core): void {
   previousStamp = null;
   // A restore lands with the plan queue cleared, so a mark left by the run that
   // was open would put a buffer on a frame for a queue that no longer stands.
-  queueMoved = false;
+  snapshotMoved = false;
   const view = core.frame_view();
   lastStep = readStep(view);
   lastMode = view.length > MODE_OFFSET ? view[MODE_OFFSET] : -1;

@@ -31,7 +31,11 @@ const CHAPTERS = [
 ];
 
 function closed(index: number): ChapterChanged {
-  return { chapter_index: index, title_key: `chapter.${CHAPTERS[index]}` };
+  return {
+    chapter_index: index,
+    title_key: `chapter.${CHAPTERS[index]}`,
+    view: { inside: [], resolution: 1, window: 1, surround: 'adjacent' },
+  };
 }
 
 function ended(index: number): RunCompleted {

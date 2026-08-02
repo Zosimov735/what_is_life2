@@ -31,8 +31,6 @@
 
 import {
   BACKDROP,
-  BOUNDARY,
-  BOUNDARY_PROPOSED,
   CANDIDATE,
   CANDIDATE_FOCUSED,
   CHARGE_CORE,
@@ -53,6 +51,9 @@ import {
   HAZE_TINT,
   mixTone,
   OVERLOAD,
+  OBSERVATION_VIEW,
+  PHYSICAL_COMPARTMENT,
+  PHYSICAL_COMPARTMENT_PROPOSED,
   PORT_BASE,
   PRESSURE_TONES,
   ROUTE_BASE,
@@ -84,8 +85,10 @@ const FORM_UNITS = 26;
 /** The widest a Port is drawn, in units. */
 const PORT_UNITS = 15;
 
-/** How wide the boundary's own edge is drawn, in units. */
-const BOUNDARY_UNITS = 3;
+/** The physical compartment reads as material; the View as a thin aperture. */
+const COMPARTMENT_EDGE_UNITS = 10;
+const VIEW_EDGE_UNITS = 2;
+const CANDIDATE_EDGE_UNITS = 2;
 
 /** How far one layer of separation pushes a plane away. */
 const DEPTH_SCALE = 0.22;
@@ -120,6 +123,9 @@ export interface MotionProfile {
   reducedMotion: boolean;
   trailIntensity: number;
 }
+
+/** Which Still Mode interaction register the chrome has selected. */
+export type StillSurfaceTool = 'view' | 'compartment';
 
 /** The profile a renderer stands on until one is set. */
 export const FULL_MOTION: MotionProfile = { reducedMotion: false, trailIntensity: 65536 };
@@ -257,13 +263,14 @@ export interface BoundaryMark {
   alpha: number;
   /** How wide the edge is drawn, in device pixels. */
   width: number;
+  /** Material compartment, passive View, or analysis candidate outline. */
+  role: BoundaryRole;
   /** The member Node each point stands at, in the same order as the points. */
   nodes: number[];
   /**
-   * Whether this is the boundary a queued change proposes rather than the
-   * standing one. A frame carrying a queued `reshape_boundary` or `set_focus`
-   * puts up both, so the shape standing and the shape proposed are read
-   * together.
+   * Whether this is a physical compartment a queued `reshape_compartment`
+   * proposes rather than the standing material edge. A passive View change
+   * never sets this bit; it is drawn in its own register.
    */
   proposed: boolean;
   /**
@@ -286,6 +293,9 @@ export interface BoundaryMark {
    */
   tier: number;
 }
+
+/** The three hull registers, kept explicit so geometry never collapses them. */
+export type BoundaryRole = 'compartment' | 'view' | 'candidate';
 
 /**
  * One candidate of the standing slate, as the renderer takes it: the position
@@ -363,22 +373,23 @@ export interface CueMark {
 export const HANDLE_KIND = { port: 0, route: 1, boundary: 2 } as const;
 
 /**
- * One handle: a place on the Field a change can be started from.
+ * One handle: a place on the Field where a causal change can be started.
  *
  * Which places those are is the `PlanCommand` union read back as geometry, and
  * nothing more: a `connect` runs between two Ports, a `redirect` moves one end
- * of a Route, a `cut` takes a Route, and a `reshape_boundary` moves the members
- * the standing inside is drawn around. So a Port carries a handle, each Route
- * carries one at each of its two ends, and every vertex of a drawn boundary
- * carries one. Drawing them is this goal's; making them draggable is the goal
- * that owns queued changes, and the geometry is the same either way.
+ * of a Route, a `cut` takes a Route, and a `reshape_compartment` moves the
+ * members enclosed by the standing material edge. So a Port carries a handle,
+ * each Route carries one at each of its two ends, and every vertex of the
+ * physical compartment carries one. Drawing them is this goal's; making them
+ * draggable is the goal that owns queued changes, and the geometry is the same
+ * either way.
  */
 export interface HandleMark {
   x: number;
   y: number;
   /**
    * What the handle names: the Node a Port handle stands on, the member a
-   * Boundary vertex is drawn around, or 0 for a Route handle, which names its
+   * Compartment vertex is drawn around, or 0 for a Route handle, which names its
    * Route instead.
    *
    * A handle is the `PlanCommand` union read back as a place on the Field, so
@@ -393,7 +404,7 @@ export interface HandleMark {
   end: number;
   /** How far the handle reaches, in device pixels. */
   radius: number;
-  /** `HANDLE_KIND`: 0 a Port, 1 a Route end, 2 a Boundary vertex. */
+  /** `HANDLE_KIND`: 0 a Port, 1 a Route end, 2 a Compartment vertex. */
   kind: number;
   tone: Tone;
   alpha: number;
@@ -533,9 +544,10 @@ export function createScene(): Scene {
     boundaries: new Pool<BoundaryMark>(() => ({
       points: [],
       nodes: [],
-      tone: BOUNDARY,
+      tone: PHYSICAL_COMPARTMENT,
       alpha: 1,
       width: 2,
+      role: 'compartment',
       proposed: false,
       candidate: 0,
       focused: false,
@@ -547,6 +559,7 @@ export function createScene(): Scene {
       tone: CANDIDATE,
       alpha: 1,
       width: 2,
+      role: 'candidate',
       proposed: false,
       candidate: 0,
       focused: false,
@@ -679,6 +692,7 @@ export function projectScene(
   candidates: readonly CandidateOutline[] = [],
   playback: PlaybackReading | null = null,
   playbackClock = 0,
+  tool: StillSurfaceTool = 'compartment',
 ): Scene {
   for (const pool of [
     scene.hazes,
@@ -743,12 +757,12 @@ export function projectScene(
   fillRoutes(scene, previous, next, place, zoom, held, cameraLayer);
   fillPorts(scene, previous, next, ephemera, place, zoom, held, cameraLayer);
   fillBoundary(scene, next, place, zoom, cameraLayer);
-  fillCandidates(scene, next, place, zoom, cameraLayer, candidates);
+  if (tool === 'view') fillCandidates(scene, next, place, zoom, cameraLayer, candidates);
   fillTrails(scene, ephemera, place, zoom, profile, reduced, cameraLayer);
   fillForms(scene, previous, next, place, zoom, held, cameraLayer);
   fillParticles(scene, reduced);
   fillCues(scene, next, ephemera, place, zoom);
-  fillHandles(scene, zoom);
+  fillHandles(scene, zoom, tool);
   fillPlayback(scene, playback, playbackClock);
   fillForecast(scene, next);
   fillRim(scene, next);
@@ -1098,12 +1112,38 @@ function fillBoundary(
   zoom: number,
   cameraLayer: number,
 ): void {
-  hullsOf(scene, next, place, zoom, cameraLayer, false);
-  // The boundary a queued change proposes, drawn beside the standing one and in
-  // the queue's own register. A frame whose queue proposes no View raises the
-  // flag on no Port at all, so nothing is drawn and nothing is walked.
+  physicalHulls(scene, next, place, zoom, cameraLayer, false);
+  // The physical compartment a queued causal change proposes. Passive View
+  // changes never raise these flags and never appear as construction lines.
   if (next.ports.some((port) => port.proposedMember)) {
-    hullsOf(scene, next, place, zoom, cameraLayer, true);
+    physicalHulls(scene, next, place, zoom, cameraLayer, true);
+  }
+
+  // The active observation View is an independent bitset. It is drawn after
+  // the material edge so its thin violet aperture remains legible where the
+  // two cross, but it never supplies physical membership or shell flags.
+  const viewed = new Set<number>();
+  next.inside.forEach((held, index) => {
+    if (held && next.ports[index]) viewed.add(next.ports[index].node);
+  });
+  if (viewed.size > 0) {
+    hullsInto(
+      scene.boundaries,
+      next,
+      place,
+      zoom,
+      cameraLayer,
+      (port) => viewed.has(port.node),
+      {
+        tone: OBSERVATION_VIEW,
+        weight: 0.94,
+        role: 'view',
+        proposed: false,
+        candidate: 0,
+        focused: false,
+        tier: 0,
+      },
+    );
   }
 }
 
@@ -1111,7 +1151,7 @@ function fillBoundary(
  * One closed hull per plane, over the members of either the standing inside or
  * the one a queued change proposes.
  */
-function hullsOf(
+function physicalHulls(
   scene: Scene,
   next: FrameState,
   place: Place,
@@ -1130,8 +1170,9 @@ function hullsOf(
       // One tone for the boundary itself, whatever stands on its shell: the
       // shell members carry their own mark, and a boundary that changed colour
       // with them would read as a different boundary.
-      tone: proposed ? BOUNDARY_PROPOSED : BOUNDARY,
+      tone: proposed ? PHYSICAL_COMPARTMENT_PROPOSED : PHYSICAL_COMPARTMENT,
       weight: proposed ? 0.8 : 0.92,
+      role: 'compartment',
       proposed,
       candidate: 0,
       focused: false,
@@ -1164,6 +1205,7 @@ function fillCandidates(
     hullsInto(scene.candidates, next, place, zoom, cameraLayer, (port) => members.has(port.node), {
       tone: candidate.focused ? CANDIDATE_FOCUSED : CANDIDATE,
       weight: candidate.focused ? 0.85 : 0.55,
+      role: 'candidate',
       proposed: false,
       candidate: candidate.position,
       focused: candidate.focused,
@@ -1176,13 +1218,14 @@ function fillCandidates(
 interface HullStyle {
   tone: Tone;
   weight: number;
+  role: BoundaryRole;
   proposed: boolean;
   candidate: number;
   focused: boolean;
   tier: number;
 }
 
-/** The one hull pass both the standing boundary and a candidate outline take. */
+/** The one hull pass the compartment, View, and candidate outlines share. */
 function hullsInto(
   pool: Pool<BoundaryMark>,
   next: FrameState,
@@ -1218,7 +1261,14 @@ function hullsInto(
     }
     mark.tone = style.tone;
     mark.alpha = style.weight * depthAlpha(depth);
-    mark.width = Math.max(2, zoom * depthScale(depth) * BOUNDARY_UNITS);
+    const units =
+      style.role === 'compartment'
+        ? COMPARTMENT_EDGE_UNITS
+        : style.role === 'view'
+          ? VIEW_EDGE_UNITS
+          : CANDIDATE_EDGE_UNITS;
+    mark.width = Math.max(style.role === 'compartment' ? 3 : 1.5, zoom * depthScale(depth) * units);
+    mark.role = style.role;
     mark.proposed = style.proposed;
     mark.candidate = style.candidate;
     mark.tier = style.tier;
@@ -1564,9 +1614,9 @@ const HANDLE_UNITS = 9;
  *
  * They come up with the surface and go down with it; at rest there are none.
  */
-function fillHandles(scene: Scene, zoom: number): void {
+function fillHandles(scene: Scene, zoom: number, tool: StillSurfaceTool): void {
   const presence = scene.still.presence;
-  if (presence <= 0.001) return;
+  if (presence <= 0.001 || tool !== 'compartment') return;
   const radius = Math.max(3, zoom * HANDLE_UNITS);
 
   for (let place = 0; place < scene.ports.count; place += 1) {
@@ -1613,14 +1663,15 @@ function fillHandles(scene: Scene, zoom: number): void {
 
   for (let place = 0; place < scene.boundaries.count; place += 1) {
     const boundary = scene.boundaries.items[place];
-    // The standing boundary carries the handles; the one a queued change
-    // proposes is a reading rather than a place to take hold of.
-    if (boundary.proposed) continue;
+    // The standing physical compartment carries the handles; its queued
+    // proposal and the passive View are readings, not places to take hold of.
+    if (boundary.proposed || boundary.role !== 'compartment') continue;
     // A vertex sits exactly where its member's own Port stands, so its handle
     // is pushed a little way outward from the middle of the shape — the same
     // reason a Route's handles sit in from its ends. Two handles in one place
     // is one handle a player cannot take hold of, and the two mean different
-    // changes: the Port starts a connection and the vertex reshapes the View.
+    // changes: the Port starts a connection and the vertex reshapes the
+    // physical compartment.
     let middleX = 0;
     let middleY = 0;
     const corners = boundary.points.length / 2;

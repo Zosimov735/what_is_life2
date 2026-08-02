@@ -19,11 +19,16 @@ import {
   handleAt,
   openStillEdits,
   planFromDrag,
-  proposedInside,
-  standingInside,
+  proposedCompartment,
+  standingCompartment,
 } from '../src/shell/still-edits';
 import type { PlanCommand } from '../../worker/src/protocol';
-import type { FrameMode, FramePort, FrameState } from '../../worker/src/frame-state';
+import {
+  FRAME_VERSION,
+  type FrameMode,
+  type FramePort,
+  type FrameState,
+} from '../../worker/src/frame-state';
 
 const WIDE = 1440;
 const HIGH = 900;
@@ -87,7 +92,7 @@ function inspectable(mode: FrameMode = 'still'): FrameState {
   ];
   return {
     header: {
-      version: 1,
+      version: FRAME_VERSION,
       flags: mode === 'still' ? 1 : 0,
       stillVisible: mode === 'still',
       dropped: false,
@@ -160,8 +165,8 @@ test('a moving Field offers nothing to take hold of', () => {
   expect(handleAt(scene, { x: WIDE / 2, y: HIGH / 2 })).toBeNull();
 });
 
-test('the standing inside is read off the surface in ascending order', () => {
-  expect(standingInside(projected(inspectable()))).toEqual([1, 2, 3]);
+test('the standing physical compartment is read off the surface in ascending order', () => {
+  expect(standingCompartment(projected(inspectable()))).toEqual([1, 2, 3]);
 });
 
 // ---------------------------------------------------------------------------
@@ -186,20 +191,20 @@ test('a drag from a Route end proposes that end, moved', () => {
   expect(planFromDrag(scene, head, to)).toEqual({ op: 'redirect', route: 7, end: 'head', to: 4 });
 });
 
-test('a drag from a Boundary vertex proposes the member set it leaves', () => {
+test('a drag from a Compartment vertex proposes the physical member set it leaves', () => {
   const scene = projected(inspectable());
   const vertex = handleFor(scene, HANDLE_KIND.boundary, (mark) => mark.node === 1);
   const outside = handleFor(scene, HANDLE_KIND.port, (mark) => mark.node === 4);
   // The member the vertex is drawn around, replaced by the Node it was let go
   // over: the set the drag leaves, ascending.
   expect(planFromDrag(scene, vertex, outside)).toEqual({
-    op: 'reshape_boundary',
+    op: 'reshape_compartment',
     members: [2, 3, 4],
   });
   // Let go over a Node already inside, the dragged member simply leaves.
   const inside = handleFor(scene, HANDLE_KIND.port, (mark) => mark.node === 2);
   expect(planFromDrag(scene, vertex, inside)).toEqual({
-    op: 'reshape_boundary',
+    op: 'reshape_compartment',
     members: [2, 3],
   });
 });
@@ -315,11 +320,11 @@ test('a moving Field takes no drag and no key at all', () => {
   expect(queued).toHaveLength(0);
 });
 
-test('a second boundary drag builds on the set the queue would leave', () => {
+test('a second compartment-edge drag builds on the set the queue would leave', () => {
   // The core validates each entry against the projection every earlier entry
   // has been applied to, so a drag made while a reshape is already queued has
-  // to start from what that reshape leaves. Starting from the standing inside
-  // would propose a set that quietly undid it.
+  // to start from what that reshape leaves. Starting from the standing
+  // physical compartment would propose a set that quietly undid it.
   const state = inspectable();
   // A reshape standing in the queue: Node 1 dropped, Node 4 taken in.
   state.ports = state.ports.map((port) => ({
@@ -328,19 +333,19 @@ test('a second boundary drag builds on the set the queue would leave', () => {
   }));
   const scene = projected(state);
 
-  expect(standingInside(scene)).toEqual([1, 2, 3]);
-  expect(proposedInside(scene)).toEqual([2, 3, 4]);
+  expect(standingCompartment(scene)).toEqual([1, 2, 3]);
+  expect(proposedCompartment(scene)).toEqual([2, 3, 4]);
 
   const vertex = handleFor(scene, HANDLE_KIND.boundary, (mark) => mark.node === 2);
   const outside = handleFor(scene, HANDLE_KIND.port, (mark) => mark.node === 4);
   // Member 2 replaced by 4, over the proposed set: 4 is already in it, so the
   // drag leaves [3, 4] rather than restoring the 1 the queue had dropped.
   expect(planFromDrag(scene, vertex, outside)).toEqual({
-    op: 'reshape_boundary',
+    op: 'reshape_compartment',
     members: [3, 4],
   });
   // And with nothing queued, the standing set is what a drag builds on.
-  expect(proposedInside(projected(inspectable()))).toBeNull();
+  expect(proposedCompartment(projected(inspectable()))).toBeNull();
 });
 
 test('a release outside the surface leaves no drag armed', () => {
@@ -407,60 +412,64 @@ test('the surface keeps the pointer for the life of a drag', () => {
 });
 
 
-test('the arrows walk the slate and each step proposes the candidate it lands on', () => {
+test('the arrows move the passive View immediately without touching the causal queue', () => {
   const scene = projected(inspectable());
   const surface = surfaceOf(scene);
   const keys = new EventTarget();
   const queued: PlanCommand[] = [];
+  const focusedCalls: { slateOrdinal: number; position: number }[] = [];
   let undone = 0;
-  // The focus is read from the queue, exactly as the shell reads it: the
-  // newest entry when it is a `set_focus`, and 0 otherwise.
-  const focused = (): number => {
-    const newest = queued[queued.length - 1];
-    return newest && newest.op === 'set_focus' ? newest.position : 0;
-  };
+  let focused = 0;
   const edits = openStillEdits({
     surface,
     keys,
     scene: () => scene,
     paused: () => true,
+    tool: () => 'view',
     queue: (plan) => queued.push(plan),
     slate: () => ({ ordinal: 3, count: 3, deficient: false }),
-    focused,
+    focused: () => focused,
+    focus: (slateOrdinal, position) => {
+      focused = position;
+      focusedCalls.push({ slateOrdinal, position });
+    },
     undo: () => {
       undone += 1;
       queued.pop();
     },
   });
 
-  // The first step forward proposes the first candidate of the presentation
-  // order, and takes nothing back: nothing was proposed yet.
+  // The first step forward selects the first candidate of the presentation
+  // order immediately, and never takes a causal entry back.
   expect(press(keys, CANDIDATE_FORWARD[0])).toBe(true);
-  expect(queued).toEqual([{ op: 'set_focus', slate_ordinal: 3, position: 1 }]);
+  expect(focusedCalls).toEqual([{ slateOrdinal: 3, position: 1 }]);
+  expect(queued).toEqual([]);
   expect(undone).toBe(0);
 
-  // Every step after replaces the proposal rather than stacking a second one.
+  // Every step after moves the View again; no queue entry or undo is involved.
   press(keys, CANDIDATE_FORWARD[1]);
-  expect(queued).toEqual([{ op: 'set_focus', slate_ordinal: 3, position: 2 }]);
-  expect(undone).toBe(1);
+  expect(focusedCalls.at(-1)).toEqual({ slateOrdinal: 3, position: 2 });
+  expect(undone).toBe(0);
   press(keys, CANDIDATE_FORWARD[0]);
   press(keys, CANDIDATE_FORWARD[0]);
-  expect(queued).toEqual([{ op: 'set_focus', slate_ordinal: 3, position: 1 }]);
-  expect(undone).toBe(3);
+  expect(focusedCalls.at(-1)).toEqual({ slateOrdinal: 3, position: 1 });
+  expect(undone).toBe(0);
 
   // And back walks the other way, wrapping through the same order.
   press(keys, CANDIDATE_BACK[0]);
-  expect(queued).toEqual([{ op: 'set_focus', slate_ordinal: 3, position: 3 }]);
+  expect(focusedCalls.at(-1)).toEqual({ slateOrdinal: 3, position: 3 });
   press(keys, CANDIDATE_BACK[1]);
-  expect(queued).toEqual([{ op: 'set_focus', slate_ordinal: 3, position: 2 }]);
+  expect(focusedCalls.at(-1)).toEqual({ slateOrdinal: 3, position: 2 });
+  expect(queued).toEqual([]);
   edits.close();
 });
 
-test('the arrows propose nothing without a slate to walk', () => {
+test('the arrows move no View without a usable slate to walk', () => {
   const scene = projected(inspectable());
   const surface = surfaceOf(scene);
   const keys = new EventTarget();
   const queued: PlanCommand[] = [];
+  const focused: number[] = [];
   let standing: { ordinal: number; count: number; deficient: boolean } | null = null;
   let running = false;
   const edits = openStillEdits({
@@ -468,29 +477,68 @@ test('the arrows propose nothing without a slate to walk', () => {
     keys,
     scene: () => scene,
     paused: () => !running,
+    tool: () => 'view',
     queue: (plan) => queued.push(plan),
     slate: () => standing,
     focused: () => 0,
+    focus: (_ordinal, position) => focused.push(position),
   });
 
   // No slate stands: the key is not even consumed, so it reaches whatever else
   // the page does with it.
   expect(press(keys, CANDIDATE_FORWARD[0])).toBe(false);
-  expect(queued).toHaveLength(0);
+  expect(focused).toHaveLength(0);
 
   // A deficient slate is not adopted from, whatever position is named.
   standing = { ordinal: 0, count: 1, deficient: true };
   expect(press(keys, CANDIDATE_FORWARD[0])).toBe(false);
-  expect(queued).toHaveLength(0);
+  expect(focused).toHaveLength(0);
 
   // And a moving Field takes no proposal at all.
   standing = { ordinal: 0, count: 2, deficient: false };
   running = true;
   expect(press(keys, CANDIDATE_FORWARD[0])).toBe(false);
-  expect(queued).toHaveLength(0);
+  expect(focused).toHaveLength(0);
 
   running = false;
   expect(press(keys, CANDIDATE_FORWARD[0])).toBe(true);
-  expect(queued).toHaveLength(1);
+  expect(focused).toEqual([1]);
+  expect(queued).toHaveLength(0);
+  edits.close();
+});
+
+test('the explicit tools keep passive View gestures and causal edits disjoint', () => {
+  const scene = projected(inspectable());
+  const surface = surfaceOf(scene);
+  const keys = new EventTarget();
+  const queued: PlanCommand[] = [];
+  const focused: number[] = [];
+  let tool: 'view' | 'compartment' = 'view';
+  const edits = openStillEdits({
+    surface,
+    keys,
+    scene: () => scene,
+    paused: () => true,
+    tool: () => tool,
+    queue: (plan) => queued.push(plan),
+    slate: () => ({ ordinal: 4, count: 2, deficient: false }),
+    focused: () => focused.at(-1) ?? 0,
+    focus: (_ordinal, position) => focused.push(position),
+  });
+
+  const from = handleFor(scene, HANDLE_KIND.port, (mark) => mark.node === 1);
+  const to = handleFor(scene, HANDLE_KIND.port, (mark) => mark.node === 4);
+  surface.dispatchEvent(pointer('pointerdown', from.x, from.y));
+  surface.dispatchEvent(pointer('pointerup', to.x, to.y));
+  expect(queued).toEqual([]);
+  expect(press(keys, CANDIDATE_FORWARD[0])).toBe(true);
+  expect(focused).toEqual([1]);
+
+  tool = 'compartment';
+  expect(press(keys, CANDIDATE_FORWARD[0])).toBe(false);
+  surface.dispatchEvent(pointer('pointerdown', from.x, from.y));
+  surface.dispatchEvent(pointer('pointerup', to.x, to.y));
+  expect(queued).toEqual([{ op: 'connect', from: 1, to: 4 }]);
+  expect(focused).toEqual([1]);
   edits.close();
 });

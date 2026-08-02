@@ -18,6 +18,7 @@ import { Objective } from './Objective';
 import { PressureLine } from './PressureLine';
 import { openSound, type Sound } from './sound';
 import { StillTray } from './StillTray';
+import type { StillTool } from './still-edits';
 import {
   openCore,
   type CandidateSlate,
@@ -32,6 +33,7 @@ import type {
   FormId,
   PerturbationResult,
   RunCompleted,
+  ViewDeclaration,
 } from '../../../worker/src/protocol';
 import type { FrameState } from '../../../worker/src/frame-state';
 import type { ObjectiveState, PressureState } from '../../../worker/src/protocol';
@@ -81,17 +83,21 @@ function noticeKey(cause: unknown): string | null {
 }
 
 /**
- * The candidate the queue proposes, 1-based, and 0 while none is proposed.
- *
- * It is read off the newest entry and only the newest: a focus is replaced by
- * taking the entry back and queueing the next one, so the entry that stands
- * last is the proposal that stands. Reading it from the queue rather than
- * holding a selection here is what keeps what the surface shows and what a
- * commit would adopt one fact.
+ * The candidate the authoritative passive View matches, 1-based, and 0 while
+ * it matches none. Focusing never reads or mutates the causal plan queue.
  */
-function focusedIn(queue: QueueState): number {
-  const newest = queue.entries[queue.entries.length - 1];
-  return newest && newest.plan.op === 'set_focus' ? newest.plan.position : 0;
+function focusedIn(view: ViewDeclaration | null, slate: CandidateSlate | null): number {
+  if (!view || !slate) return 0;
+  return (
+    slate.candidates.find(
+      (candidate) =>
+        candidate.view.resolution === view.resolution &&
+        candidate.view.window === view.window &&
+        candidate.view.surround === view.surround &&
+        candidate.view.inside.length === view.inside.length &&
+        candidate.view.inside.every((node, place) => node === view.inside[place]),
+    )?.position ?? 0
+  );
 }
 
 /**
@@ -129,6 +135,8 @@ export function App({ open = openSession, sound = openSound }: ShellProps) {
   const [queue, setQueue] = useState<QueueState | null>(null);
   const [impulse, setImpulse] = useState(0);
   const [slate, setSlate] = useState<CandidateSlate | null>(null);
+  const [view, setView] = useState<ViewDeclaration | null>(null);
+  const [tool, setTool] = useState<StillTool>('view');
   // The two session-lived readings the shell holds: a coordinate profile is
   // taken only when the inspection surface asks for one, and an Echo arrives at
   // Still Mode exit after a committed change.
@@ -164,6 +172,7 @@ export function App({ open = openSession, sound = openSound }: ShellProps) {
       // holds the one last raised. So do the coordinate profile and the Echo,
       // which ride the same event and are held the same way.
       setSlate(session.slate());
+      setView(session.view?.() ?? null);
       setProfile(session.profile());
       setPerturbation(session.perturbation());
       setEcho(session.echo());
@@ -233,6 +242,22 @@ export function App({ open = openSession, sound = openSound }: ShellProps) {
     };
   }, []);
 
+  // `C` and `V` select the same two tools as the focusable buttons. Interactive
+  // chrome keeps its own keys; these bindings apply only to the Field surface.
+  useEffect(() => {
+    if (mode !== 'still' || typeof window === 'undefined') return;
+    const choose = (event: KeyboardEvent): void => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('button, input, select, textarea, [contenteditable="true"]')) return;
+      if (event.code === 'KeyC') setTool('compartment');
+      else if (event.code === 'KeyV') setTool('view');
+      else return;
+      if (event.cancelable) event.preventDefault();
+    };
+    window.addEventListener('keydown', choose);
+    return () => window.removeEventListener('keydown', choose);
+  }, [mode]);
+
   // The playback offer is memoized on its two inputs, deliberately: the offer
   // is an object, the surface hands it to the renderer on identity, and the
   // renderer opens a fresh reading from its own start. An offer rebuilt every
@@ -259,8 +284,12 @@ export function App({ open = openSession, sound = openSound }: ShellProps) {
         sound={sounding}
         queuePlan={client.queuePlan}
         undoPlan={client.undoPlan}
+        tool={tool}
+        setFocus={(slateOrdinal, position) => {
+          void client.setFocus?.(slateOrdinal, position);
+        }}
         slate={slate}
-        focused={focusedIn(queue ?? client.queue())}
+        focused={focusedIn(view, slate)}
         playback={playback}
       />
       <Objective objective={objective} />
@@ -278,7 +307,13 @@ export function App({ open = openSession, sound = openSound }: ShellProps) {
         queue={queue ?? client.queue()}
         impulse={impulse}
         slate={slate}
-        focused={focusedIn(queue ?? client.queue())}
+        view={view}
+        focused={focusedIn(view, slate)}
+        tool={tool}
+        setTool={setTool}
+        setFocus={(position) => {
+          if (slate) void client.setFocus?.(slate.ordinal, position);
+        }}
       />
       <ChapterReview review={review} ending={ending} clearReview={client.clearReview} />
       {recovering ? <p className="notice">{copy('notice.run_resumed')}</p> : null}

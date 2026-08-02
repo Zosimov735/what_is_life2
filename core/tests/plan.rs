@@ -1,4 +1,4 @@
-//! Transactional PlanCommands: the five variants, the queue that holds them,
+//! Transactional PlanCommands: the four causal variants, the queue that holds them,
 //! and the commit that spends them.
 //!
 //! `docs/field-framework/ARCHITECTURE.md` locks the union field by field — the
@@ -16,13 +16,12 @@
 //! reach is what makes the preconditions readable one at a time.
 
 use field_game_core::field::{
-    BoundaryState, FieldLayer, FormState, NodeKind, PortState, RouteState,
+    BoundaryState, FieldLayer, FormState, NodeKind, PhysicalCompartment, PortState, RouteState,
 };
 use field_game_core::fx::{Vec2, ONE_UNIT};
 use field_game_core::json::{parse, write_text, Json};
 use field_game_core::plan::{
-    self, PlanCommand, PlanQueue, Projection, RouteEnd, StandingSlate, CONNECTED_ROUTE_CAPACITY,
-    PLAN_QUEUE_DEPTH,
+    self, PlanCommand, PlanQueue, Projection, RouteEnd, CONNECTED_ROUTE_CAPACITY, PLAN_QUEUE_DEPTH,
 };
 use field_game_core::state::{
     FieldState, InputConfig, Progress, RunState, Surround, Trace, ViewDeclaration, IMPULSE_CAP,
@@ -101,7 +100,11 @@ fn linked_field() -> FieldState {
         link: None,
         trail: None,
     }];
-    field.boundaries = BoundaryState { drawn: Vec::new(), authored: Vec::new(), leak_frac: 0 };
+    field.physical_compartment = PhysicalCompartment {
+        members: vec![2, 3],
+        leak_per_exposed_contact_per_step: 0,
+    };
+    field.boundaries = BoundaryState { drawn: Vec::new(), authored: Vec::new() };
     field
 }
 
@@ -246,6 +249,17 @@ fn inside(session: &Session) -> Vec<u32> {
     session.run().expect("a run is loaded").state().view.inside.clone()
 }
 
+fn physical_members(session: &Session) -> Vec<u32> {
+    session
+        .run()
+        .expect("a run is loaded")
+        .state()
+        .now
+        .physical_compartment
+        .members
+        .clone()
+}
+
 fn payload(session: &Session) -> String {
     session.run().expect("a run is loaded").payload().expect("inside the cap")
 }
@@ -268,22 +282,19 @@ fn every_variant_reads_its_own_payload_and_nothing_else() {
     );
     assert_eq!(read("{\"op\":\"cut\",\"route\":2}").expect("cut reads"), PlanCommand::Cut { route: 2 });
     assert_eq!(
-        read("{\"members\":[2,3,4],\"op\":\"reshape_boundary\"}").expect("reshape reads"),
-        PlanCommand::ReshapeBoundary { members: vec![2, 3, 4] },
-    );
-    assert_eq!(
-        read("{\"op\":\"set_focus\",\"position\":2,\"slate_ordinal\":7}").expect("set_focus reads"),
-        PlanCommand::SetFocus { slate_ordinal: 7, position: 2 },
+        read("{\"members\":[2,3,4],\"op\":\"reshape_compartment\"}").expect("reshape reads"),
+        PlanCommand::ReshapeCompartment { members: vec![2, 3, 4] },
     );
 
-    // A tag outside the five, a key another variant declares, a missing key,
+    // A tag outside the four, a key another variant declares, a missing key,
     // and a member list that is not a set.
-    assert!(read("{\"op\":\"replace\"}").is_err(), "the union is closed at five");
+    assert!(read("{\"op\":\"replace\"}").is_err(), "the union is closed at four");
+    assert!(read("{\"op\":\"set_focus\",\"position\":2,\"slate_ordinal\":7}").is_err(), "observation is not a plan");
     assert!(read("{\"from\":2,\"op\":\"connect\",\"route\":1,\"to\":3}").is_err(), "an extra key");
     assert!(read("{\"op\":\"connect\",\"to\":3}").is_err(), "a missing key");
-    assert!(read("{\"members\":[3,3],\"op\":\"reshape_boundary\"}").is_err(), "a repeat");
-    assert!(read("{\"members\":[4,2],\"op\":\"reshape_boundary\"}").is_err(), "out of order");
-    assert!(read("{\"members\":[],\"op\":\"reshape_boundary\"}").is_err(), "empty");
+    assert!(read("{\"members\":[3,3],\"op\":\"reshape_compartment\"}").is_err(), "a repeat");
+    assert!(read("{\"members\":[4,2],\"op\":\"reshape_compartment\"}").is_err(), "out of order");
+    assert!(read("{\"members\":[],\"op\":\"reshape_compartment\"}").is_err(), "empty");
     assert!(read("{\"end\":\"middle\",\"op\":\"redirect\",\"route\":1,\"to\":4}").is_err(), "an end");
 }
 
@@ -374,30 +385,27 @@ fn cut_validates_the_route_and_nothing_else() {
 }
 
 #[test]
-fn reshape_boundary_takes_the_member_set_through_intake() {
+fn reshape_compartment_takes_the_member_set_through_intake_without_moving_the_view() {
     let (mut session, _) = stilled(OPENING_IMPULSE);
 
     // A member naming a Node that stands nowhere is dropped by intake rather
     // than refusing the entry; a set that intake empties is refused.
     assert_eq!(
-        refusal(&queue(&mut session, "{\"members\":[41,42],\"op\":\"reshape_boundary\"}")),
+        refusal(&queue(&mut session, "{\"members\":[41,42],\"op\":\"reshape_compartment\"}")),
         ("validation".to_string(), "members".to_string()),
     );
-    body(&queue(&mut session, "{\"members\":[3,4,42],\"op\":\"reshape_boundary\"}"));
+    body(&queue(&mut session, "{\"members\":[3,4,42],\"op\":\"reshape_compartment\"}"));
     body(&session.command("commit_plan", "{}"));
-    assert_eq!(inside(&session), vec![3, 4], "the intersection with the Node set, ascending");
+    assert_eq!(physical_members(&session), vec![3, 4], "the material intersection, ascending");
+    assert_eq!(inside(&session), vec![2, 3], "a physical edit never changes observation");
 }
 
 #[test]
 fn set_focus_is_refused_when_the_ordinal_names_no_slate() {
-    // The one variant whose preconditions read something other than the Field.
-    // Entry into Still Mode assembles the Run's first slate, which takes
-    // ordinal 0, so an ordinal past it names an evaluation record that does
-    // not stand — and the locked envelope for an identifier naming nothing is
-    // what it answers with.
+    // Observation is its own free protocol command, never a queued causal edit.
     let (mut session, _) = stilled(OPENING_IMPULSE);
     assert_eq!(
-        refusal(&queue(&mut session, "{\"op\":\"set_focus\",\"position\":1,\"slate_ordinal\":7}")),
+        refusal(&session.command("set_focus", "{\"position\":1,\"slate_ordinal\":7}")),
         ("not_found".to_string(), "slate".to_string()),
     );
     assert_eq!(entries(&queue_state(&session.command("undo_plan", "{}"))).len(), 0);
@@ -452,13 +460,13 @@ fn the_seventh_entry_crosses_the_locked_depth_rather_than_the_impulse() {
         "{\"from\":3,\"op\":\"connect\",\"to\":2}",
         "{\"from\":4,\"op\":\"connect\",\"to\":2}",
         "{\"from\":4,\"op\":\"connect\",\"to\":3}",
-        "{\"members\":[2,3],\"op\":\"reshape_boundary\"}",
+        "{\"members\":[2,3],\"op\":\"reshape_compartment\"}",
     ];
     for plan in plans {
         body(&queue(&mut session, plan));
     }
     assert_eq!(PLAN_QUEUE_DEPTH, 6);
-    let answer = queue(&mut session, "{\"members\":[2,4],\"op\":\"reshape_boundary\"}");
+    let answer = queue(&mut session, "{\"members\":[2,4],\"op\":\"reshape_compartment\"}");
     let parsed = parse(&answer).expect("canonical");
     let error = parsed.get("error").expect("a refusal");
     assert_eq!(error.get("code").and_then(Json::as_text), Some("capacity"));
@@ -550,7 +558,7 @@ fn the_commit_spends_exactly_the_total_the_queue_predicted() {
     let (mut session, _) = stilled(IMPULSE_CAP);
     body(&queue(&mut session, "{\"from\":3,\"op\":\"connect\",\"to\":2}"));
     body(&queue(&mut session, "{\"op\":\"cut\",\"route\":2}"));
-    let predicted = queue_state(&queue(&mut session, "{\"members\":[2,3],\"op\":\"reshape_boundary\"}"));
+    let predicted = queue_state(&queue(&mut session, "{\"members\":[2,3],\"op\":\"reshape_compartment\"}"));
     let per_entry: Vec<i64> = entries(&predicted).iter().map(|entry| int_of(entry, "cost")).collect();
     assert_eq!(per_entry, vec![1, 1, 1]);
     assert_eq!(int_of(&predicted, "cost_total"), 3);
@@ -580,8 +588,7 @@ fn a_refused_entry_is_not_queued_and_leaves_no_trace_of_itself() {
         "{\"from\":2,\"op\":\"connect\",\"to\":9}",
         "{\"from\":2,\"op\":\"connect\",\"to\":2}",
         "{\"op\":\"cut\",\"route\":9}",
-        "{\"members\":[41],\"op\":\"reshape_boundary\"}",
-        "{\"op\":\"set_focus\",\"position\":1,\"slate_ordinal\":7}",
+        "{\"members\":[41],\"op\":\"reshape_compartment\"}",
     ] {
         assert!(queue(&mut session, plan).contains("\"ok\":false"), "{plan}");
     }
@@ -602,7 +609,7 @@ fn a_queue_with_one_invalid_entry_applies_none_of_itself() {
     // projection — there is no half-applied state to roll back, and the
     // position and reason the commit answers with are the failing entry's own.
     let state = state_with(IMPULSE_CAP);
-    let mut projected = Projection::of(&state.now, &state.view);
+    let mut projected = Projection::of(&state.now);
     // The whole payload, byte for byte: what the transaction may not touch is
     // not "the Routes" or "the View" but every byte of the run.
     let held = state.payload();
@@ -615,8 +622,8 @@ fn a_queue_with_one_invalid_entry_applies_none_of_itself() {
     ];
     let mut refused = None;
     for (position, entry) in entries.iter().enumerate() {
-        match plan::check(entry, &projected, None)
-            .and_then(|()| plan::apply(entry, &mut projected, None))
+        match plan::check(entry, &projected)
+            .and_then(|()| plan::apply(entry, &mut projected))
         {
             Ok(()) => continue,
             Err(refusal) => {
@@ -705,7 +712,7 @@ fn a_commit_that_applies_a_change_ends_the_active_window() {
     session.command("input_frame", &toggling_at(2, 0, 1_100_000));
     session.command("input_frame", &at(3, 0, 1_100_000 + RAMP_US));
     assert_eq!(session.lifecycle(), "still");
-    body(&queue(&mut session, "{\"members\":[2,4],\"op\":\"reshape_boundary\"}"));
+    body(&queue(&mut session, "{\"members\":[2,4],\"op\":\"reshape_compartment\"}"));
     body(&session.command("commit_plan", "{}"));
 
     let after = session.run().expect("a run is loaded").state().trace.clone();
@@ -717,7 +724,8 @@ fn a_commit_that_applies_a_change_ends_the_active_window() {
         session.run().expect("a run is loaded").state().now.written(),
         "the keyframe is the state the commit leaves",
     );
-    assert_eq!(inside(&session), vec![2, 4]);
+    assert_eq!(physical_members(&session), vec![2, 4]);
+    assert_eq!(inside(&session), vec![2, 3], "the observation View is unchanged");
 }
 
 #[test]
@@ -733,7 +741,7 @@ fn a_run_carrying_a_committed_reshape_exports_and_restores_byte_for_byte() {
     session.command("input_frame", &toggling_at(2, 0, 1_100_000));
     session.command("input_frame", &at(3, 0, 1_100_000 + RAMP_US));
     body(&queue(&mut session, "{\"from\":2,\"op\":\"connect\",\"to\":4}"));
-    body(&queue(&mut session, "{\"members\":[2,4],\"op\":\"reshape_boundary\"}"));
+    body(&queue(&mut session, "{\"members\":[2,4],\"op\":\"reshape_compartment\"}"));
     body(&session.command("commit_plan", "{}"));
     session.command("input_frame", &at(4, 0, 1_100_000 + 2 * RAMP_US));
     session.command("input_frame", &at(5, 40, 1_400_000));
@@ -793,7 +801,7 @@ fn restored(text: &str) -> Session {
 fn an_export_taken_mid_still_with_a_queue_restores_with_the_queue_cleared() {
     let (mut session, _) = stilled(IMPULSE_CAP);
     body(&queue(&mut session, "{\"op\":\"cut\",\"route\":1}"));
-    body(&queue(&mut session, "{\"members\":[2,4],\"op\":\"reshape_boundary\"}"));
+    body(&queue(&mut session, "{\"members\":[2,4],\"op\":\"reshape_compartment\"}"));
 
     let exported = body(&session.command("export_run", "{}"));
     let text = exported.get("text").and_then(Json::as_text).expect("an export file").to_string();
@@ -823,7 +831,7 @@ fn a_completed_drag_is_recorded_whether_or_not_the_change_is_committed() {
     // take back: the drawn list holds what the player drew, and source 1 of
     // candidate assembly reads that list rather than the commits.
     let (mut session, _) = stilled(IMPULSE_CAP);
-    body(&queue(&mut session, "{\"members\":[2,4],\"op\":\"reshape_boundary\"}"));
+    body(&queue(&mut session, "{\"members\":[2,4],\"op\":\"reshape_compartment\"}"));
     body(&session.command("undo_plan", "{}"));
 
     let drawn = session.run().expect("a run is loaded").state().now.boundaries.drawn.clone();
@@ -854,9 +862,9 @@ fn a_run_with_queued_and_committed_edits_replays_byte_for_byte() {
         session.command("input_frame", &at(3, 0, 1_050_000 + RAMP_US));
         body(&queue(&mut session, "{\"op\":\"cut\",\"route\":1}"));
         body(&queue(&mut session, "{\"from\":3,\"op\":\"connect\",\"to\":2}"));
-        body(&queue(&mut session, "{\"members\":[2,4],\"op\":\"reshape_boundary\"}"));
+        body(&queue(&mut session, "{\"members\":[2,4],\"op\":\"reshape_compartment\"}"));
         body(&session.command("undo_plan", "{}"));
-        body(&queue(&mut session, "{\"members\":[3,4],\"op\":\"reshape_boundary\"}"));
+        body(&queue(&mut session, "{\"members\":[3,4],\"op\":\"reshape_compartment\"}"));
         body(&session.command("commit_plan", "{}"));
         session.command("input_frame", &at(4, 0, 1_050_000 + 2 * RAMP_US));
         session.command("input_frame", &at(5, 45, 1_400_000));
@@ -1029,16 +1037,16 @@ fn the_frame_carries_the_queue_as_previews_and_drops_them_with_it() {
         ],
     );
 
-    // The membership a queued reshape proposes, beside the standing one.
+    // The material membership a queued reshape proposes, beside the standing one.
     let standing = frame_port_flags(&session);
-    assert!(standing.iter().all(|flags| flags & 16 == 0), "no View is proposed yet");
-    body(&queue(&mut session, "{\"members\":[3,4],\"op\":\"reshape_boundary\"}"));
+    assert!(standing.iter().all(|flags| flags & 16 == 0), "no compartment is proposed yet");
+    body(&queue(&mut session, "{\"members\":[3,4],\"op\":\"reshape_compartment\"}"));
     let proposed = frame_port_flags(&session);
     let member = |place: usize| proposed[place] & 4 != 0;
     let wanted = |place: usize| proposed[place] & 16 != 0;
-    assert!(member(1) && !wanted(1), "Node 2 stands inside and would be left out");
-    assert!(member(2) && wanted(2), "Node 3 stands inside and would stay");
-    assert!(!member(3) && wanted(3), "Node 4 stands outside and would be taken in");
+    assert!(member(1) && !wanted(1), "Node 2 is physical and would be left out");
+    assert!(member(2) && wanted(2), "Node 3 is physical and would stay");
+    assert!(!member(3) && wanted(3), "Node 4 is non-member and would be taken in");
 
     body(&session.command("undo_plan", "{}"));
     assert!(
@@ -1124,7 +1132,7 @@ fn an_applying_commit_leaves_a_retained_span_of_zero_and_a_window_clamped_to_it(
     session.command("input_frame", &toggling_at(3, 0, 1_200_000));
     session.command("input_frame", &at(4, 0, 1_200_000 + RAMP_US));
     assert_eq!(session.lifecycle(), "still");
-    body(&queue(&mut session, "{\"members\":[2,4],\"op\":\"reshape_boundary\"}"));
+    body(&queue(&mut session, "{\"members\":[2,4],\"op\":\"reshape_compartment\"}"));
     body(&session.command("commit_plan", "{}"));
 
     {
@@ -1176,89 +1184,130 @@ fn an_empty_commit_ends_no_window() {
 }
 
 // ---------------------------------------------------------------------------
-// set_focus, against a slate that stands
+// set_focus, the free observational protocol command
 // ---------------------------------------------------------------------------
 
-/// A slate with two candidates, each declaring a whole View of its own.
-fn slate_of(ordinal: u32, deficient: bool) -> StandingSlate {
-    StandingSlate {
-        ordinal,
-        deficient,
-        candidates: vec![
-            ViewDeclaration {
-                inside: vec![2, 3],
-                resolution: 1,
-                window: 45,
-                surround: Surround::Adjacent,
-            },
-            ViewDeclaration {
-                inside: vec![3, 4, 5],
-                resolution: 8,
-                window: 30,
-                surround: Surround::Double,
-            },
-        ],
-    }
+#[test]
+fn set_focus_is_immediate_free_and_outside_the_causal_plan_queue() {
+    let (mut session, _) = stilled(IMPULSE_CAP);
+    body(&queue(&mut session, "{\"op\":\"cut\",\"route\":1}"));
+    let (ordinal, position, expected) = {
+        let run = session.run().expect("a run is loaded");
+        let slate = run.standing_slate().expect("entry assembled a slate");
+        let (place, candidate) = slate
+            .candidates
+            .iter()
+            .enumerate()
+            .find(|(_, candidate)| candidate.view != run.state().view)
+            .expect("the fixture offers a distinct observation View");
+        (slate.ordinal, place as u8 + 1, candidate.view.clone())
+    };
+    let before_field = session.run().expect("a run").state().now.written();
+    let before_keyframe = session.run().expect("a run").state().trace.keyframe.written();
+    let before_span = session.run().expect("a run").state().trace.steps.len();
+    let before_step = session.step();
+    let before_impulse = session.run().expect("a run").state().progress.impulse;
+    let before_queue = session.run().expect("a run").queue().len();
+
+    let answer = body(&session.command(
+        "set_focus",
+        &format!("{{\"position\":{position},\"slate_ordinal\":{ordinal}}}"),
+    ));
+    assert_eq!(answer.get("view"), Some(&parse(&expected.written()).expect("canonical View")));
+    let run = session.run().expect("a run is loaded");
+    assert_eq!(run.state().view, expected, "the candidate is active immediately");
+    assert_eq!(run.state().now.written(), before_field, "the Field is untouched");
+    assert_eq!(run.state().trace.keyframe.written(), before_keyframe, "the trace is untouched");
+    assert_eq!(run.state().trace.steps.len(), before_span);
+    assert_eq!(run.step(), before_step);
+    assert_eq!(run.state().progress.impulse, before_impulse, "observation costs no Impulse");
+    assert_eq!(run.queue().len(), before_queue, "the causal queue is unchanged");
+    assert_eq!(session.lifecycle(), "still", "no commit or ramp was started");
 }
 
 #[test]
-fn set_focus_reads_the_slate_that_stands() {
-    let state = state_with(IMPULSE_CAP);
-    let projected = Projection::of(&state.now, &state.view);
-    let slate = slate_of(4, false);
-    let focus = |slate_ordinal: u32, position: u8| PlanCommand::SetFocus { slate_ordinal, position };
+fn set_focus_position_zero_clears_only_view_members_and_round_trips() {
+    let (mut session, _) = stilled(IMPULSE_CAP);
+    body(&queue(&mut session, "{\"op\":\"cut\",\"route\":1}"));
+    let (ordinal, before_view) = {
+        let run = session.run().expect("a run is loaded");
+        (
+            run.standing_slate().expect("entry assembled a slate").ordinal,
+            run.state().view.clone(),
+        )
+    };
+    let before_field = session.run().expect("a run").state().now.written();
+    let before_keyframe = session.run().expect("a run").state().trace.keyframe.written();
+    let before_records: Vec<String> = session
+        .run()
+        .expect("a run")
+        .state()
+        .trace
+        .steps
+        .iter()
+        .map(field_game_core::state::TraceStep::written)
+        .collect();
+    let before_rng = session.run().expect("a run").state().rng;
+    let before_span = session.run().expect("a run").state().retained_span();
+    let before_impulse = session.run().expect("a run").state().progress.impulse;
+    let before_queue = session.run().expect("a run").queue().len();
 
-    // An ordinal naming a slate that does not stand names nothing.
+    let answer = body(&session.command(
+        "set_focus",
+        &format!("{{\"position\":0,\"slate_ordinal\":{ordinal}}}"),
+    ));
+    let cleared = answer.get("view").expect("the cleared View");
+    assert_eq!(cleared.get("inside"), Some(&Json::List(Vec::new())));
     assert_eq!(
-        plan::check(&focus(3, 1), &projected, Some(&slate)).expect_err("a stale ordinal").reason,
-        "slate",
+        cleared.get("resolution").and_then(Json::as_int),
+        Some(i64::from(before_view.resolution))
     );
-    // And so does no slate at all.
     assert_eq!(
-        plan::check(&focus(4, 1), &projected, None).expect_err("no slate stands").reason,
-        "slate",
+        cleared.get("window").and_then(Json::as_int),
+        Some(i64::from(before_view.window))
     );
-    // A position outside the slate, at both ends: positions are 1-based.
-    for outside in [0, 3, 255] {
-        let refused = plan::check(&focus(4, outside), &projected, Some(&slate))
-            .expect_err("a position outside the slate");
-        assert_eq!(refused.reason, "position", "position {outside}");
-        assert_eq!(refused.code, field_game_core::fault::Code::Validation);
-    }
-    // A deficient slate is not adopted from, whatever position is named.
-    let deficient = slate_of(4, true);
     assert_eq!(
-        plan::check(&focus(4, 1), &projected, Some(&deficient))
-            .expect_err("a deficient slate")
-            .reason,
-        "deficient",
+        cleared.get("surround").and_then(Json::as_text),
+        Some(before_view.surround.name())
     );
-    // And the one that stands passes.
-    plan::check(&focus(4, 2), &projected, Some(&slate)).expect("the second candidate stands");
-}
 
-#[test]
-fn a_committed_set_focus_adopts_the_candidates_view_whole() {
-    // A candidate inherits resolution, window, and surround from the View it
-    // was generated under, so adopting one adopts the tuple it declared — not
-    // its inside with the standing View's other three components kept.
-    let state = state_with(IMPULSE_CAP);
-    let mut projected = Projection::of(&state.now, &state.view);
-    assert_eq!(projected.view.inside, vec![2, 3]);
-    assert_eq!(projected.view.resolution, 1);
-    assert_eq!(projected.view.surround.name(), "adjacent");
+    let run = session.run().expect("a run is loaded");
+    assert!(run.state().view.inside.is_empty());
+    assert_eq!(run.state().view.resolution, before_view.resolution);
+    assert_eq!(run.state().view.window, before_view.window);
+    assert_eq!(run.state().view.surround, before_view.surround);
+    assert_eq!(
+        run.state().now.written(),
+        before_field,
+        "clearing observation moves no Field byte"
+    );
+    assert_eq!(run.state().trace.keyframe.written(), before_keyframe);
+    assert_eq!(
+        run.state()
+            .trace
+            .steps
+            .iter()
+            .map(field_game_core::state::TraceStep::written)
+            .collect::<Vec<_>>(),
+        before_records,
+    );
+    assert_eq!(run.state().rng, before_rng);
+    assert_eq!(run.state().retained_span(), before_span);
+    assert_eq!(run.state().progress.impulse, before_impulse);
+    assert_eq!(run.queue().len(), before_queue);
+    run.state().coherent().expect("a cleared live View is coherent");
 
-    let slate = slate_of(4, false);
-    let adopt = PlanCommand::SetFocus { slate_ordinal: 4, position: 2 };
-    plan::check(&adopt, &projected, Some(&slate)).expect("the candidate stands");
-    plan::apply(&adopt, &mut projected, Some(&slate)).expect("and is adopted");
-
-    assert_eq!(projected.view.inside, vec![3, 4, 5]);
-    assert_eq!(projected.view.resolution, 8, "the candidate's own grain");
-    assert_eq!(projected.view.window, 30, "and its own window");
-    assert_eq!(projected.view.surround.name(), "double", "and its own surround rule");
-    // Nothing about the Field moved: adopting a View is a View change.
-    assert_eq!(projected.field.written(), state.now.written());
+    let file = exported(&mut session);
+    let restored = restored(&file);
+    let state = restored.run().expect("the cleared run restores").state();
+    assert!(
+        state.view.inside.is_empty(),
+        "the cleared selection remains across the save boundary"
+    );
+    assert_eq!(state.view.resolution, before_view.resolution);
+    assert_eq!(state.view.window, before_view.window);
+    assert_eq!(state.view.surround, before_view.surround);
+    state.coherent().expect("the restored cleared View is coherent");
 }
 
 #[test]

@@ -12,8 +12,8 @@
 //! ARCHITECTURE.md's `Field model rules` section adds the four rules that move
 //! Charge, and each is tested against the locked text: Route flow as one
 //! ascending pass with its `open` gate, source shortfall, destination headroom,
-//! and multi-hop chain; Boundary leakage by exposure and `leak_frac`, including
-//! the empty-inside and whole-of-N edges; Node overload as an inflow throttle,
+//! and multi-hop chain; physical-compartment leakage by exposure and its
+//! per-contact coefficient, including the empty and whole-of-N edges; Node overload as an inflow throttle,
 //! a quarter-of-the-excess decay, and memoryless recovery; and Current delivery
 //! with its exact remainder split and its refusal at a full Node.
 //!
@@ -22,7 +22,7 @@
 
 use field_game_core::field::{
     self, advance, pulse_radius, reach_ticks, BoundaryState, CurrentState,
-    FieldLayer, FormState, Ledger, NodeKind, PortState, RouteState, StepOutcome, StepRecords,
+    FieldLayer, FormState, Ledger, NodeKind, PhysicalCompartment, PortState, RouteState, StepOutcome, StepRecords,
     Unstaged, UpkeepRecord, CUE_CHARGE_GATHERED, CUE_INTERFERENCE_PUSHED, CUE_PORT_OPENED,
     CUE_PULSE_EMITTED, CURRENTS_PER_CHAPTER, CURRENT_STRENGTH_CAP, DRAWN_RETAINED,
     FORECAST_DEPTH_CAP, FORMS_PER_RUN, LAYERS_PER_CHAPTER, LEAK_FRAC_CAP, MAX_LAYER,
@@ -59,7 +59,7 @@ const SAVE_PAYLOAD_CAP: usize = 8 * 1024 * 1024;
 const RETAINED_STEPS: usize = 150;
 
 /// The measured canonical size of a fully dense `TraceStep`, which
-/// `docs/field-framework/ARCHITECTURE.md` records under Save version 1.
+/// `docs/field-framework/ARCHITECTURE.md` records under Save version 2.
 const DENSE_STEP_BYTES: usize = 49_092;
 
 /// The measured canonical size of the worst-case save payload: the widest
@@ -70,7 +70,7 @@ const DENSE_STEP_BYTES: usize = 49_092;
 /// caps, and their spelling moves this figure by 16 bytes either way, so the
 /// equality pins one precisely stated fixture rather than a claim about the
 /// widest way to spell a flag.
-const WORST_PAYLOAD_BYTES: usize = 7_664_520;
+const WORST_PAYLOAD_BYTES: usize = 7_666_474;
 
 // ---------------------------------------------------------------------------
 // Fixtures. Balance values are the fixture's own; the shapes are locked.
@@ -169,6 +169,10 @@ fn assembled(
     field.routes = routes;
     field.forms = forms;
     field.currents = currents;
+    field.physical_compartment = PhysicalCompartment {
+        members: field.ports.iter().map(|port| port.node).collect(),
+        leak_per_exposed_contact_per_step: 0,
+    };
     field
 }
 
@@ -203,10 +207,9 @@ fn layers_only() -> FieldState {
     field
 }
 
-/// One step of a Field with no standing inside — what a run stands on before a
-/// chapter declares one, and the case in which nothing leaks.
+/// One step of a Field using only its authoritative physical compartment.
 fn step_of(field: &mut FieldState, control: ControlState) -> StepOutcome {
-    advance(field, control, &[], FRAC_ONE, &mut Unstaged::default().staging())
+    advance(field, control, FRAC_ONE, &mut Unstaged::default().staging())
 }
 
 /// A run standing on a Field under a View of the whole of it, ready to be
@@ -423,18 +426,17 @@ fn identity_holds(before: &FieldState, after: &FieldState, records: &StepRecords
 #[test]
 fn every_step_balances_the_charge_ledger_exactly() {
     // Every rule at once, for forty steps: Routes carrying Charge, a Drain at
-    // each depth, a standing inside whose exposed member leaks, a Node standing
+    // each depth, a physical compartment whose exposed member leaks, a Node standing
     // over its threshold, and a current the Form can reach.
     let mut field = across_layers();
-    field.boundaries.leak_frac = LEAK_FRAC_CAP;
+    field.physical_compartment.members = vec![1, 3];
+    field.physical_compartment.leak_per_exposed_contact_per_step = LEAK_FRAC_CAP;
     field.ports[2].capacity = 8 * ONE_UNIT;
     field.ports[2].q = 40 * ONE_UNIT;
     field.currents[0].path = vec![Vec2::units(2048, 2048), Vec2::units(2100, 2048)];
     field.currents[0].strength = 6 * ONE_UNIT;
     field.layers[0].gain = FRAC_ONE;
     field::validate(&field).expect("the fixture is a valid Field");
-    let inside = [1u32, 3];
-
     let mut sinks_total = 0i64;
     let mut sources_total = 0i64;
     let mut fired = (false, false, false, false);
@@ -448,7 +450,7 @@ fn every_step_balances_the_charge_ledger_exactly() {
             depth_move: if step % 8 == 0 { 1 } else { 0 },
             ..ControlState::default()
         };
-        let outcome = advance(&mut field, control, &inside, FRAC_ONE, &mut Unstaged::default().staging());
+        let outcome = advance(&mut field, control, FRAC_ONE, &mut Unstaged::default().staging());
         let ledger = &outcome.ledger;
 
         assert_eq!(ledger.residual(), 0, "step {step} balances with no tolerance at all");
@@ -809,20 +811,21 @@ fn exposed(leak_frac: Frac) -> FieldState {
         port(5, 0, NodeKind::Reserve, 64, Vec2::units(3000, 3000)),
     ];
     let mut field = assembled(vec![layer(0, 0)], ports, Vec::new(), Vec::new(), Vec::new());
-    field.boundaries.leak_frac = leak_frac;
+    field.physical_compartment.leak_per_exposed_contact_per_step = leak_frac;
     field::validate(&field).expect("the fixture is a valid Field");
     field
 }
 
 #[test]
 fn boundary_leakage_takes_the_exposure_share_of_every_shell_member() {
-    // The inside is {1, 2}. Node 1 is adjacent to 2 (a member) and 3 (a
+    // The physical member set is {1, 2}. Node 1 is adjacent to 2 (a member) and 3 (a
     // non-member): one exposed link. Node 2 is adjacent to 1, 3, and 4 — 3 and 4
     // are non-members, so two exposed links.
     let mut field = exposed(LEAK_FRAC_CAP);
+    field.physical_compartment.members = vec![1, 2];
     assert!(field::nodes_adjacent(&field, 2, 4), "200 units apart, inside the rule");
     assert!(!field::nodes_adjacent(&field, 1, 4), "300 units apart, outside it");
-    let outcome = advance(&mut field, ControlState::default(), &[1, 2], FRAC_ONE, &mut Unstaged::default().staging());
+    let outcome = advance(&mut field, ControlState::default(), FRAC_ONE, &mut Unstaged::default().staging());
 
     // One eighth of 64 units, and two eighths of 64 units.
     assert_eq!(charge_of(&field, 1), 56 * ONE_UNIT);
@@ -839,51 +842,58 @@ fn boundary_leakage_takes_the_exposure_share_of_every_shell_member() {
 
     // An interior member — one with no non-member neighbor — leaks nothing.
     let mut field = exposed(LEAK_FRAC_CAP);
-    let outcome = advance(&mut field, ControlState::default(), &[1, 2, 3, 4], FRAC_ONE, &mut Unstaged::default().staging());
+    field.physical_compartment.members = vec![1, 2, 3, 4];
+    let outcome = advance(&mut field, ControlState::default(), FRAC_ONE, &mut Unstaged::default().staging());
     assert_eq!(charge_of(&field, 1), 64 * ONE_UNIT, "Node 1 touches only members");
     assert_eq!(outcome.ledger.leakage, 0, "and 5 stands beside nobody at all");
 
     // A Route to a non-member exposes a member the same way an adjacency does,
     // and a neighbor reached both ways counts once.
     let mut field = exposed(LEAK_FRAC_CAP);
+    field.physical_compartment.members = vec![1, 2, 3, 4];
     field.next_route_id = 3;
     field.routes = vec![route(1, 1, 5, 16), route(2, 5, 1, 16)];
-    let outcome = advance(&mut field, ControlState::default(), &[1, 2, 3, 4], FRAC_ONE, &mut Unstaged::default().staging());
+    let outcome = advance(&mut field, ControlState::default(), FRAC_ONE, &mut Unstaged::default().staging());
     assert_eq!(outcome.ledger.leakage, 8 * ONE_UNIT, "one distinct non-member neighbor, once");
     assert_eq!(charge_of(&field, 1), 56 * ONE_UNIT);
 }
 
 #[test]
 fn leakage_is_nothing_at_the_empty_and_whole_field_edges_and_never_more_than_is_held() {
-    // The empty standing inside, which is what a run stands on before a chapter
-    // loads: no member, so nothing leaks however wide the parameter.
+    // An empty physical compartment: no member, so nothing leaks however wide
+    // the parameter.
     let mut field = exposed(LEAK_FRAC_CAP);
+    field.physical_compartment.members.clear();
     let before: Fx = field.ports.iter().map(|port| port.q).sum();
-    let outcome = advance(&mut field, ControlState::default(), &[], FRAC_ONE, &mut Unstaged::default().staging());
+    let outcome = advance(&mut field, ControlState::default(), FRAC_ONE, &mut Unstaged::default().staging());
     assert_eq!(outcome.ledger.leakage, 0);
     assert_eq!(field.ports.iter().map(|port| port.q).sum::<Fx>(), before);
 
-    // An inside equal to the whole of the Field: no non-member exists, so no
+    // A physical compartment equal to the whole Field: no non-member exists, so no
     // member is exposed and nothing leaks.
     let mut field = exposed(LEAK_FRAC_CAP);
-    let outcome = advance(&mut field, ControlState::default(), &[1, 2, 3, 4, 5], FRAC_ONE, &mut Unstaged::default().staging());
+    field.physical_compartment.members = vec![1, 2, 3, 4, 5];
+    let outcome = advance(&mut field, ControlState::default(), FRAC_ONE, &mut Unstaged::default().staging());
     assert_eq!(outcome.ledger.leakage, 0);
     assert_eq!(field.ports.iter().map(|port| port.q).sum::<Fx>(), before);
 
     // A parameter of nothing leaks nothing, exposed or not.
     let mut field = exposed(0);
-    let outcome = advance(&mut field, ControlState::default(), &[1, 2], FRAC_ONE, &mut Unstaged::default().staging());
+    field.physical_compartment.members = vec![1, 2];
+    let outcome = advance(&mut field, ControlState::default(), FRAC_ONE, &mut Unstaged::default().staging());
     assert_eq!(outcome.ledger.leakage, 0);
 
     // Exposure enough to reach the whole of what is held takes exactly that and
     // never more: the rate is held at one, so the Node empties and no more.
     let mut field = exposed(LEAK_FRAC_CAP);
-    let outcome = advance(&mut field, ControlState::default(), &[1], FRAC_ONE, &mut Unstaged::default().staging());
+    field.physical_compartment.members = vec![1];
+    let outcome = advance(&mut field, ControlState::default(), FRAC_ONE, &mut Unstaged::default().staging());
     // Node 1 stands beside 2 and 3, two non-members at an eighth each.
     assert_eq!(charge_of(&field, 1), 48 * ONE_UNIT);
     assert_eq!(outcome.ledger.leakage, 16 * ONE_UNIT);
 
     let mut field = exposed(LEAK_FRAC_CAP);
+    field.physical_compartment.members = vec![1];
     // Eight exposed links would be the whole of it; the rule holds the rate at
     // one, so the member empties in a single step and the step still balances.
     for extra in 0..6u32 {
@@ -893,7 +903,7 @@ fn leakage_is_nothing_at_the_empty_and_whole_field_edges_and_never_more_than_is_
     }
     field.layers[0].port_ids = (1..=11).collect();
     field::validate(&field).expect("a wider fixture is still a valid Field");
-    let outcome = advance(&mut field, ControlState::default(), &[1], FRAC_ONE, &mut Unstaged::default().staging());
+    let outcome = advance(&mut field, ControlState::default(), FRAC_ONE, &mut Unstaged::default().staging());
     assert_eq!(charge_of(&field, 1), 0, "eight eighths is the whole of it");
     assert_eq!(outcome.ledger.leakage, 64 * ONE_UNIT);
     assert!(outcome.records.z.contains(&1), "a Node that ends with nothing failed");
@@ -901,10 +911,40 @@ fn leakage_is_nothing_at_the_empty_and_whole_field_edges_and_never_more_than_is_
 
     // The parameter has a locked range, and past it the Field is refused.
     let mut field = exposed(LEAK_FRAC_CAP);
-    field.boundaries.leak_frac = LEAK_FRAC_CAP + 1;
+    field.physical_compartment.leak_per_exposed_contact_per_step = LEAK_FRAC_CAP + 1;
     assert_eq!(refusal(&field), Code::Validation);
-    field.boundaries.leak_frac = -1;
+    field.physical_compartment.leak_per_exposed_contact_per_step = -1;
     assert_eq!(refusal(&field), Code::Validation);
+}
+
+#[test]
+fn a_compartment_edit_causes_the_first_leakage_divergence_and_both_ledgers_balance() {
+    let mut standing = exposed(LEAK_FRAC_CAP);
+    standing.physical_compartment.members = vec![1, 2, 3, 4];
+    let mut reshaped = standing.clone();
+    reshaped.physical_compartment.members = vec![1];
+
+    let unchanged = advance(
+        &mut standing,
+        ControlState::default(),
+        FRAC_ONE,
+        &mut Unstaged::default().staging(),
+    );
+    let changed = advance(
+        &mut reshaped,
+        ControlState::default(),
+        FRAC_ONE,
+        &mut Unstaged::default().staging(),
+    );
+
+    assert_eq!(standing.step, 1);
+    assert_eq!(reshaped.step, 1, "the divergence is on the first post-edit step");
+    assert_eq!(unchanged.ledger.leakage, 0, "the standing compartment has no exposed member");
+    assert_eq!(changed.ledger.leakage, 16 * ONE_UNIT, "the reshaped member has two contacts");
+    assert_ne!(standing.written(), reshaped.written(), "the physical intervention changes state");
+    assert_eq!(unchanged.ledger.residual(), 0);
+    assert_eq!(changed.ledger.residual(), 0);
+    assert!(unchanged.ledger.balanced() && changed.ledger.balanced());
 }
 
 // ---------------------------------------------------------------------------
@@ -1131,7 +1171,7 @@ fn at_every_cap() -> FieldState {
         .collect();
 
     let mut field = assembled(layers, ports, routes, forms, currents);
-    field.boundaries.leak_frac = LEAK_FRAC_CAP;
+    field.physical_compartment.leak_per_exposed_contact_per_step = LEAK_FRAC_CAP;
     // The Trail queue at its own cap, every entry written as wide as one is
     // ever written: the furthest due step, the widest position, and the whole
     // magnitude an entry may carry.
@@ -1638,7 +1678,7 @@ fn steering(steer_x: i16, steer_y: i16) -> ControlState {
 
 /// One step under a control and a configured pointer speed.
 fn step_at(field: &mut FieldState, control: ControlState, pointer_speed: Frac) -> StepOutcome {
-    advance(field, control, &[], pointer_speed, &mut Unstaged::default().staging())
+    advance(field, control, pointer_speed, &mut Unstaged::default().staging())
 }
 
 /// The velocity a control settles a Form at, at a given pointer speed.
@@ -1791,7 +1831,7 @@ fn a_steering_schedule_replays_to_the_same_field_and_the_same_bytes() {
     let trace = &run.state().trace;
     let mut carried = trace.keyframe.clone();
     for recorded in &trace.steps {
-        advance(&mut carried, recorded.ctl, &[], FRAC_ONE, &mut Unstaged::default().staging());
+        advance(&mut carried, recorded.ctl, FRAC_ONE, &mut Unstaged::default().staging());
     }
     assert_eq!(carried.written(), now.written(), "the replay lands on the live Field");
 
@@ -1832,7 +1872,8 @@ fn played(field: FieldState, script: &[(u16, i8)]) -> String {
     played_under(field, inside, script)
 }
 
-/// The same, under a named inside, so leakage takes part in the bytes.
+/// The same, under a named passive View, which takes part in the payload bytes
+/// but never in the Field's leakage arithmetic.
 fn played_under(field: FieldState, inside: Vec<u32>, script: &[(u16, i8)]) -> String {
     let mut run = standing_under(field, inside);
     for (index, (steps, depth_key)) in script.iter().enumerate() {
@@ -1865,20 +1906,20 @@ fn a_field_on_several_layers_serializes_the_same_bytes_under_the_same_schedule()
     assert_ne!(once, other, "the depth the Form reached is part of the state");
 
     // The richer state repeats byte for byte too: a Field where all four rules
-    // move Charge every step, played under a standing inside that leaks.
+    // move Charge every step, including the Field's physical leakage rule.
     let script = [(1u16, 1i8), (4, 0), (1, 1), (5, 0), (1, -1), (3, 0)];
     let rich = played_under(whole_field(), vec![1, 3], &script);
     assert_eq!(rich, played_under(whole_field(), vec![1, 3], &script));
     assert_eq!(canonicalize(&rich).expect("the payload is canonical"), rich);
-    assert!(rich.contains("\"leak_frac\":8192"), "{rich}");
+    assert!(rich.contains("\"leak_per_exposed_contact_per_step\":8192"), "{rich}");
     assert!(rich.contains("\"flow\":"), "the Routes carried their flow into the trace");
 
-    // The standing inside is part of what the bytes depend on, because it is
-    // what the leakage rule reads.
+    // The active View is serialized observation metadata, so the whole payload
+    // differs even though the physical Field and its leakage do not.
     assert_ne!(rich, played_under(whole_field(), vec![1, 3, 4], &script));
     // And so is the leakage parameter itself.
     let mut quiet = whole_field();
-    quiet.boundaries.leak_frac = 0;
+    quiet.physical_compartment.leak_per_exposed_contact_per_step = 0;
     assert_ne!(rich, played_under(quiet, vec![1, 3], &script));
 
     let mut deeper = across_layers();
@@ -1922,7 +1963,8 @@ fn whole_field() -> FieldState {
         vec![form(1, 1, 0, Vec2::units(1000, 1000), 0)],
         vec![bright],
     );
-    field.boundaries.leak_frac = LEAK_FRAC_CAP;
+    field.physical_compartment.members = vec![1];
+    field.physical_compartment.leak_per_exposed_contact_per_step = LEAK_FRAC_CAP;
     // Zero noise, for the same reason the chain fixture is quiet: what these
     // tests pin is the other rules' exact arithmetic.
     let field = quiet(field);
@@ -1931,9 +1973,69 @@ fn whole_field() -> FieldState {
 }
 
 #[test]
+fn arbitrary_view_changes_leave_field_trace_leakage_and_impulse_unchanged() {
+    let run = standing_under(whole_field(), vec![1]);
+    let mut first = run.state().clone();
+    let mut second = first.clone();
+    second.view = ViewDeclaration {
+        inside: vec![2, 3, 4],
+        resolution: 8,
+        window: 30,
+        surround: field_game_core::state::Surround::Double,
+    };
+    let opening_impulse = first.progress.impulse;
+    let controls = [
+        ControlState::default(),
+        ControlState { steer_x: 12_000, ..ControlState::default() },
+        ControlState { depth_move: 1, ..ControlState::default() },
+    ];
+
+    for control in controls {
+        let left = advance(
+            &mut first.now,
+            control,
+            FRAC_ONE,
+            &mut Unstaged::default().staging(),
+        );
+        let right = advance(
+            &mut second.now,
+            control,
+            FRAC_ONE,
+            &mut Unstaged::default().staging(),
+        );
+        let step = first.now.step;
+        first.trace.steps.push_back(TraceStep {
+            step,
+            rng: Default::default(),
+            ctl: control,
+            records: left.records.clone(),
+        });
+        second.trace.steps.push_back(TraceStep {
+            step,
+            rng: Default::default(),
+            ctl: control,
+            records: right.records.clone(),
+        });
+
+        assert_eq!(left.ledger.leakage, right.ledger.leakage);
+        assert_eq!(left.records.e, right.records.e, "View never enters the leakage record");
+        assert_eq!(left.ledger.residual(), 0);
+        assert_eq!(right.ledger.residual(), 0);
+        assert_eq!(first.now.written(), second.now.written(), "the Fields stay byte-identical");
+        let left_trace: Vec<String> = first.trace.steps.iter().map(TraceStep::written).collect();
+        let right_trace: Vec<String> = second.trace.steps.iter().map(TraceStep::written).collect();
+        assert_eq!(left_trace, right_trace, "the retained causal trace is identical");
+        assert_eq!(first.progress.impulse, opening_impulse);
+        assert_eq!(second.progress.impulse, opening_impulse);
+    }
+    assert_eq!(first.trace.keyframe.written(), second.trace.keyframe.written());
+    assert_ne!(first.view, second.view, "only observation metadata differs");
+}
+
+#[test]
 fn a_headless_form_accumulates_moves_loses_and_routes_charge_across_several_layers() {
-    // The inside is the Form alone, so it is a shell member of the standing View
-    // and its exposure leaks — the fourth rule, beside the other three.
+    // The physical compartment contains the Form alone, so it is an exposed
+    // material shell member and leaks — the fourth rule, beside the other three.
     let mut run = standing_under(whole_field(), vec![1]);
     let play = |run: &mut Run, seq: u32, steps: u16, depth_key: i8| {
         let body = frame(seq, steps, depth_key);
@@ -1990,7 +2092,7 @@ fn a_headless_form_accumulates_moves_loses_and_routes_charge_across_several_laye
     let mut totals = (0i64, 0i64, 0i64, 0i64);
     let mut replayed = whole_field();
     for recorded in &run.state().trace.steps {
-        let outcome = advance(&mut replayed, recorded.ctl, &[1], FRAC_ONE, &mut Unstaged::default().staging());
+        let outcome = advance(&mut replayed, recorded.ctl, FRAC_ONE, &mut Unstaged::default().staging());
         assert_eq!(outcome.ledger.residual(), 0, "step {} balances", recorded.step);
         assert!(outcome.ledger.balanced(), "per Node too");
         totals.0 += outcome.ledger.moved;
@@ -2027,7 +2129,7 @@ fn the_keyframe_carried_forward_replays_to_the_live_field() {
 
     let mut carried = trace.keyframe.clone();
     for recorded in &trace.steps {
-        let outcome = advance(&mut carried, recorded.ctl, &[], FRAC_ONE, &mut Unstaged::default().staging());
+        let outcome = advance(&mut carried, recorded.ctl, FRAC_ONE, &mut Unstaged::default().staging());
         assert_eq!(carried.step, recorded.step);
         assert_eq!(outcome.ledger.residual(), 0);
     }
@@ -2229,7 +2331,7 @@ fn the_ledger_carries_every_term_of_the_locked_identity() {
     assert_eq!(ledger.closing, 121 * ONE_UNIT);
     assert_eq!(ledger.drain, 7 * ONE_UNIT);
     assert_eq!(ledger.upkeep, 0, "no upkeep falls due while its attribution is unlocked");
-    assert_eq!(ledger.leakage, 0, "no inside stands, so no boundary leaks");
+    assert_eq!(ledger.leakage, 0, "the physical leakage coefficient is zero");
     assert_eq!(ledger.overload, 0, "and nothing holds more than its threshold");
     assert_eq!(ledger.current, 0, "this fixture carries no current");
     assert_eq!(ledger.moved, 0, "and no Route");
@@ -2239,12 +2341,13 @@ fn the_ledger_carries_every_term_of_the_locked_identity() {
 
     // Every sink and source at once, on a Field that carries all four rules.
     let mut whole = across_layers();
-    whole.boundaries.leak_frac = LEAK_FRAC_CAP;
+    whole.physical_compartment.members = vec![1, 3];
+    whole.physical_compartment.leak_per_exposed_contact_per_step = LEAK_FRAC_CAP;
     whole.ports[1].q = 32 * ONE_UNIT;
     whole.ports[1].capacity = 8 * ONE_UNIT;
     whole.currents[0].path = vec![Vec2::units(2048, 2048), Vec2::units(2100, 2048)];
     field::validate(&whole).expect("the fixture is a valid Field");
-    let outcome = advance(&mut whole, ControlState::default(), &[1, 3], FRAC_ONE, &mut Unstaged::default().staging());
+    let outcome = advance(&mut whole, ControlState::default(), FRAC_ONE, &mut Unstaged::default().staging());
     let ledger = &outcome.ledger;
     assert!(ledger.moved > 0, "a Route carried Charge");
     assert!(ledger.drain > 0, "a layer's Drain took some");
@@ -2315,8 +2418,8 @@ fn whole_field_with_a_source() -> FieldState {
 
 #[test]
 fn a_schedule_carrying_pulses_balances_every_step_and_replays_byte_exact() {
-    // The Field where all five locked rules move Charge, played under an inside
-    // that leaks, with the Pulse held across it and released inside reach of a
+    // The Field where all five locked rules move Charge, with an exposed
+    // physical member, the Pulse held across it and released inside reach of a
     // closed Port that holds Charge: conservation has to hold through the
     // gathering transfer exactly as through every other rule.
     let script = one_pulse(20);
@@ -2332,7 +2435,7 @@ fn a_schedule_carrying_pulses_balances_every_step_and_replays_byte_exact() {
     let mut gathered = 0i64;
     let mut replayed = whole_field_with_a_source();
     for recorded in &run.state().trace.steps {
-        let outcome = advance(&mut replayed, recorded.ctl, &[1], FRAC_ONE, &mut Unstaged::default().staging());
+        let outcome = advance(&mut replayed, recorded.ctl, FRAC_ONE, &mut Unstaged::default().staging());
         // Exact zero residual, in total and per Node, with no tolerance
         // anywhere — including on the step that carried the release.
         assert_eq!(outcome.ledger.residual(), 0, "step {} balances", recorded.step);
@@ -2391,7 +2494,7 @@ fn the_keyframe_carries_a_pulse_carrying_schedule_forward_exactly() {
 
     let mut carried = trace.keyframe.clone();
     for recorded in &trace.steps {
-        let outcome = advance(&mut carried, recorded.ctl, &[], FRAC_ONE, &mut Unstaged::default().staging());
+        let outcome = advance(&mut carried, recorded.ctl, FRAC_ONE, &mut Unstaged::default().staging());
         assert_eq!(outcome.ledger.residual(), 0);
     }
     assert_eq!(
@@ -2772,7 +2875,6 @@ fn an_emission_displaces_a_quarter_of_every_interference_level_within_reach() {
     let outcome = advance(
         &mut live,
         pulsing(false, true),
-        &[],
         FRAC_ONE,
         &mut staged.staging(),
     );

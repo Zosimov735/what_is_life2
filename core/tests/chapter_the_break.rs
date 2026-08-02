@@ -240,7 +240,7 @@ fn cut(route: u32) -> String {
 
 fn reshape(members: &[u32]) -> String {
     let written: Vec<String> = members.iter().map(|held| held.to_string()).collect();
-    format!("{{\"plan\":{{\"members\":[{}],\"op\":\"reshape_boundary\"}}}}", written.join(","))
+    format!("{{\"plan\":{{\"members\":[{}],\"op\":\"reshape_compartment\"}}}}", written.join(","))
 }
 
 // ---------------------------------------------------------------------------
@@ -396,15 +396,15 @@ struct Driven {
     outlet: Vec<(Step, bool, i64)>,
     /// Whether the spare store stood open.
     store_open: bool,
-    /// What the standing inside held at the close, in whole units.
+    /// What the standing physical compartment held at the close, in whole units.
     inside_units: i64,
-    /// The standing inside at the close.
+    /// The physical compartment's standing member set at the close.
     inside: Vec<u32>,
     /// What the spare store held at the close, in whole units.
     store_units: i64,
     /// What the far store held at the close, in whole units.
     bank_units: i64,
-    /// What the run leaked on the last batch, recomputed by the Boundary
+    /// What the run leaked on the last batch, recomputed by the compartment
     /// leakage rule off the Field, in raw units.
     leak_now: i64,
     form_units: i64,
@@ -558,14 +558,14 @@ fn trailing_flow_route(session: &Session) -> Option<(u32, i64, u32, i64)> {
     }
 }
 
-/// What the run leaks this step, recomputed off the Field by the Boundary
-/// leakage rule: every member of the standing inside with a crossing Route or a
-/// declared adjacency to a non-member loses the fraction its exposure earns.
+/// What the run leaks this step, recomputed off the Field by the physical
+/// compartment rule: every member with a crossing Route or a declared
+/// adjacency to a non-member loses the fraction its exposure earns.
 fn leak_now(session: &Session) -> i64 {
     use field_game_core::fx::{adjacent, fixed_mul};
     let state = session.run().expect("a run").state();
-    let inside = &state.view.inside;
-    let leak_frac = state.now.boundaries.leak_frac;
+    let inside = &state.now.physical_compartment.members;
+    let coefficient = state.now.physical_compartment.leak_per_exposed_contact_per_step;
     let mut total = 0;
     for member in inside {
         let Some(port) = state.now.ports.iter().find(|held| held.node == *member) else {
@@ -591,7 +591,7 @@ fn leak_now(session: &Session) -> i64 {
         if neighbours.is_empty() {
             continue;
         }
-        let rate = (neighbours.len() as i64 * leak_frac).min(65_536);
+        let rate = (neighbours.len() as i64 * coefficient).min(65_536);
         total += fixed_mul(port.q, rate);
     }
     total
@@ -805,7 +805,7 @@ fn drive_full(
             }
             // The ranking recomputed every batch, so the reading taken at the
             // last batch before the break is the newest one this file can take
-            // before the boundary ends the window and leaves the trace with
+            // before the compartment edit ends the window and leaves the trace with
             // nothing to rank.
             ranked_now = trailing_flow_route(&session);
             let outlet = state
@@ -817,12 +817,12 @@ fn drive_full(
             driven.outlet.push((state.now.step, driven.cut_step.is_some(), outlet));
             driven.store_open =
                 state.now.ports.iter().any(|port| port.node == 9 && port.open);
-            driven.inside = state.view.inside.clone();
+            driven.inside = state.now.physical_compartment.members.clone();
             driven.inside_units = state
                 .now
                 .ports
                 .iter()
-                .filter(|port| state.view.inside.contains(&port.node))
+                .filter(|port| state.now.physical_compartment.members.contains(&port.node))
                 .map(|port| port.q / ONE_UNIT)
                 .sum();
             driven.store_units = state
@@ -1028,7 +1028,7 @@ fn milestones(named: &str, run: &Driven) {
 
 #[test]
 fn the_chapter_completes_and_carries_the_run_into_its_own_transition() {
-    assert_eq!(CONTENT_VERSION, 1);
+    assert_eq!(CONTENT_VERSION, 2);
     let run = attentive();
 
     milestones("The Break, attentive first run", &run);
@@ -1112,7 +1112,6 @@ fn every_starting_form_completes_the_whole_chapter() {
         "form", "objectives", "steps", "minutes", "setbacks", "forms", "inside", "leak/step",
         "broke",
     );
-    let mut readings: Vec<(&str, i64, i64, usize)> = Vec::new();
     for form in field_game_core::run::FORMS {
         let run = drive_as(form, Trunk::Near, false, true);
         assert_eq!(run.completed, authored, "{form} completes the whole chapter in order");
@@ -1140,20 +1139,8 @@ fn every_starting_form_completes_the_whole_chapter() {
             run.leak_now,
             format!("{:?}", run.cut_route),
         );
-        readings.push((form, run.inside_units, run.leak_now, run.forms));
+        assert!(!run.inside.is_empty(), "{form} retains the chapter-authored compartment");
     }
-    // The same script, eight different Fields at the end of it: what a Form's
-    // authored parameters are for. `leak_frac` is the parameter this chapter's
-    // Boundary is read through, and every Form authors a different one, so no
-    // two of the eight leak the same.
-    let distinct: std::collections::BTreeSet<(i64, i64, usize)> =
-        readings.iter().map(|held| (held.1, held.2, held.3)).collect();
-    assert_eq!(
-        distinct.len(),
-        readings.len(),
-        "the eight Forms end the chapter holding only {} distinct readings: {readings:?}",
-        distinct.len(),
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1667,7 +1654,7 @@ fn each_recovery_is_worth_something_the_baseline_is_not() {
     );
     assert!(
         separate.inside.len() < baseline.inside.len(),
-        "the separated run's standing inside is not smaller: {:?} against {:?}",
+        "the separated run's physical compartment is not smaller: {:?} against {:?}",
         separate.inside,
         baseline.inside,
     );
@@ -1693,7 +1680,7 @@ fn each_recovery_is_worth_something_the_baseline_is_not() {
     }
     // The reserve is the only one that spends the store, and the separation is
     // the only one that leaves the run leaking less than it did — the exposure
-    // the reshaped inside sheds is the whole of that difference.
+    // the reshaped physical compartment sheds is the whole of that difference.
     assert_eq!(reserve.store_units, 0, "the reserve run spent the store it had banked");
     assert!(
         reroute.store_units > 0 && separate.store_units > 0,
@@ -1702,7 +1689,7 @@ fn each_recovery_is_worth_something_the_baseline_is_not() {
     assert!(
         separate.leak_now * 8 < baseline.leak_now,
         "the separated run leaks {} raw a step against the baseline's {}: shedding the \
-         stranded Nodes from the inside bought less than an eighth",
+         stranded Nodes from the compartment bought less than an eighth",
         separate.leak_now,
         baseline.leak_now,
     );

@@ -5,9 +5,10 @@
 //! them. So the tests here are in two halves. The first reads the authored
 //! files and pins what they declare — the orderings the promises name, and the
 //! one parameter the document says only `lens` carries. The second drives the
-//! rules and pins what the declarations do: the Charge a Boundary lets go of,
-//! the Charge a Form can stand on, the links a reach admits, and the Forms a
-//! Field opens with.
+//! rules and pins what the declarations do: the Charge a Form can stand on,
+//! the links a reach admits, and the Forms a Field opens with. Physical
+//! compartment membership and leakage are chapter parameters, so the same
+//! chapter must establish them identically under every Form.
 //!
 //! What is deliberately not here is a branch on a Form's name. Nothing in the
 //! core asks which Form was selected; the Field is established from the Form's
@@ -58,9 +59,9 @@ fn opened_field(content: &content::Content, id: &str) -> (FieldState, ViewDeclar
 }
 
 /// One step over a Field, with nothing staged and no control asked for.
-fn one_step(field: &mut FieldState, inside: &[u32]) {
+fn one_step(field: &mut FieldState) -> field::StepOutcome {
     let mut unstaged = Unstaged::default();
-    field::advance(field, ControlState::default(), inside, FRAC_ONE, &mut unstaged.staging());
+    field::advance(field, ControlState::default(), FRAC_ONE, &mut unstaged.staging())
 }
 
 /// Where a Node stands in the Port list.
@@ -105,11 +106,11 @@ fn every_starting_form_authors_its_own_parameters() {
     let content = authored();
     assert_eq!(content.forms.len(), FORMS.len(), "one file per Form of the closed set");
 
-    let mut seen: Vec<(String, [i64; 6])> = Vec::new();
+    let mut seen: Vec<(String, [i64; 7])> = Vec::new();
     println!("\nthe authored parameters, in whole units where they are quantities");
     println!(
-        "{:<8} {:>6} {:>9} {:>10} {:>7} {:>8} {:>6}",
-        "form", "reach", "forecast", "leak_frac", "upkeep", "capacity", "links",
+        "{:<8} {:>6} {:>9} {:>8} {:>8} {:>7} {:>8} {:>6}",
+        "form", "reach", "forecast", "steer", "route", "upkeep", "capacity", "links",
     );
     for id in FORMS {
         let form = form_of(&content, id);
@@ -122,10 +123,11 @@ fn every_starting_form_authors_its_own_parameters() {
             })
             .sum();
         println!(
-            "{id:<8} {:>6} {:>9} {:>10} {:>7} {:>8} {:>6}",
+            "{id:<8} {:>6} {:>9} {:>8} {:>8} {:>7} {:>8} {:>6}",
             form.route_reach / ONE_UNIT,
             form.forecast_depth,
-            form.leak_frac,
+            form.steer_scale,
+            form.route_capacity / ONE_UNIT,
             form.upkeep_rate / ONE_UNIT,
             form.capacity / ONE_UNIT,
             links,
@@ -133,7 +135,8 @@ fn every_starting_form_authors_its_own_parameters() {
         let vector = [
             form.route_reach,
             i64::from(form.forecast_depth),
-            form.leak_frac,
+            form.steer_scale,
+            form.route_capacity,
             form.upkeep_rate,
             form.capacity,
             form.reserve,
@@ -159,12 +162,6 @@ fn the_authored_parameters_stand_in_the_order_the_promises_name() {
         held
     };
 
-    // Ring's strong boundary and Thread's weak one are the two ends of the
-    // leakage parameter.
-    let leakage = by(|form| form.leak_frac);
-    assert_eq!(leakage.first().map(|(id, _)| id.as_str()), Some("ring"));
-    assert_eq!(leakage.last().map(|(id, _)| id.as_str()), Some("thread"));
-
     // Ring's short reach and Relay's long routes are the two ends of the reach.
     let reach = by(|form| form.route_reach);
     assert_eq!(reach.first().map(|(id, _)| id.as_str()), Some("ring"));
@@ -182,8 +179,14 @@ fn the_authored_parameters_stand_in_the_order_the_promises_name() {
     let reserve = by(|form| form.reserve);
     assert_eq!(reserve.last().map(|(id, _)| id.as_str()), Some("vault"));
 
+    // Thread responds twice as fast as the standard chassis and Vault is the
+    // slow end of the authored steering range.
+    let steering = by(|form| form.steer_scale);
+    assert_eq!(steering.first().map(|(id, _)| id.as_str()), Some("vault"));
+    assert_eq!(steering.last().map(|(id, _)| id.as_str()), Some("thread"));
+
     // The document's own line: only `lens` declares a Forecast depth above 0
-    // in version 1.
+    // in version 2.
     for id in FORMS {
         let depth = form_of(&content, id).forecast_depth;
         assert_eq!(depth > 0, id == "lens", "{id} declares a Forecast depth of {depth}");
@@ -195,8 +198,9 @@ fn the_authored_parameters_stand_in_the_order_the_promises_name() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn the_field_a_run_opens_on_carries_the_selected_forms_parameters() {
+fn the_field_a_run_opens_on_carries_form_parameters_and_the_chapters_compartment() {
     let content = authored();
+    let chapter = content.chapter(0).expect("the opening chapter");
     for id in FORMS {
         let form = form_of(&content, id);
         let (field, _) = opened_field(&content, id);
@@ -205,8 +209,10 @@ fn the_field_a_run_opens_on_carries_the_selected_forms_parameters() {
         assert_eq!(controlled.route_reach, form.route_reach);
         assert_eq!(controlled.forecast_depth, form.forecast_depth);
         assert_eq!(controlled.reserve, form.reserve);
-        // The Boundary parameter is the run's, and it is the selected Form's.
-        assert_eq!(field.boundaries.leak_frac, form.leak_frac);
+        assert_eq!(
+            field.physical_compartment, chapter.physical_compartment,
+            "{id} opens the chapter-authored members and leakage coefficient",
+        );
         // The Form's own Node carries the threshold and the upkeep rate.
         let node = field
             .ports
@@ -220,61 +226,37 @@ fn the_field_a_run_opens_on_carries_the_selected_forms_parameters() {
 }
 
 #[test]
-fn the_boundary_a_form_authors_decides_what_the_inside_lets_go_of() {
-    // One step over the same Field, with the same Charge standing on the same
-    // inside, under each Form's own Boundary parameter. The rule is the locked
-    // leakage rule and is not under test here; what is under test is that the
-    // selected Form decides its rate, and that the rates stand in the order the
-    // promises name.
+fn the_same_chapter_compartment_leaks_identically_under_every_form() {
+    // One step over the same chapter-authored physical compartment, with the
+    // same Charge on every member. The opening View begins with the same member
+    // list as authored initial data, but clearing that local View value cannot
+    // enter the transition: `advance` accepts no View.
     let content = authored();
+    let chapter = content.chapter(0).expect("the opening chapter");
     let standing = 512 * ONE_UNIT;
     let mut leaked: Vec<(&str, i64)> = Vec::new();
     for id in FORMS {
-        let (mut field, view) = opened_field(&content, id);
+        let (mut field, mut view) = opened_field(&content, id);
+        assert_eq!(view.inside, chapter.physical_compartment.members);
+        view.inside.clear();
+        assert!(view.inside.is_empty());
+        assert_eq!(field.physical_compartment, chapter.physical_compartment);
         for port in &mut field.ports {
-            if view.inside.contains(&port.node) {
+            if field.physical_compartment.members.contains(&port.node) {
                 port.q = standing;
             }
         }
-        let before: i64 = field
-            .ports
-            .iter()
-            .filter(|port| view.inside.contains(&port.node))
-            .map(|port| port.q)
-            .sum();
-        one_step(&mut field, &view.inside);
-        let after: i64 = field
-            .ports
-            .iter()
-            .filter(|port| view.inside.contains(&port.node))
-            .map(|port| port.q)
-            .sum();
-        leaked.push((id, before - after));
+        leaked.push((id, one_step(&mut field).ledger.leakage));
     }
-    println!("\nwhat one step of the same inside lets go of, raw");
+    println!("\nwhat one step of the same physical compartment leaks, raw");
     for (id, held) in &leaked {
         println!("  {id:<8} {held:>8}");
     }
-    let ring = leaked.iter().find(|(id, _)| *id == "ring").expect("ring").1;
-    let thread = leaked.iter().find(|(id, _)| *id == "thread").expect("thread").1;
-    assert!(ring > 0, "every authored Boundary leaks something across an exposed link");
+    let expected = leaked.first().expect("one Form").1;
+    assert!(expected > 0, "the authored compartment has exposed contacts");
     assert!(
-        thread > ring * 4,
-        "Thread's weak Boundary lets go of far more than Ring's strong one: {thread} against {ring}",
-    );
-    // The whole order follows the authored parameter, so no Form is quietly
-    // leaking out of turn.
-    let mut by_parameter: Vec<(&str, i64)> = FORMS
-        .iter()
-        .map(|id| (*id, form_of(&content, id).leak_frac))
-        .collect();
-    by_parameter.sort_by_key(|(_, value)| *value);
-    let mut by_measure = leaked.clone();
-    by_measure.sort_by_key(|(_, value)| *value);
-    assert_eq!(
-        by_parameter.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
-        by_measure.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
-        "the measured order is the authored order",
+        leaked.iter().all(|(_, held)| *held == expected),
+        "Form selection cannot change chapter leakage: {leaked:?}",
     );
 }
 
@@ -283,13 +265,13 @@ fn the_threshold_a_form_authors_decides_what_it_can_stand_on() {
     // The same Charge pressed onto each Form's own Node, and one step run. A
     // Form standing above its threshold sheds a quarter of the excess; a Form
     // whose threshold is above what it holds sheds nothing. That is the whole
-    // of "preserves stored state" against "holds little charge" as version 1
+    // of "preserves stored state" against "holds little charge" as version 2
     // expresses them.
     let content = authored();
     let pressed = 1024 * ONE_UNIT;
     let mut held: Vec<(&str, i64)> = Vec::new();
     for id in FORMS {
-        let (mut field, view) = opened_field(&content, id);
+        let (mut field, _) = opened_field(&content, id);
         let node = field.forms.iter().find(|form| form.controlled).expect("one is steered").node;
         for port in &mut field.ports {
             if port.node == node {
@@ -300,7 +282,7 @@ fn the_threshold_a_form_authors_decides_what_it_can_stand_on() {
         // leaves standing is the threshold the Form authored, or everything
         // pressed onto it when the threshold stands above that.
         for _ in 0..60 {
-            one_step(&mut field, &view.inside);
+            one_step(&mut field);
         }
         held.push((id, node_q(&field, node)));
     }
@@ -621,11 +603,10 @@ fn an_ability_this_build_cannot_apply_is_refused_rather_than_ignored() {
 /// One step over a Field under a named control, and what the step accounted.
 fn steered_step(
     field: &mut FieldState,
-    inside: &[u32],
     control: ControlState,
 ) -> field::StepOutcome {
     let mut unstaged = Unstaged::default();
-    field::advance(field, control, inside, FRAC_ONE, &mut unstaged.staging())
+    field::advance(field, control, FRAC_ONE, &mut unstaged.staging())
 }
 
 #[test]
@@ -638,10 +619,10 @@ fn the_steering_scale_a_form_authors_decides_how_far_a_gesture_carries_it() {
     let control = ControlState { steer_x: 32767, ..ControlState::default() };
     let mut carried: Vec<(&str, i64)> = Vec::new();
     for id in FORMS {
-        let (mut field, view) = opened_field(&content, id);
+        let (mut field, _) = opened_field(&content, id);
         let opened = field.forms.iter().find(|form| form.controlled).expect("one is steered").pos.x;
         for _ in 0..60 {
-            steered_step(&mut field, &view.inside, control);
+            steered_step(&mut field, control);
         }
         let ended = field.forms.iter().find(|form| form.controlled).expect("one is steered").pos.x;
         carried.push((id, (ended - opened) / ONE_UNIT));
@@ -683,7 +664,7 @@ fn the_trail_wake_authors_is_left_behind_it_and_comes_due_where_it_stood() {
     let Some(Ability::Trail { period, delay, magnitude, .. }) = wake.abilities.first() else {
         panic!("wake authors a Trail");
     };
-    let (mut field, view) = opened_field(&content, "wake");
+    let (mut field, _) = opened_field(&content, "wake");
     let node = field.forms.iter().find(|form| form.controlled).expect("one is steered").node;
     let opening = node_q(&field, node);
 
@@ -691,7 +672,7 @@ fn the_trail_wake_authors_is_left_behind_it_and_comes_due_where_it_stood() {
     let mut delivered_at = 0;
     let mut delivered = 0;
     for step in 1..=(u32::from(*period) + u32::from(*delay)) {
-        let outcome = steered_step(&mut field, &view.inside, ControlState::default());
+        let outcome = steered_step(&mut field, ControlState::default());
         assert_eq!(outcome.ledger.residual(), 0, "step {step} balances");
         assert!(outcome.ledger.balanced(), "and balances per Node");
         if left_at == 0 && !field.pending.is_empty() {
@@ -727,7 +708,7 @@ fn a_chorus_running_flat_out_stands_separated_and_rejoins_when_it_stops() {
     let Some(Ability::LinkedForms { separation, .. }) = chorus.abilities.first() else {
         panic!("chorus authors links");
     };
-    let (mut field, view) = opened_field(&content, "chorus");
+    let (mut field, _) = opened_field(&content, "chorus");
     let apart = |field: &FieldState| -> Vec<i64> {
         let anchor = field.forms.iter().find(|form| form.controlled).expect("one is steered");
         field
@@ -741,7 +722,7 @@ fn a_chorus_running_flat_out_stands_separated_and_rejoins_when_it_stops() {
 
     let control = ControlState { steer_x: 32767, steer_y: -16384, ..ControlState::default() };
     for _ in 0..90 {
-        steered_step(&mut field, &view.inside, control);
+        steered_step(&mut field, control);
     }
     let running = apart(&field);
     println!("\nhow far a running Chorus stands from its own Forms, raw: {running:?}");
@@ -754,7 +735,7 @@ fn a_chorus_running_flat_out_stands_separated_and_rejoins_when_it_stops() {
     assert!(field.forms.iter().filter(|form| !form.controlled).all(|form| form.vel.x != 0));
 
     for _ in 0..120 {
-        steered_step(&mut field, &view.inside, ControlState::default());
+        steered_step(&mut field, ControlState::default());
     }
     assert!(
         apart(&field).iter().all(|held| held <= separation),

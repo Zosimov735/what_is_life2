@@ -10,7 +10,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import catalog from '../../content/copy/catalog.json';
-import { FORM_IDS, type FormId } from '../../worker/src/protocol';
+import { FORM_IDS, PROTOCOL_VERSION, type FormId } from '../../worker/src/protocol';
 import type { CommandEnvelope, ResponseEnvelope } from '../../worker/src/protocol';
 import { App } from '../src/shell/App';
 import { FormSelect } from '../src/shell/FormSelect';
@@ -77,10 +77,15 @@ function named(form: FormId): { name: string; promise: string } {
 
 /** A client that answers nothing, for a shell under test past the selection. */
 function stubClient(): CoreClient {
-  const ready: Promise<ResponseEnvelope> = Promise.resolve({ v: 1, re: 1, ok: true, body: {} });
+  const ready: Promise<ResponseEnvelope> = Promise.resolve({
+    v: PROTOCOL_VERSION,
+    re: 1,
+    ok: true,
+    body: {},
+  });
   return {
     ready,
-    command: async () => ({ v: 1, re: 0, ok: true, body: {} }),
+    command: async () => ({ v: PROTOCOL_VERSION, re: 0, ok: true, body: {} }),
     snapshot: () => null,
     frames: () => ({ previous: null, next: null, alpha: 0 }),
     pause: () => {},
@@ -104,8 +109,8 @@ function stubClient(): CoreClient {
     clearReview: () => {},
     ending: () => null,
     inspect: () => {},
-    queuePlan: async () => ({ v: 1, re: 0, ok: true, body: {} }),
-    undoPlan: async () => ({ v: 1, re: 0, ok: true, body: {} }),
+    queuePlan: async () => ({ v: PROTOCOL_VERSION, re: 0, ok: true, body: {} }),
+    undoPlan: async () => ({ v: PROTOCOL_VERSION, re: 0, ok: true, body: {} }),
     telemetry: () => ({}),
     watch: () => () => {},
     close: () => {},
@@ -150,9 +155,9 @@ test('no Form is offered as the one to take', () => {
     expect(offered.className).toBe('opening-form');
   }
 
-  // And no reading of any kind reaches the surface: the promises say what a
-  // Form does, and no figure says how much of it.
-  expect(container.textContent ?? '').not.toMatch(/[0-9]/);
+  // Quantified chassis promises may name their limits, but none receives an
+  // editorial badge or selection state that makes it the prescribed choice.
+  expect(container.querySelector('[data-recommended], [data-current]')).toBeNull();
 });
 
 test('the arrow keys move through the Forms, and one tab stop holds them all', () => {

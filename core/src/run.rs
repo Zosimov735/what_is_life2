@@ -20,7 +20,7 @@ use crate::fault::{Code, Fault};
 use crate::field::{self, cap_fault, Cue, StepRecords};
 use crate::frame::{self, Snapshot};
 use crate::json::{is_hex, Json, Obj};
-use crate::plan::{self, PlanCommand, PlanQueue, Projection, StandingSlate, PLAN_QUEUE_DEPTH};
+use crate::plan::{self, PlanCommand, PlanQueue, Projection, PLAN_QUEUE_DEPTH};
 use crate::records::save_key;
 use crate::rng::trajectory_stream;
 use crate::sha256;
@@ -501,10 +501,9 @@ impl Run {
     /// This is the seam authored content arrives through: the chapter's layers,
     /// Ports, Routes, Forms, currents, authored Boundary list, and opening View.
     ///
-    /// The two arrive together because they are one chapter's content, and
-    /// because the Boundary leakage rule reads the standing View's inside: a
-    /// Field without the View it is read under would leak nothing whatever its
-    /// parameter said.
+    /// The two arrive together because they are one chapter's content. The
+    /// Field already carries its independent material compartment; the View is
+    /// the passive observation declaration the chapter opens under.
     ///
     /// The trajectory's keyframe takes the same Field, because a keyframe holds
     /// the state as of its own step and this is the opening state of the run. A
@@ -538,9 +537,10 @@ impl Run {
         self.raise(
             "chapter_changed",
             &format!(
-                "{{\"chapter_index\":{},\"title_key\":{}}}",
+                "{{\"chapter_index\":{},\"title_key\":{},\"view\":{}}}",
                 self.state.progress.chapter_index,
                 crate::fault::quoted(&chapter.title_key),
+                self.state.view.written(),
             ),
         );
         crate::content::offer_opening(&mut self.state.progress, chapter, self.state.now.step);
@@ -1353,17 +1353,12 @@ impl Run {
         // recorded and not advanced: the goals that add exogenous terms to
         // pressures and currents draw in the locked order.
         let position = self.state.rng;
-        // The Boundary leakage rule reads the standing View's inside, which is a
-        // step input the trace does not carry. What makes that exact is locked
-        // in ARCHITECTURE.md's Boundary leakage rule: the standing inside is
-        // immutable between View commits, and a commit ends the active window,
-        // so a regeneration inside any one window reads one fixed inside. The
-        // goal that introduces committed changes mid-run has the two paths that
-        // rule names and no third.
+        // Physical membership and its leakage coefficient live in the Field.
+        // The active View is observation metadata and is deliberately absent
+        // from this causal transition call.
         let outcome = field::advance(
             &mut self.state.now,
             control,
-            &self.state.view.inside,
             self.state.input_config.pointer_speed,
             &mut field::Staging {
                 pressures: &mut self.state.pressures,
@@ -1716,7 +1711,7 @@ impl Run {
         // One cache for the whole carry: the Field's shape does not change
         // while it runs, because a commit is what changes a shape and a commit
         // ends the window before it does.
-        let cache = field::StepCache::of(&self.state.trace.keyframe, &self.state.view.inside);
+        let cache = field::StepCache::of(&self.state.trace.keyframe);
         while self.state.trace.start_step < wanted {
             let Some(recorded) = self.state.trace.steps.pop_front() else {
                 debug_assert!(false, "the retained span holds every step after its keyframe");
@@ -1725,7 +1720,6 @@ impl Run {
             replay_onto(
                 &mut self.state.trace.keyframe,
                 &recorded,
-                &self.state.view.inside,
                 self.state.input_config.pointer_speed,
                 &self.state.pressures,
                 &self.state.schedule,
@@ -1735,26 +1729,47 @@ impl Run {
         }
     }
 
-    /// The evaluation record the run stands under, which `set_focus` names a
-    /// position in.
-    ///
-    /// A run stands under none until the first assembly runs — the payload's
-    /// `slate` is null, and every `set_focus` is refused with `not_found`,
-    /// which is the locked envelope for an identifier naming nothing. Once one
-    /// stands, this is the reading of it the queue validates against: the
-    /// ordinal it names, whether it is deficient, and the candidate Views in
-    /// assembly order, which is presentation order.
-    fn slate(&self) -> Option<StandingSlate> {
-        self.state.slate.as_ref().map(|slate| StandingSlate {
-            ordinal: slate.ordinal,
-            deficient: slate.deficient,
-            candidates: slate.candidates.iter().map(|entry| entry.view.clone()).collect(),
-        })
-    }
-
     /// The evaluation record itself, for the caller that reports it.
     pub fn standing_slate(&self) -> Option<&CandidateSlate> {
         self.state.slate.as_ref()
+    }
+
+    /// Selects one candidate's observation View immediately and for free, or
+    /// clears only its member selection at position 0.
+    ///
+    /// This changes measurement metadata only. It deliberately does not touch
+    /// the Field, trace, completed step, plan queue, Impulse, slate, or active
+    /// window. Physical compartment reshaping is the paid plan operation.
+    pub fn set_focus(
+        &mut self,
+        slate_ordinal: u32,
+        position: u8,
+    ) -> Result<ViewDeclaration, Fault> {
+        let Some(slate) = self.state.slate.as_ref() else {
+            return Err(plan::Refusal::missing("slate").fault());
+        };
+        if slate.ordinal != slate_ordinal {
+            return Err(plan::Refusal::missing("slate").fault());
+        }
+        // Position 0 is the passive clear operation, not a candidate seat. It
+        // retains the rest of the active measurement protocol and is available
+        // even when the slate is deficient, because it adopts no evidence from
+        // that slate. The ordinal still has to name the record that stands.
+        if position == 0 {
+            let mut view = self.state.view.clone();
+            view.inside.clear();
+            self.state.view = view.clone();
+            return Ok(view);
+        }
+        if slate.deficient {
+            return Err(plan::Refusal::invalid("deficient").fault());
+        }
+        let Some(candidate) = slate.candidates.get(usize::from(position) - 1) else {
+            return Err(plan::Refusal::invalid("position").fault());
+        };
+        let view = candidate.view.clone();
+        self.state.view = view.clone();
+        Ok(view)
     }
 
     /// Assembles the slate for one evaluation and raises the record.
@@ -1766,10 +1781,11 @@ impl Run {
     /// budget locks as the trigger, and the evaluation step is the last
     /// completed step.
     ///
-    /// A Field with no Node is the one case no evaluation may run in: the
-    /// standing inside is empty there and so is the fallback, and the empty set
-    /// is not a View. That is the state a run stands in before a chapter is
-    /// loaded, and nothing is assembled in it.
+    /// A Field with no Node is the one case no evaluation may run in: both the
+    /// selected members and the fallback seed are empty, so there is no
+    /// candidate to evaluate. That pre-chapter placeholder differs from a
+    /// player-cleared View over a populated Field, whose slate uses the local
+    /// whole-Field fallback without reselecting the active View.
     fn assemble_slate(&mut self) {
         if self.state.now.ports.is_empty() {
             return;
@@ -1806,10 +1822,8 @@ impl Run {
         if self.queue.len() >= PLAN_QUEUE_DEPTH {
             return Err(cap_fault("plan_queue_depth", PLAN_QUEUE_DEPTH as i64));
         }
-        let slate = self.slate();
-        let projected =
-            self.queue.projected(&self.state.now, &self.state.view, slate.as_ref());
-        plan::check(&plan, &projected, slate.as_ref()).map_err(plan::Refusal::fault)?;
+        let projected = self.queue.projected(&self.state.now);
+        plan::check(&plan, &projected).map_err(plan::Refusal::fault)?;
 
         let cost = (self.queue.len() as u8 + 1) * crate::plan::PLAN_ENTRY_COST;
         if cost > self.impulse() {
@@ -1826,11 +1840,11 @@ impl Run {
         // current step, whether or not the change is later committed. It is the
         // player's own act, and source 1 of candidate assembly reads the list
         // rather than the commits.
-        if let PlanCommand::ReshapeBoundary { members } = &plan {
+        if let PlanCommand::ReshapeCompartment { members } = &plan {
             self.state.now.boundaries.record_drawn(members.clone(), self.state.now.step);
         }
         let queued = self.queue.push(plan)?;
-        self.queue.rebuild(&self.state.now, &self.state.view, slate.as_ref());
+        self.queue.rebuild(&self.state.now);
         Ok(queued)
     }
 
@@ -1838,12 +1852,11 @@ impl Run {
     ///
     /// What a drag recorded in the drawn boundary list is not taken back with
     /// it: the list holds every completed drag whether or not the change is
-    /// committed, so an undo that removes a `reshape_boundary` removes the
+    /// committed, so an undo that removes a `reshape_compartment` removes the
     /// proposal and leaves the record of the act.
     pub fn undo_plan(&mut self) -> usize {
         self.queue.undo();
-        let slate = self.slate();
-        self.queue.rebuild(&self.state.now, &self.state.view, slate.as_ref());
+        self.queue.rebuild(&self.state.now);
         self.queue.len()
     }
 
@@ -1953,7 +1966,7 @@ impl Run {
             field: &self.state.now,
             mode: self.mode,
             time_scale: self.time_scale(),
-            inside: &self.state.view.inside,
+            view_inside: &self.state.view.inside,
             queue: &self.queue,
             cues: &self.cues,
             config: &self.state.input_config,
@@ -1975,8 +1988,16 @@ impl Run {
     /// rather than the mode.
     fn forecast(&self) -> &[(crate::state::Fx, crate::state::Fx)] {
         match &self.state.slate {
-            Some(slate) => &slate.forecast_envelope,
+            Some(slate)
+                if slate
+                    .candidates
+                    .first()
+                    .is_some_and(|candidate| candidate.view == self.state.view) =>
+            {
+                &slate.forecast_envelope
+            }
             None => &[],
+            Some(_) => &[],
         }
     }
 
@@ -2044,12 +2065,11 @@ impl Run {
         // state cannot have moved under it — but the entries can disagree with
         // each other, and an entry that stood when it was queued can fail
         // against a projection the entries before it have changed.
-        let slate = self.slate();
-        let mut projected = Projection::of(&self.state.now, &self.state.view);
+        let mut projected = Projection::of(&self.state.now);
         for (position, entry) in entries.iter().enumerate() {
-            plan::check(entry, &projected, slate.as_ref())
+            plan::check(entry, &projected)
                 .map_err(|refusal| refusal.positioned(position))?;
-            plan::apply(entry, &mut projected, slate.as_ref())
+            plan::apply(entry, &mut projected)
                 .map_err(|refusal| refusal.positioned(position))?;
         }
 
@@ -2060,19 +2080,13 @@ impl Run {
             // reads the pre-commit slate, whose baselines the reassembly is
             // about to replace with the unassigned ones a span of 0 gives.
             // Either reading taken after the commit would read nothing.
-            self.pending_echo = self.echo_of(&entries, &projected.view);
-            // The active window ends here, before the change takes effect. The
-            // keyframe carry runs to this step under the View and the Field the
-            // recorded steps ran under, so no recorded step is ever replayed
-            // against an inside or a Route set it did not run under; the
-            // trajectory then restarts on the state the commit leaves. Without
-            // it a regeneration inside a window that spans this step would read
-            // the new standing inside for steps that ran under the old one, and
-            // a change no step recorded would sit inside a window a replay
-            // reads.
+            self.pending_echo = self.echo_of(&entries);
+            // The active window ends before the causal change takes effect.
+            // The keyframe carry therefore replays every retained step under
+            // the material compartment and route topology it actually ran
+            // under, then restarts on the Field the commit leaves.
             self.end_window();
             self.state.now = projected.field;
-            self.state.view = projected.view;
             self.state.progress.impulse -= cost as u8;
             // The second of the two assembly moments: a committed change
             // reassembles the slate, under the span the commit just clamped.
@@ -2107,16 +2121,9 @@ impl Run {
     ///   is: the commit ends it. A cut whose reading is unassigned leaves no
     ///   highlight, and — because the branch is one match — never another
     ///   arm's.
-    /// - a committed **reshape or adoption** runs no perturbation at all: its
-    ///   highlight derives from the adopted candidate's evaluation record in
-    ///   the **pre-commit** slate, the record that actually evaluated it and
-    ///   carries baseline deviations. The post-commit record cannot serve —
-    ///   the commit clamps the retained span to 0, so its baselines are the
-    ///   unassigned ones an empty window gives, always. For `set_focus` the
-    ///   adopted candidate is the one at the named position; for
-    ///   `reshape_boundary` it is the candidate standing at the View the
-    ///   commit installs, and there is no highlight when no candidate
-    ///   evaluated that View — honest, rather than another record's reading.
+    /// - a committed **compartment reshape** has no candidate-View evaluation
+    ///   to borrow and therefore leaves no highlight until a typed physical
+    ///   compartment counterfactual exists;
     /// - a committed **connect or redirect**, which the framework's list does
     ///   not bind, reads the standing candidate — seat 1 — because the
     ///   standing View is what those commits leave adopted.
@@ -2124,18 +2131,12 @@ impl Run {
     ///   reads from `component-substitution` with that member as its
     ///   parameter; until that flow exists no entry queues one.
     ///
-    /// `adopted` is the View the commit is about to install, projected from
-    /// the whole queue, which is what a reshape's highlight is matched against.
-    fn echo_of(
-        &self,
-        entries: &[PlanCommand],
-        adopted: &crate::state::ViewDeclaration,
-    ) -> Option<crate::perturb::EchoHighlight> {
+    fn echo_of(&self, entries: &[PlanCommand]) -> Option<crate::perturb::EchoHighlight> {
         use crate::perturb::{Request, BOUNDARY_SEVERANCE, ROUTE_REMOVAL};
         match entries.last()? {
             PlanCommand::Cut { route } => {
                 // Every Route the committed queue cuts, against the crossing
-                // set of the View standing before it: a commit that takes the
+                // set of the physical compartment standing before it: a commit that takes the
                 // last one of them is a severance of the boundary rather than
                 // the removal of one Route.
                 let cut: Vec<u32> = entries
@@ -2149,6 +2150,16 @@ impl Run {
                 let severed =
                     !crossing.is_empty() && crossing.iter().all(|held| cut.contains(held));
                 let request = if severed {
+                    // The existing boundary-severance assay is parameterized
+                    // by an observation View. Once that View and the material
+                    // compartment differ, borrowing it would replay a
+                    // different crossing set from the physical edit. Leave no
+                    // Echo until a typed compartment-severance assay exists.
+                    if self.state.view.inside.as_slice()
+                        != self.state.now.physical_compartment.members.as_slice()
+                    {
+                        return None;
+                    }
                     Request::of(BOUNDARY_SEVERANCE, None)?
                 } else {
                     Request::of(ROUTE_REMOVAL, Some(*route))?
@@ -2164,19 +2175,10 @@ impl Run {
                 )
                 .highlight()
             }
-            PlanCommand::SetFocus { position, .. } => {
-                let slate = self.state.slate.as_ref()?;
-                let candidate = slate.candidates.get(usize::from(*position) - 1)?;
-                crate::perturb::evaluation_highlight(candidate, slate.ordinal)
-            }
-            PlanCommand::ReshapeBoundary { .. } => {
-                let slate = self.state.slate.as_ref()?;
-                let candidate = slate
-                    .candidates
-                    .iter()
-                    .find(|held| held.view == *adopted)?;
-                crate::perturb::evaluation_highlight(candidate, slate.ordinal)
-            }
+            // A physical reshape has no candidate-View evaluation to borrow.
+            // It leaves no Echo until a typed compartment counterfactual is
+            // implemented.
+            PlanCommand::ReshapeCompartment { .. } => None,
             PlanCommand::Connect { .. } | PlanCommand::Redirect { .. } => {
                 let slate = self.state.slate.as_ref()?;
                 crate::perturb::evaluation_highlight(slate.candidates.first()?, slate.ordinal)
@@ -2184,10 +2186,10 @@ impl Run {
         }
     }
 
-    /// The crossing set of the standing View: the Routes with exactly one
-    /// endpoint inside it.
+    /// The crossing set of the physical compartment: the Routes with exactly
+    /// one material endpoint inside it.
     fn crossing_routes(&self) -> Vec<u32> {
-        let inside = &self.state.view.inside;
+        let inside = &self.state.now.physical_compartment.members;
         self.state
             .now
             .routes
@@ -2206,15 +2208,14 @@ impl Run {
     /// This is the ordinary keyframe carry run to a boundary rather than to the
     /// retained span's own start, and it is what "a commit ends the active
     /// window" means for the trace: every retained step is replayed under the
-    /// standing inside before the commit changes it, and none is left behind to
-    /// be replayed under the one after.
+    /// causal Field that produced it, and none is left behind to be replayed
+    /// under a later physical edit.
     fn end_window(&mut self) {
-        let cache = field::StepCache::of(&self.state.trace.keyframe, &self.state.view.inside);
+        let cache = field::StepCache::of(&self.state.trace.keyframe);
         while let Some(recorded) = self.state.trace.steps.pop_front() {
             replay_onto(
                 &mut self.state.trace.keyframe,
                 &recorded,
-                &self.state.view.inside,
                 self.state.input_config.pointer_speed,
                 &self.state.pressures,
                 &self.state.schedule,
@@ -2275,7 +2276,6 @@ fn drift_paths(field: &mut crate::state::FieldState, layer: u32, delta: crate::s
 fn replay_onto(
     state: &mut FieldState,
     recorded: &TraceStep,
-    inside: &[u32],
     pointer_speed: Frac,
     pressures: &[crate::pressure::PressureState],
     schedule: &crate::pressure::Schedule,
@@ -2295,7 +2295,6 @@ fn replay_onto(
     field::advance_cached(
         state,
         recorded.ctl,
-        inside,
         pointer_speed,
         &mut field::Staging { pressures: &mut carried, schedule, stream: &mut stream },
         cache,

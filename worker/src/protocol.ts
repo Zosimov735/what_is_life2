@@ -1,7 +1,7 @@
 /**
  * The worker protocol, as `docs/field-framework/ARCHITECTURE.md` locks it.
  *
- * The command set (9) and the event set (7) are closed for version 1: nothing
+ * The command set (10) and the event set (7) are closed for version 2: nothing
  * else crosses the boundary between the shell and the worker. Beside the
  * message layer — the envelopes, the closed name sets, and the error envelope —
  * this file re-declares the public core types one to one with the Rust core, in
@@ -9,19 +9,20 @@
  * reached yet are declared by those goals.
  */
 
-/** The protocol version field, literally 1 everywhere in version 1. */
-export const PROTOCOL_VERSION = 1;
+/** The protocol version field. */
+export const PROTOCOL_VERSION = 2;
 
 /** The save version this build reads and writes. */
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 
-/** The nine commands the shell may send. */
+/** The ten commands the shell may send. */
 export type CommandName =
   | 'init_run'
   | 'input_frame'
   | 'queue_plan'
   | 'undo_plan'
   | 'commit_plan'
+  | 'set_focus'
   | 'restore_checkpoint'
   | 'recover_branch'
   | 'export_run'
@@ -71,7 +72,7 @@ export interface Vec2 {
   y: Fx;
 }
 
-/** The closed Node-kind set of version 1. */
+/** The closed Node-kind set of version 2. */
 export type NodeKind = 'port' | 'reserve' | 'module' | 'form';
 
 /** The eight starting Forms, as their machine ids. */
@@ -190,14 +191,18 @@ export interface RouteState {
 }
 
 /**
- * The two Boundary lists — drawn most recent first, authored in authored order —
- * and the run's boundary-leakage parameter, the Charge fraction that escapes per
- * exposed link per step, in [0, 8192].
+ * Candidate-Boundary seeds only — drawn most recent first and authored in
+ * authored order. These never determine leakage or physical membership.
  */
 export interface BoundaryState {
   drawn: { members: number[]; step: number }[];
   authored: { members: number[] }[];
-  leak_frac: Frac;
+}
+
+/** The causal material compartment, independent of the observation View. */
+export interface PhysicalCompartmentState {
+  members: number[];
+  leak_per_exposed_contact_per_step: Frac;
 }
 
 /** The six pressures of the closed set, in ordinal order. */
@@ -309,9 +314,11 @@ export interface ObjectiveState {
 }
 
 /**
- * The tagged union of proposed changes, exactly five variants; `op` is the tag.
+ * The tagged union of causal proposed changes, exactly four variants; `op` is
+ * the tag.
  *
- * Every variant costs one Impulse and nothing else spends Impulse at all. What
+ * Every variant costs one Intervention and passive View changes never enter
+ * this union. What
  * each is validated against is the core's — the preconditions are locked per
  * variant and checked against the base state with every earlier queued entry
  * applied — so nothing here validates anything: this is the shape the body
@@ -321,15 +328,28 @@ export type PlanCommand =
   | { op: 'connect'; from: number; to: number }
   | { op: 'redirect'; route: number; end: 'tail' | 'head'; to: number }
   | { op: 'cut'; route: number }
-  | { op: 'reshape_boundary'; members: number[] }
-  | { op: 'set_focus'; slate_ordinal: number; position: number };
+  | { op: 'reshape_compartment'; members: number[] };
+
+/**
+ * The body of the immediate, passive `set_focus` command. Position 0 clears
+ * only `view.inside`; positive positions are 1-based candidate seats.
+ */
+export interface SetFocusBody extends Payload {
+  slate_ordinal: number;
+  position: number;
+}
+
+/** The success body of `set_focus`: the View now used for measurement. */
+export interface FocusSet extends Payload {
+  view: ViewDeclaration;
+}
 
 /** One entry of the queue, as every queued-change response carries it. */
 export interface QueueEntry {
   /** Where it stands in the queue, from 0. */
   position: number;
   plan: PlanCommand;
-  /** What this entry costs, in Impulse. One, per the locked table. */
+  /** What this causal entry costs. One Intervention, per the locked table. */
   cost: number;
   /**
    * Whether another entry of the queue touches the same Route or proposes the
@@ -341,7 +361,7 @@ export interface QueueEntry {
 
 /**
  * The queue of proposed changes: what stands in it, what it costs, and the
- * Impulse standing before and after it.
+ * Intervention Budget standing before and after it.
  *
  * `impulse_after` is the prediction the tray shows, and a commit spends exactly
  * `cost_total` — one number arrived at once, so what is displayed and what is
@@ -388,6 +408,8 @@ export interface RunOpened extends Payload {
   view: ViewDeclaration;
   content_hash: string;
   content_changed: boolean;
+  /** Present only when a V1 record was migrated in memory while opening. */
+  migrated_from?: 1;
 }
 
 /** The success body both restores answer with. */
@@ -395,6 +417,8 @@ export interface RunRestored extends Payload {
   step: number;
   branch_nonce: number;
   view: ViewDeclaration;
+  /** Present only when a V1 record was migrated in memory while restoring. */
+  migrated_from?: 1;
 }
 
 /** The success body of `export_run`. */
@@ -409,6 +433,9 @@ export interface RunImported extends Payload {
   run_id: string;
   step: number;
   branch_nonce: number;
+  view: ViewDeclaration;
+  /** Present only when the imported V1 payload was migrated to V2. */
+  migrated_from?: 1;
 }
 
 /**
@@ -471,8 +498,9 @@ export const PERTURBATION_KINDS: readonly PerturbationKind[] = [
  * `handoff` is the one target that changes the run rather than reading it: it
  * moves control to the Form `parameter` names, immediately and for no Impulse,
  * with `kind` null. ARCHITECTURE.md's `The Handoff` puts it here rather than in
- * the plan queue — the command set is closed and the queue's five variants are
- * SPEC-closed, and a Handoff changes no Route, no Boundary and no View. It
+ * the plan queue — the command set is closed and the queue's four causal
+ * variants are SPEC-closed, and a Handoff changes no Route, physical
+ * Compartment, or View. It
  * refuses on the `input_frame` error path: `not_found` for a Form the run does
  * not hold, `validation` for one the chapter marks un-controllable and for a
  * Handoff to the Form already controlled.
@@ -545,20 +573,21 @@ export interface EventEnvelope {
   body: Payload;
 }
 
-/** The nine commands as a value, for membership tests. */
+/** The ten commands as a value, for membership tests. */
 export const COMMAND_NAMES: readonly CommandName[] = [
   'init_run',
   'input_frame',
   'queue_plan',
   'undo_plan',
   'commit_plan',
+  'set_focus',
   'restore_checkpoint',
   'recover_branch',
   'export_run',
   'import_run',
 ];
 
-/** True when a value is one of the nine commands. */
+/** True when a value is one of the ten commands. */
 export function isCommandName(value: unknown): value is CommandName {
   return typeof value === 'string' && (COMMAND_NAMES as readonly string[]).includes(value);
 }
@@ -789,6 +818,8 @@ export interface ReviewReady extends Payload {
 export interface ChapterChanged extends Payload {
   chapter_index: number;
   title_key: string;
+  /** The complete authoritative passive View at this chapter boundary. */
+  view: ViewDeclaration;
 }
 
 /**

@@ -10,12 +10,14 @@ import path from 'node:path';
 import type { ReactElement } from 'react';
 import { afterEach, beforeEach, expect, inject, test, vi } from 'vitest';
 import catalog from '../../content/copy/catalog.json';
-import type { FrameState } from '../../worker/src/frame-state';
+import { FRAME_VERSION, type FrameState } from '../../worker/src/frame-state';
 import type {
   CommandEnvelope,
+  EventEnvelope,
   ObjectiveState,
   ResponseEnvelope,
 } from '../../worker/src/protocol';
+import { PROTOCOL_VERSION } from '../../worker/src/protocol';
 import { App } from '../src/shell/App';
 import { PLAY_SURFACE } from '../src/shell/depth';
 import { openCore, type CoreClient } from '../src/shell/worker-client';
@@ -60,7 +62,7 @@ afterEach(() => {
 function stubClient(ready: Promise<ResponseEnvelope>, close = () => {}): CoreClient {
   return {
     ready,
-    command: async () => ({ v: 1, re: 0, ok: true, body: {} }),
+    command: async () => ({ v: PROTOCOL_VERSION, re: 0, ok: true, body: {} }),
     snapshot: () => null,
     frames: () => ({ previous: null, next: null, alpha: 0 }),
     pause: () => {},
@@ -75,6 +77,7 @@ function stubClient(ready: Promise<ResponseEnvelope>, close = () => {}): CoreCli
     mode: () => null,
     queue: () => ({ entries: [], cost_total: 0, impulse: 0, impulse_after: 0 }),
     slate: () => null,
+    view: () => null,
     profile: () => null,
     perturbation: () => null,
     echo: () => null,
@@ -84,8 +87,9 @@ function stubClient(ready: Promise<ResponseEnvelope>, close = () => {}): CoreCli
     clearReview: () => {},
     ending: () => null,
     inspect: () => {},
-    queuePlan: async () => ({ v: 1, re: 0, ok: true, body: {} }),
-    undoPlan: async () => ({ v: 1, re: 0, ok: true, body: {} }),
+    queuePlan: async () => ({ v: PROTOCOL_VERSION, re: 0, ok: true, body: {} }),
+    setFocus: async () => ({ v: PROTOCOL_VERSION, re: 0, ok: true, body: {} }),
+    undoPlan: async () => ({ v: PROTOCOL_VERSION, re: 0, ok: true, body: {} }),
     telemetry: () => ({}),
     watch: () => () => {},
     close,
@@ -131,7 +135,7 @@ test('the notice comes from the catalog and the field replaces it', async () => 
 
   await act(async () => {
     answer({
-      v: 1,
+      v: PROTOCOL_VERSION,
       re: 1,
       ok: false,
       error: {
@@ -184,7 +188,7 @@ test('the objective the worker reports reaches the surface', async () => {
   let announce: () => void = () => {};
   let standing: ObjectiveState | null = null;
   const client: CoreClient = {
-    ...stubClient(Promise.resolve({ v: 1, re: 1, ok: true, body: {} })),
+    ...stubClient(Promise.resolve({ v: PROTOCOL_VERSION, re: 1, ok: true, body: {} })),
     objective: () => standing,
     watch: (observer) => {
       announce = observer;
@@ -227,7 +231,7 @@ test('a session the core refuses surfaces the notice the envelope names', async 
   // reachable, and its `message_key` is locked. The shell shows what the
   // envelope names and never chooses a notice of its own.
   const refused = {
-    v: 1,
+    v: PROTOCOL_VERSION,
     re: 1,
     ok: false as const,
     error: { code: 'content_invalid' as const, message_key: 'notice.content_invalid', detail: null },
@@ -253,7 +257,7 @@ test('a run being resumed after a worker fault surfaces the catalog notice', asy
 
   const { container } = opened(<App open={() => watching} />);
   await act(async () => {
-    answer({ v: 1, re: 1, ok: true, body: { protocol: 1 } });
+    answer({ v: PROTOCOL_VERSION, re: 1, ok: true, body: { protocol: PROTOCOL_VERSION } });
   });
   expect(container.querySelector('canvas')).not.toBeNull();
   const resumed = catalog.entries['notice.run_resumed'].text;
@@ -275,7 +279,7 @@ test('a run being resumed after a worker fault surfaces the catalog notice', asy
 /** A worker that records what it was sent and answers when the test says so. */
 class RecordingWorker {
   static opened: RecordingWorker[] = [];
-  onmessage: ((message: MessageEvent<ResponseEnvelope>) => void) | null = null;
+  onmessage: ((message: MessageEvent<ResponseEnvelope | EventEnvelope>) => void) | null = null;
   onerror: ((failure: unknown) => void) | null = null;
   readonly sent: CommandEnvelope[] = [];
 
@@ -291,6 +295,10 @@ class RecordingWorker {
 
   answer(response: ResponseEnvelope): void {
     this.onmessage?.({ data: response } as MessageEvent<ResponseEnvelope>);
+  }
+
+  raise(event: EventEnvelope): void {
+    this.onmessage?.({ data: event } as MessageEvent<EventEnvelope>);
   }
 }
 
@@ -326,7 +334,7 @@ test('the first command is init_run, on the Form the session was opened with', (
   openCore({ form: 'vault' }).close();
 
   const [handshake] = RecordingWorker.opened[0].sent;
-  expect(handshake.v).toBe(1);
+  expect(handshake.v).toBe(PROTOCOL_VERSION);
   expect(handshake.id).toBe(1);
   expect(handshake.cmd).toBe('init_run');
   expect(handshake.body.mode).toBe('new');
@@ -336,9 +344,89 @@ test('the first command is init_run, on the Form the session was opened with', (
   expect(handshake.body.form).toBe('vault');
 });
 
+test('setFocus is a top-level free command and the shell adopts only the returned View', async () => {
+  RecordingWorker.opened.length = 0;
+  vi.stubGlobal('Worker', RecordingWorker);
+  const initial = { inside: [2, 3], resolution: 1, window: 45, surround: 'adjacent' as const };
+  const selected = { inside: [3], resolution: 2, window: 30, surround: 'double' as const };
+  const client = openCore({ form: 'thread', pump: false });
+  const worker = RecordingWorker.opened[0];
+
+  worker.answer({
+    v: PROTOCOL_VERSION,
+    re: 1,
+    ok: true,
+    body: { protocol: PROTOCOL_VERSION, view: initial },
+  });
+  await client.ready;
+  expect(client.view?.()).toEqual(initial);
+
+  const moved = client.setFocus?.(7, 2);
+  expect(worker.sent[1]).toEqual({
+    v: PROTOCOL_VERSION,
+    id: 2,
+    cmd: 'set_focus',
+    body: { slate_ordinal: 7, position: 2 },
+  });
+  expect(client.queue().entries).toEqual([]);
+  worker.answer({ v: PROTOCOL_VERSION, re: 2, ok: true, body: { view: selected } });
+  await moved;
+  expect(client.view?.()).toEqual(selected);
+  expect(client.queue().entries).toEqual([]);
+  client.close();
+});
+
+test('a chapter transition replaces the cached View and forgets a missing authoritative reading', async () => {
+  RecordingWorker.opened.length = 0;
+  vi.stubGlobal('Worker', RecordingWorker);
+  const initial = { inside: [2, 3, 4], resolution: 1, window: 45, surround: 'adjacent' as const };
+  const entered = { inside: [2, 3], resolution: 2, window: 30, surround: 'double' as const };
+  const client = openCore({ form: 'thread', pump: false });
+  const worker = RecordingWorker.opened[0];
+
+  worker.answer({
+    v: PROTOCOL_VERSION,
+    re: 1,
+    ok: true,
+    body: { protocol: PROTOCOL_VERSION, view: initial },
+  });
+  await client.ready;
+  worker.raise({
+    v: PROTOCOL_VERSION,
+    ev: 'chapter_changed',
+    step: 0,
+    body: { chapter_index: 0, title_key: 'title.the_pull', view: initial },
+  });
+  worker.raise({
+    v: PROTOCOL_VERSION,
+    ev: 'chapter_changed',
+    step: 120,
+    body: { chapter_index: 1, title_key: 'title.the_edge', view: entered },
+  });
+  expect(client.view?.()).toEqual(entered);
+
+  // A transition from an older producer that omitted the new field may not
+  // leave the previous chapter's View masquerading as the current one.
+  worker.raise({
+    v: PROTOCOL_VERSION,
+    ev: 'chapter_changed',
+    step: 240,
+    body: { chapter_index: 2, title_key: 'title.the_loop' },
+  });
+  expect(client.view?.()).toBeNull();
+  client.close();
+});
+
 test('readiness is a loaded run, and nothing short of one', async () => {
   // The one answer that means a run is loaded and the module behind it opened.
-  expect(await gate({ v: 1, re: 1, ok: true, body: { protocol: 1 } })).toBe('ready');
+  expect(
+    await gate({
+      v: PROTOCOL_VERSION,
+      re: 1,
+      ok: true,
+      body: { protocol: PROTOCOL_VERSION },
+    }),
+  ).toBe('ready');
 
   // Every fault is a session that did not open. A protocol fault is answered
   // before the core is ever consulted; an internal fault means it never
@@ -346,7 +434,7 @@ test('readiness is a loaded run, and nothing short of one', async () => {
   // core, so none may swap in a canvas that nothing can ever draw on — the
   // content fault included, which opening a new run can no longer produce.
   for (const code of ['protocol', 'internal', 'save_corrupt', 'content_invalid'] as const) {
-    expect(await gate({ v: 1, re: 1, ok: false, error: { code, message_key: null, detail: null } })).toBe(
+    expect(await gate({ v: PROTOCOL_VERSION, re: 1, ok: false, error: { code, message_key: null, detail: null } })).toBe(
       'refused',
     );
   }
@@ -375,7 +463,7 @@ test('the surface hands the sound the same snapshots it draws', async () => {
   /** A snapshot with nothing in it but its own step: the renderer draws it. */
   const frame = (step: number): FrameState => ({
     header: {
-      version: 1,
+      version: FRAME_VERSION,
       flags: 0,
       stillVisible: false,
       dropped: false,
@@ -406,7 +494,7 @@ test('the surface hands the sound the same snapshots it draws', async () => {
 
   opened(<App open={() => drawing} sound={() => sound} />);
   await act(async () => {
-    answer({ v: 1, re: 1, ok: true, body: { protocol: 1 } });
+    answer({ v: PROTOCOL_VERSION, re: 1, ok: true, body: { protocol: PROTOCOL_VERSION } });
   });
   await act(async () => {
     for (const run of waiting.splice(0)) run(0);
@@ -441,7 +529,7 @@ test('the queued-change tray stands only while the Still Mode surface is up', as
 
   const { container } = opened(<App open={() => still} />);
   await act(async () => {
-    answer({ v: 1, re: 1, ok: true, body: { protocol: 1 } });
+    answer({ v: PROTOCOL_VERSION, re: 1, ok: true, body: { protocol: PROTOCOL_VERSION } });
   });
   expect(container.querySelector('.tray')).toBeNull();
 
@@ -454,10 +542,21 @@ test('the queued-change tray stands only while the Still Mode surface is up', as
     expect(screen.getByText(queued)).toBeTruthy();
   }
 
-  // Nothing in the tray takes focus, so Space and Enter never land on a
-  // control instead of on the mode — and nothing in it is hidden from the
-  // accessibility tree either, because entering the mode is announced.
-  expect(container.querySelector('.tray button, .tray a, .tray [tabindex]')).toBeNull();
+  // The two explicit tools are real accessible controls. Their selected state
+  // says which register a gesture affects without relying on colour.
+  mode = 'still';
+  await act(async () => watcher());
+  const viewTool = screen.getByRole('button', {
+    name: new RegExp(catalog.entries['label.observation_view'].text),
+  });
+  const compartmentTool = screen.getByRole('button', {
+    name: new RegExp(catalog.entries['label.physical_compartment'].text),
+  });
+  expect(viewTool.getAttribute('aria-pressed')).toBe('true');
+  expect(compartmentTool.getAttribute('aria-pressed')).toBe('false');
+  act(() => compartmentTool.click());
+  expect(viewTool.getAttribute('aria-pressed')).toBe('false');
+  expect(compartmentTool.getAttribute('aria-pressed')).toBe('true');
   expect(container.querySelector('.tray[aria-hidden]')).toBeNull();
   const announced = container.querySelector('.tray-name');
   expect(announced?.getAttribute('role')).toBe('status');
@@ -496,7 +595,7 @@ test('the tray lists every queued entry with its own cost and the total', async 
 
   const { container } = opened(<App open={() => still} />);
   await act(async () => {
-    answer({ v: 1, re: 1, ok: true, body: { protocol: 1 } });
+    answer({ v: PROTOCOL_VERSION, re: 1, ok: true, body: { protocol: PROTOCOL_VERSION } });
   });
   await act(async () => watcher());
 
@@ -540,10 +639,10 @@ function profile(
 
 const NO_DEVIATIONS = { deviations: [0, 0, 0, 0, 0, 0, 0, 0] };
 
-test('the tray lists the candidates of the standing slate by their provenance', async () => {
+test('the tray lists candidate Views and moves the active View without queuing a causal edit', async () => {
   // A candidate is named by the source it came from, grouped under the tier the
   // ranking put it in, and read beside its four values as ranges — never as one
-  // figure. The one the queue proposes is marked as the one it proposes.
+  // figure. The one the authoritative View matches is marked as active.
   const { client, answer } = heldClient();
   const heading = catalog.entries['label.candidates'].text;
   const standing = catalog.entries['label.candidate_standing'].text;
@@ -588,22 +687,30 @@ test('the tray lists the candidates of the standing slate by their provenance', 
     ],
   };
   let watcher: () => void = () => {};
+  let activeView = slate.candidates[2].view;
+  const setFocus = vi.fn(async (slateOrdinal: number, position: number): Promise<ResponseEnvelope> => {
+    activeView =
+      position === 0
+        ? { ...activeView, inside: [] }
+        : slate.candidates[position - 1].view;
+    return {
+      v: PROTOCOL_VERSION,
+      re: 2,
+      ok: true,
+      body: { view: activeView, slate_ordinal: slateOrdinal },
+    };
+  });
   const held: CoreClient = {
     ...client,
     mode: () => 'still',
     slate: () => slate,
+    view: () => activeView,
+    setFocus,
     queue: () => ({
-      entries: [
-        {
-          position: 0,
-          plan: { op: 'set_focus', slate_ordinal: 0, position: 3 },
-          cost: 1,
-          conflict: false,
-        },
-      ],
-      cost_total: 1,
+      entries: [],
+      cost_total: 0,
       impulse: 3,
-      impulse_after: 2,
+      impulse_after: 3,
     }),
     snapshot: () =>
       ({ header: { impulse: 3 } }) as unknown as ReturnType<CoreClient['snapshot']>,
@@ -615,7 +722,7 @@ test('the tray lists the candidates of the standing slate by their provenance', 
 
   const { container } = opened(<App open={() => held} />);
   await act(async () => {
-    answer({ v: 1, re: 1, ok: true, body: { protocol: 1 } });
+    answer({ v: PROTOCOL_VERSION, re: 1, ok: true, body: { protocol: PROTOCOL_VERSION } });
   });
   await act(async () => watcher());
 
@@ -627,7 +734,7 @@ test('the tray lists the candidates of the standing slate by their provenance', 
     finer,
     drawn,
   ]);
-  // The candidate the queue proposes is the one marked, and only that one.
+  // The candidate the passive View matches is the one marked, and only that one.
   expect(listed.map((entry) => entry.getAttribute('data-focused'))).toEqual([
     'false',
     'false',
@@ -675,17 +782,40 @@ test('the tray lists the candidates of the standing slate by their provenance', 
     expect(entry.querySelector('.tray-value')).toBeNull();
   }
 
-  // The tolerance-sensitivity flag, and nothing focusable anywhere in the tray.
+  // The tolerance-sensitivity flag and the accessible candidate controls.
   const flagged = container.querySelector('.tray-sensitivity');
   expect(flagged?.textContent).toBe(catalog.entries['label.sensitivity'].text);
-  expect(container.querySelector('.tray button, .tray a, .tray [tabindex]')).toBeNull();
+  const candidateButtons = container.querySelectorAll('.tray-candidate-select');
+  expect(candidateButtons).toHaveLength(3);
+  expect(candidateButtons[2].getAttribute('aria-pressed')).toBe('true');
 
-  // The walk's announcement: the proposed candidate is said when it changes,
+  // Clearing is an explicit accessible View action and remains outside the
+  // causal queue. Position 0 is the protocol's passive clear operation.
+  const clear = screen.getByRole('button', {
+    name: catalog.entries['label.clear_view'].text,
+  }) as HTMLButtonElement;
+  expect(clear.disabled).toBe(false);
+  await act(async () => clear.click());
+  expect(setFocus).toHaveBeenLastCalledWith(0, 0);
+  expect(held.queue().entries).toEqual([]);
+  await act(async () => watcher());
+  expect(clear.disabled).toBe(true);
+
+  await act(async () => {
+    (candidateButtons[1] as HTMLButtonElement).click();
+  });
+  expect(setFocus).toHaveBeenLastCalledWith(0, 2);
+  expect(held.queue().entries).toEqual([]);
+  await act(async () => watcher());
+  expect(candidateButtons[1].getAttribute('aria-pressed')).toBe('true');
+  expect(candidateButtons[2].getAttribute('aria-pressed')).toBe('false');
+
+  // The View announcement: the active candidate is said when it changes,
   // under the same status discipline as the mode's own name.
   const announced = container.querySelector('.tray-focus');
   expect(announced?.getAttribute('role')).toBe('status');
   expect(announced?.getAttribute('aria-live')).toBe('polite');
-  expect(announced?.textContent).toBe(drawn);
+  expect(announced?.textContent).toBe(finer);
 });
 
 test('a deficient slate is listed as no candidates at all', async () => {
@@ -728,7 +858,7 @@ test('a deficient slate is listed as no candidates at all', async () => {
 
   const { container } = opened(<App open={() => held} />);
   await act(async () => {
-    answer({ v: 1, re: 1, ok: true, body: { protocol: 1 } });
+    answer({ v: PROTOCOL_VERSION, re: 1, ok: true, body: { protocol: PROTOCOL_VERSION } });
   });
   await act(async () => watcher());
 

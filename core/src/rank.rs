@@ -325,18 +325,15 @@ impl Sets {
 // The window, and the replays over it
 // ---------------------------------------------------------------------------
 
-/// Everything one evaluation reads of the Run: the window's recorded steps, the
-/// state the window starts at, and the two step inputs a replay carries.
+/// Everything one evaluation reads of the Run: the window's recorded steps,
+/// the state the window starts at, and the remaining step inputs a replay
+/// carries. Physical membership is already part of that Field state.
 pub(crate) struct Window<'a> {
     /// The window's recorded steps, oldest first.
     pub(crate) steps: Vec<&'a TraceStep>,
     /// The Field as of step `t0 - w_eff`, regenerated from the trajectory's
     /// keyframe under the recorded control schedule.
     pub(crate) start: FieldState,
-    /// The standing View's inside, which the Boundary leakage rule reads. Every
-    /// replay runs under the inside the recorded steps ran under — a candidate
-    /// proposes a reading of the window, never a different history of it.
-    pub(crate) inside: Vec<u32>,
     pub(crate) pointer_speed: Frac,
     /// The prepared step pass for the window's own shape, built once and read
     /// by every replay that does not change that shape — which is every one
@@ -359,17 +356,15 @@ impl<'a> Window<'a> {
     pub(crate) fn of(state: &'a RunState, effective: u16) -> Self {
         let held: Vec<&TraceStep> = state.trace.steps.iter().collect();
         let start_at = held.len().saturating_sub(usize::from(effective));
-        let inside = state.view.inside.clone();
         let pointer_speed = state.input_config.pointer_speed;
         let mut start = state.trace.keyframe.clone();
-        let cache = StepCache::of(&start, &inside);
+        let cache = StepCache::of(&start);
         let mut scratch = state.pressures.clone();
         for recorded in &held[..start_at] {
             let mut stream = recorded.rng;
             field::advance_cached(
                 &mut start,
                 recorded.ctl,
-                &inside,
                 pointer_speed,
                 &mut field::Staging {
                     pressures: &mut scratch,
@@ -379,11 +374,10 @@ impl<'a> Window<'a> {
                 &cache,
             );
         }
-        let cache = StepCache::of(&start, &inside);
+        let cache = StepCache::of(&start);
         Window {
             steps: held[start_at..].to_vec(),
             start,
-            inside,
             pointer_speed,
             cache,
             pressures: state.pressures.clone(),
@@ -410,8 +404,8 @@ pub(crate) enum Edit<'a> {
 /// Replays the window from its start state under an edit, handing each step's
 /// records to a watcher.
 ///
-/// The control comes from the recorded schedule and the standing inside from
-/// the window. Under a Field with no effective noise a replay with no edit
+/// The control comes from the recorded schedule and physical membership from
+/// the replayed Field. Under a Field with no effective noise a replay with no edit
 /// reproduces the recorded window exactly; where noise stands, the sample's
 /// own stream re-draws the flow scales — the locked forecast distortion, one
 /// rule seen through the replay carriage — so baselines legitimately spread
@@ -464,7 +458,6 @@ pub(crate) fn replay(
         let outcome = field::advance_cached(
             &mut state,
             recorded.ctl,
-            &window.inside,
             window.pointer_speed,
             &mut field::Staging {
                 pressures: &mut scratch,
@@ -483,7 +476,7 @@ pub(crate) fn replay(
 pub(crate) fn severed_cache(window: &Window<'_>, routes: &[u32]) -> StepCache {
     let mut state = window.start.clone();
     state.routes.retain(|held| routes.binary_search(&held.route).is_err());
-    StepCache::of(&state, &window.inside)
+    StepCache::of(&state)
 }
 
 /// Walks a step's record list and the ascending Node list together. Both are

@@ -31,7 +31,12 @@ import {
   type PerturbationResult,
   type ResponseEnvelope,
 } from '../src/protocol';
-import { decodeFrameState, FRAME_SECTION, type FrameState } from '../src/frame-state';
+import {
+  decodeFrameState,
+  FRAME_SECTION,
+  FRAME_VERSION,
+  type FrameState,
+} from '../src/frame-state';
 
 const WORKER_ENTRY = new URL('../src/entry.ts', import.meta.url);
 const WORKSPACE = inject('workspace');
@@ -348,7 +353,7 @@ test('the decoder reads an overlay section the encoder wrote', () => {
   const bytes = new Uint8Array(header + table + records * 8);
   const view = new DataView(bytes.buffer);
   bytes.set([0x46, 0x47, 0x46, 0x31], 0);
-  view.setUint16(4, 1, true);
+  view.setUint16(4, FRAME_VERSION, true);
   view.setUint16(6, 1, true);
   view.setUint16(12, 0, true);
   bytes[14] = 2;
@@ -394,9 +399,25 @@ test('a queued change crosses the bridge, previews in the frame, and commits', a
   }
 
   const reshaped = await session.command('queue_plan', {
-    plan: { op: 'reshape_boundary', members: [2, 3] },
+    plan: { op: 'reshape_compartment', members: [2, 3] },
   });
   expect(reshaped.ok).toBe(true);
+  if (reshaped.ok) {
+    expect(reshaped.body.queue).toMatchObject({
+      entries: [
+        { position: 0, plan: { op: 'cut', route: 1 }, cost: 1, conflict: false },
+        {
+          position: 1,
+          plan: { op: 'reshape_compartment', members: [2, 3] },
+          cost: 1,
+          conflict: false,
+        },
+      ],
+      cost_total: 2,
+      impulse: 3,
+      impulse_after: 1,
+    });
+  }
   const predicted = reshaped.ok ? (reshaped.body.queue as { cost_total: number }).cost_total : 0;
   expect(predicted).toBe(2);
 
@@ -415,6 +436,9 @@ test('a queued change crosses the bridge, previews in the frame, and commits', a
     2, 3,
   ]);
   expect(preview.ports.filter((port) => port.member).map((port) => port.node)).toEqual([2, 3, 4]);
+  const viewBeforeCommit = preview.ports
+    .filter((_port, place) => preview.inside[place])
+    .map((port) => port.node);
 
   const committed = await session.command('commit_plan', {});
   expect(committed.ok).toBe(true);
@@ -429,22 +453,29 @@ test('a queued change crosses the bridge, previews in the frame, and commits', a
   expect(after.routes.every((route) => route.status !== 1)).toBe(true);
   expect(after.ports.filter((port) => port.member).map((port) => port.node)).toEqual([2, 3]);
   expect(after.ports.every((port) => !port.proposedMember)).toBe(true);
+  expect(after.ports.filter((_port, place) => after.inside[place]).map((port) => port.node)).toEqual(
+    viewBeforeCommit,
+  );
   expect(after.header.impulse).toBe(1);
   session.close();
 });
 
 
-test('entering Still Mode raises the slate, and adopting a candidate commits it', async () => {
+test('entering Still Mode raises the slate, and set_focus moves only the passive View', async () => {
   // The whole candidate path over the bridge: the record the entry raises, the
-  // position a `set_focus` names in it, the preview the frame draws, and the
-  // standing View the commit leaves — with the reassembled record after it.
+  // position a top-level `set_focus` names in it, and the independent View
+  // bitset the next frame carries without a queued or committed causal edit.
   const session = openSession();
   await openRun(session);
 
   await send(session, rendered(1, true));
   const { seq, snapshot } = await playUntil(session, 'still', 2);
-  const before = snapshot.ports.filter((port) => port.member).map((port) => port.node);
-  expect(before.length).toBeGreaterThan(0);
+  const physicalBefore = snapshot.ports.filter((port) => port.member).map((port) => port.node);
+  const viewBefore = snapshot.ports
+    .filter((_port, place) => snapshot.inside[place])
+    .map((port) => port.node);
+  expect(physicalBefore.length).toBeGreaterThan(0);
+  expect(viewBefore.length).toBeGreaterThan(0);
 
   const raised = session.reviews();
   expect(raised).toHaveLength(1);
@@ -458,7 +489,7 @@ test('entering Still Mode raises the slate, and adopting a candidate commits it'
   expect(slate.candidates.length).toBeGreaterThanOrEqual(2);
   expect(slate.candidates.length).toBeLessThanOrEqual(5);
   expect(slate.candidates[0].provenance[0].source).toBe('standing');
-  expect(slate.candidates[0].view.inside).toEqual(before);
+  expect(slate.candidates[0].view.inside).toEqual(viewBefore);
   for (const candidate of slate.candidates) {
     expect(candidate.provenance.length).toBeGreaterThan(0);
     expect(candidate.view.inside.length).toBeGreaterThan(0);
@@ -494,39 +525,42 @@ test('entering Still Mode raises the slate, and adopting a candidate commits it'
   }
   expect(slate.sensitivity.flag).toBe(slate.sensitivity.changed_at.length > 0);
 
-  const adopted = slate.candidates[1].view.inside;
-  const queued = await session.command('queue_plan', {
-    plan: { op: 'set_focus', slate_ordinal: slate.ordinal, position: 2 },
+  const adopted = slate.candidates[1].view;
+  const focused = await session.command('set_focus', {
+    slate_ordinal: slate.ordinal,
+    position: 2,
   });
-  expect(queued.ok).toBe(true);
+  expect(focused.ok).toBe(true);
+  if (!focused.ok) return;
+  expect(focused.body.view).toEqual(adopted);
 
-  // The frame draws the adoption as the membership it proposes, beside the
-  // standing one.
-  const preview = await firstSnapshot(session, seq);
-  expect(preview.ports.filter((port) => port.proposedMember).map((port) => port.node)).toEqual(
-    adopted,
+  // A still frame carries the moved View immediately. Physical membership,
+  // proposed-physical flags, Intervention Budget, and the queue do not move.
+  const after = await firstSnapshot(session, seq);
+  expect(after.ports.filter((_port, place) => after.inside[place]).map((port) => port.node)).toEqual(
+    adopted.inside,
   );
-
-  const committed = await session.command('commit_plan', {});
-  expect(committed.ok).toBe(true);
-  if (committed.ok) {
-    expect(committed.body.applied).toBe(1);
-    // The commit reassembled the slate, and names the ordinal it left standing.
-    expect(committed.body.slate_ordinal).toBe(1);
-  }
-
-  const after = await firstSnapshot(session, seq + 8);
-  expect(after.ports.filter((port) => port.member).map((port) => port.node)).toEqual(adopted);
+  expect(after.ports.filter((port) => port.member).map((port) => port.node)).toEqual(physicalBefore);
   expect(after.ports.every((port) => !port.proposedMember)).toBe(true);
+  expect(after.header.impulse).toBe(snapshot.header.impulse);
+  expect(session.reviews()).toEqual([]);
 
-  // And the reassembly rode after the response, under the span the commit
-  // clamped: nothing has been observed of the Field the commit left.
-  const again = session.reviews();
-  expect(again).toHaveLength(1);
-  const next = (again[0] as { slate: CandidateSlate }).slate;
-  expect(next.ordinal).toBe(1);
-  expect(next.candidates[0].view.inside).toEqual(adopted);
-  expect(next.window_effective).toBe(0);
+  // Position 0 clears only the selected members and retains the measurement
+  // protocol. The physical compartment and Intervention Budget still do not
+  // move, and the cleared View is visible in the next frame as an empty bitset.
+  const cleared = await session.command('set_focus', {
+    slate_ordinal: slate.ordinal,
+    position: 0,
+  });
+  expect(cleared.ok).toBe(true);
+  if (!cleared.ok) return;
+  expect(cleared.body.view).toEqual({ ...adopted, inside: [] });
+  const afterClear = await firstSnapshot(session, seq + 8);
+  expect(afterClear.ports.filter((_port, place) => afterClear.inside[place])).toEqual([]);
+  expect(afterClear.ports.filter((port) => port.member).map((port) => port.node)).toEqual(
+    physicalBefore,
+  );
+  expect(afterClear.header.impulse).toBe(snapshot.header.impulse);
   session.close();
 });
 

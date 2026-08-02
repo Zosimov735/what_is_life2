@@ -310,6 +310,10 @@
       ]
     }
   ],
+  "physical_compartment": {
+    "members": [4, 6, 7],
+    "leak_per_exposed_contact_per_step": 64
+  },
   "objectives": [
     {
       "id": "objective.the_mesh.follow_the_supply",

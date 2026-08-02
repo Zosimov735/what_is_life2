@@ -36,6 +36,7 @@ import {
   type ResponseEnvelope,
   type RunExported,
   type RunOpened,
+  type ViewDeclaration,
 } from '../../../worker/src/protocol';
 import type {
   CandidateSlate,
@@ -104,7 +105,7 @@ export interface FramePair {
 }
 
 export interface CoreClient {
-  /** Settles once the worker has answered in protocol version 1. */
+  /** Settles once the worker has answered in protocol version 2. */
   ready: Promise<ResponseEnvelope>;
   /** Sends one command and settles with the response envelope. */
   command: (cmd: CommandName, body: Payload) => Promise<ResponseEnvelope>;
@@ -178,6 +179,8 @@ export interface CoreClient {
    * Still Mode.
    */
   slate: () => CandidateSlate | null;
+  /** The active passive-observation View returned by the core. */
+  view?: () => ViewDeclaration | null;
   /**
    * The coordinate profile the worker last answered with, and none until one is
    * asked for.
@@ -242,6 +245,8 @@ export interface CoreClient {
    * Valid only while the run is `still`, exactly as the command is.
    */
   queuePlan: (plan: PlanCommand) => Promise<ResponseEnvelope>;
+  /** Moves the passive View immediately and spends no causal budget. */
+  setFocus?: (slateOrdinal: number, position: number) => Promise<ResponseEnvelope>;
   /**
    * Takes the newest queued entry back, and settles with the response.
    *
@@ -344,6 +349,8 @@ export function openCore(options: CoreOptions): CoreClient {
   let queue: QueueState = EMPTY_QUEUE;
   /** The evaluation record the run stands under, and none before the first. */
   let slate: CandidateSlate | null = null;
+  /** The active View, updated only from authoritative command responses. */
+  let activeView: ViewDeclaration | null = null;
   /**
    * The coordinate profile the worker last answered with, and none until one is
    * asked for. It is optional by construction: nothing here requests one, so a
@@ -477,9 +484,29 @@ export function openCore(options: CoreOptions): CoreClient {
         // about now. A reopened run reports the chapter it stands in, and a
         // restore can report an earlier one, so only a step of exactly one
         // forwards leaves a chapter to review.
-        const entered = data.body as ChapterChanged;
+        const entered = data.body as ChapterChanged & { view?: ViewDeclaration };
         if (chapter && entered.chapter_index === chapter.chapter_index + 1) {
           review = chapter;
+        }
+        // A chapter transition replaces both the Field and its opening View.
+        // The event carries that authoritative View in protocol V2; without it,
+        // an already-open session must forget its cached reading rather than
+        // claim that the previous chapter's aperture still stands. The first
+        // `chapter_changed` follows `init_run`, whose response already carried
+        // the View, so an older event shape does not erase that handshake.
+        if (entered.view) {
+          activeView = entered.view;
+        } else if (chapter !== null) {
+          activeView = null;
+        }
+        // Candidate Nodes and cold-path readings belong to the Field that made
+        // them. Keeping any across this boundary would let the new chapter's
+        // tray address positions in a slate the core has already discarded.
+        if (chapter !== null) {
+          slate = null;
+          profile = null;
+          perturbation = null;
+          echo = null;
         }
         chapter = entered;
         announce();
@@ -752,6 +779,7 @@ export function openCore(options: CoreOptions): CoreClient {
       // on the next entry into Still Mode, and a position in a record the
       // session that raised it no longer holds names nothing.
       slate = null;
+      activeView = null;
       // The session-lived readings go with it, for the same reason: a
       // coordinate profile and a perturbation result belong to the session that
       // took them, and the fresh worker takes its own when it is asked to.
@@ -797,16 +825,33 @@ export function openCore(options: CoreOptions): CoreClient {
   async function reopen(): Promise<boolean> {
     if (recovery) {
       const answer = await send('import_run', { text: recovery.text });
-      if (answer.ok) return true;
+      if (answer.ok) {
+        carryView(answer);
+        return true;
+      }
       console.error('field_game shell: the held record did not import', answer.error);
     }
-    await send('init_run', { mode: 'new', run_id: runId, form });
+    carryView(await send('init_run', { mode: 'new', run_id: runId, form }));
     return false;
   }
 
+  /** Adopts only the View a successful authoritative core response carries. */
+  function carryView(response: ResponseEnvelope): void {
+    if (response.ok && 'view' in response.body) {
+      activeView = (response.body as { view: ViewDeclaration }).view;
+    }
+  }
+
   function command(cmd: CommandName, body: Payload): Promise<ResponseEnvelope> {
-    if (restarting) return restarting.then(() => send(cmd, body));
-    return send(cmd, body);
+    const answered = restarting ? restarting.then(() => send(cmd, body)) : send(cmd, body);
+    return answered.then((response) => {
+      const before = activeView;
+      carryView(response);
+      if (activeView !== before) {
+        announce();
+      }
+      return response;
+    });
   }
 
   function nextFrame(overrides: Partial<InputFrame>, stamp: number): InputFrame {
@@ -873,8 +918,10 @@ export function openCore(options: CoreOptions): CoreClient {
   )
     .then((response) => {
       if (!answeredByCore(response)) throw response;
+      carryView(response);
       opened = true;
       console.info(`field_game shell: worker handshake in protocol ${response.v}`, response);
+      announce();
       startPump();
       return response;
     });
@@ -934,6 +981,7 @@ export function openCore(options: CoreOptions): CoreClient {
     mode: () => latest?.header.mode ?? null,
     queue: () => queue,
     slate: () => slate,
+    view: () => activeView,
     profile: () => profile,
     perturbation: () => perturbation,
     echo: () => echo,
@@ -962,6 +1010,8 @@ export function openCore(options: CoreOptions): CoreClient {
         }
         return answer;
       }),
+    setFocus: (slateOrdinal, position) =>
+      command('set_focus', { slate_ordinal: slateOrdinal, position }),
     undoPlan: () =>
       command('undo_plan', {}).then((answer) => {
         if (answer.ok) {
@@ -1043,7 +1093,9 @@ function performanceStamp(): number {
  * never opened or refused the run. None of them may swap in a canvas that
  * nothing can ever draw on.
  */
-function answeredByCore(response: ResponseEnvelope): boolean {
+function answeredByCore(
+  response: ResponseEnvelope,
+): response is Extract<ResponseEnvelope, { ok: true }> {
   return response.ok === true;
 }
 

@@ -21,6 +21,7 @@ import {
   FORM_IDS,
   neutralFrame,
   PROTOCOL_VERSION,
+  SAVE_VERSION,
   type ErrorEnvelope,
   type EventEnvelope,
   type FrameEventBody,
@@ -33,6 +34,7 @@ import {
   FrameStateError,
   FRAME_HEADER_BYTES,
   FRAME_MAGIC,
+  FRAME_VERSION,
 } from '../src/frame-state';
 
 const WORKER_ENTRY = new URL('../src/entry.ts', import.meta.url);
@@ -168,6 +170,13 @@ test('an export carried to a fresh worker imports and re-exports the same bytes'
   expect(imported.body.run_id).toBe(KEY);
   expect(imported.body.step).toBe(30);
   expect(imported.body.branch_nonce).toBe(0);
+  expect(imported.body.view).toMatchObject({
+    inside: expect.any(Array),
+    resolution: expect.any(Number),
+    window: expect.any(Number),
+    surround: expect.any(String),
+  });
+  expect(imported.body).not.toHaveProperty('migrated_from');
 
   const again = await exportOf(second);
   second.close();
@@ -180,6 +189,33 @@ test('an export carried to a fresh worker imports and re-exports the same bytes'
   expect(third_time.text).toBe(again.text);
   expect(third_time.sha256).toBe(again.sha256);
   expect(String(again.sha256)).toMatch(/^[0-9a-f]{64}$/);
+});
+
+test('a verified V1 import labels its transient migration and rewrites as ordinary V2', async () => {
+  const { DEV_RUN_EXPORT } = await import('../../app/src/shell/dev-run');
+  const session = openSession();
+  const migrated = await session.command('import_run', { text: DEV_RUN_EXPORT });
+  expect(migrated.ok).toBe(true);
+  if (!migrated.ok) return;
+  expect(migrated.body.migrated_from).toBe(1);
+  expect(migrated.body.view).toMatchObject({
+    inside: expect.any(Array),
+    resolution: expect.any(Number),
+    window: expect.any(Number),
+    surround: expect.any(String),
+  });
+
+  const rewritten = await exportOf(session);
+  expect(JSON.parse(String(rewritten.text)).save_version).toBe(SAVE_VERSION);
+  session.close();
+
+  const reopened = openSession();
+  const ordinary = await reopened.command('import_run', { text: rewritten.text });
+  expect(ordinary.ok).toBe(true);
+  if (!ordinary.ok) return;
+  expect(ordinary.body).not.toHaveProperty('migrated_from');
+  expect(ordinary.body.view).toEqual(migrated.body.view);
+  reopened.close();
 });
 
 test('an import is refused for every locked reason, and loads nothing', async () => {
@@ -195,7 +231,14 @@ test('an import is refused for every locked reason, and loads nothing', async ()
     ['truncated', file.slice(0, Math.floor(file.length / 2)), 'import_invalid'],
     ['spaced', file.replace('{', '{ '), 'import_invalid'],
     ['wrong format', file.replace('field-game-run', 'field-game-save'), 'import_invalid'],
-    ['newer version', file.replace(',"save_version":1}', ',"save_version":2}'), 'save_version'],
+    [
+      'newer version',
+      file.replace(
+        `,"save_version":${SAVE_VERSION}}`,
+        `,"save_version":${SAVE_VERSION + 1}}`,
+      ),
+      'save_version',
+    ],
     ['wrong digest', file.replace('"payload_sha256":"', '"payload_sha256":"0'), 'import_invalid'],
     ['out of range', file.replace('"impulse":3', '"impulse":9'), 'import_invalid'],
   ];
@@ -236,6 +279,13 @@ test('a checkpoint is restored exactly, and a recovered branch takes a fresh non
   if (!retried.ok) return;
   expect(retried.body.step).toBe(AUTOSAVE_STEPS);
   expect(retried.body.branch_nonce).toBe(0);
+  expect(retried.body.view).toMatchObject({
+    inside: expect.any(Array),
+    resolution: expect.any(Number),
+    window: expect.any(Number),
+    surround: expect.any(String),
+  });
+  expect(retried.body).not.toHaveProperty('migrated_from');
 
   const back = JSON.parse(String((await exportOf(session)).text)).payload;
   const recorded = JSON.parse(String(atInterval.text)).payload;
@@ -249,6 +299,7 @@ test('a checkpoint is restored exactly, and a recovered branch takes a fresh non
   expect(recovered.ok).toBe(true);
   if (!recovered.ok) return;
   expect(recovered.body.branch_nonce).toBe(1);
+  expect(recovered.body.view).toEqual(retried.body.view);
   const branched = JSON.parse(String((await exportOf(session)).text)).payload;
   expect(branched.branch_nonce).toBe(1);
   expect(branched.rng).not.toEqual(recorded.rng);
@@ -284,7 +335,7 @@ test('the decoder reads the fixture the core encoder pins', async () => {
   }
 
   const decoded = decodeFrameState(bytes.buffer);
-  expect(decoded.header.version).toBe(1);
+  expect(decoded.header.version).toBe(FRAME_VERSION);
   expect(decoded.header.step).toBe(1);
   expect(decoded.header.mode).toBe('running');
   expect(decoded.header.timeScale).toBe(65_535);
@@ -353,7 +404,7 @@ test('the three sections the renderer reads decode from their locked layouts', (
   const bytes = new Uint8Array(table + span);
   const view = new DataView(bytes.buffer);
   bytes.set(Array.from(FRAME_MAGIC, (character) => character.charCodeAt(0)));
-  view.setUint16(4, 1, true);
+  view.setUint16(4, FRAME_VERSION, true);
   bytes[20] = layouts.length;
   let at = table;
   layouts.forEach((one, place) => {
@@ -422,7 +473,7 @@ test('a snapshot the shell cannot read is refused rather than half read', () => 
   expect(() => decodeFrameState(wrong.buffer)).toThrow(FrameStateError);
   const future = new Uint8Array(FRAME_HEADER_BYTES);
   future.set(Array.from(FRAME_MAGIC, (character) => character.charCodeAt(0)));
-  new DataView(future.buffer).setUint16(4, 2, true);
+  new DataView(future.buffer).setUint16(4, FRAME_VERSION + 1, true);
   expect(() => decodeFrameState(future.buffer)).toThrow(FrameStateError);
 });
 
@@ -451,12 +502,12 @@ test('a message outside the envelope rules answers protocol, with the locked cor
   const cases: [string, unknown, number][] = [
     ['not an object', 'init_run', 0],
     ['no version', { id: 4, cmd: 'init_run', body: {} }, 4],
-    ['another version', { v: 2, id: 5, cmd: 'init_run', body: {} }, 5],
-    ['a version that is not a number', { v: '1', id: 6, cmd: 'init_run', body: {} }, 6],
-    ['no correlation', { v: 1, cmd: 'init_run', body: {} }, 0],
-    ['a correlation that is not a u32', { v: 1, id: -1, cmd: 'init_run', body: {} }, 0],
-    ['an unknown command', { v: 1, id: 8, cmd: 'restore_state', body: {} }, 8],
-    ['a command that is not a string', { v: 1, id: 9, cmd: 7, body: {} }, 9],
+    ['another version', { v: PROTOCOL_VERSION + 1, id: 5, cmd: 'init_run', body: {} }, 5],
+    ['a version that is not a number', { v: String(PROTOCOL_VERSION), id: 6, cmd: 'init_run', body: {} }, 6],
+    ['no correlation', { v: PROTOCOL_VERSION, cmd: 'init_run', body: {} }, 0],
+    ['a correlation that is not a u32', { v: PROTOCOL_VERSION, id: -1, cmd: 'init_run', body: {} }, 0],
+    ['an unknown command', { v: PROTOCOL_VERSION, id: 8, cmd: 'restore_state', body: {} }, 8],
+    ['a command that is not a string', { v: PROTOCOL_VERSION, id: 9, cmd: 7, body: {} }, 9],
   ];
   for (const [named, message, re] of cases) {
     const answer = await session.raw(message);
@@ -466,8 +517,13 @@ test('a message outside the envelope rules answers protocol, with the locked cor
   }
 
   // A correlation that does not strictly increase is refused too.
-  await session.raw({ v: 1, id: 40, cmd: 'init_run', body: {} });
-  const repeated = await session.raw({ v: 1, id: 40, cmd: 'init_run', body: {} });
+  await session.raw({ v: PROTOCOL_VERSION, id: 40, cmd: 'init_run', body: {} });
+  const repeated = await session.raw({
+    v: PROTOCOL_VERSION,
+    id: 40,
+    cmd: 'init_run',
+    body: {},
+  });
   expect(refusalOf(repeated).detail).toEqual({ reason: 'correlation' });
 });
 
@@ -476,7 +532,7 @@ test('every command refuses a body it cannot read, with the locked envelope', as
   await openRun(session);
 
   // A command valid only in Still Mode, which no run reaches yet.
-  for (const cmd of ['queue_plan', 'undo_plan', 'commit_plan']) {
+  for (const cmd of ['queue_plan', 'undo_plan', 'commit_plan', 'set_focus']) {
     const error = refusalOf(await session.command(cmd, {}));
     expect(error.code, cmd).toBe('state');
     expect(error.detail, cmd).toEqual({ actual: 'running', expected: ['still'] });

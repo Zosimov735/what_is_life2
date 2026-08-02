@@ -179,8 +179,8 @@ fn the_placeholder_campaign_runs_from_its_opening_to_its_ending() {
 
     // Every chapter was entered, in the closed set's own order, and each one
     // told the shell which it was.
-    let entered: Vec<(i64, &str)> = driver
-        .of("chapter_changed")
+    let chapter_events = driver.of("chapter_changed");
+    let entered: Vec<(i64, &str)> = chapter_events
         .iter()
         .map(|(_, _, body)| {
             (
@@ -193,6 +193,18 @@ fn the_placeholder_campaign_runs_from_its_opening_to_its_ending() {
     for (place, id) in CHAPTER_IDS.iter().enumerate() {
         assert_eq!(entered[place].0, place as i64);
         assert_eq!(entered[place].1, format!("chapter.{id}"));
+        let event = chapter_events[place]
+            .2
+            .get("view")
+            .expect("the full View");
+        let expected = parse(
+            &content.chapter(place as u8).expect("the entered chapter").opening_view.written(),
+        )
+        .expect("the authored View is canonical");
+        assert_eq!(
+            event, &expected,
+            "chapter {place} announces its authoritative View"
+        );
     }
 
     // The objective line stands on one objective at a time throughout, and
@@ -454,6 +466,11 @@ fn a_quick_retry_across_a_chapter_boundary_lands_at_the_opening_of_the_next() {
     let told = driver.of("chapter_changed");
     let last = told.last().expect("a chapter is announced on every reopening");
     assert_eq!(last.2.get("title_key").and_then(Json::as_text), Some("chapter.the_edge"));
+    assert_eq!(
+        last.2.get("view"),
+        Some(&parse(&restored.view.written()).expect("the restored View is canonical")),
+        "a reopen announces the restored authoritative View",
+    );
 
     // The chapter's authored event fires again on the restored run, at its own
     // step: the trigger is read off the objective's `started_step` and the step

@@ -438,7 +438,7 @@ fn a_filled_envelope_encodes_at_the_locked_record_layout() {
         field: &field,
         mode: Mode::Still,
         time_scale: 0,
-        inside: &[],
+        view_inside: &[],
         queue: &queue,
         cues: &[],
         config: &config,

@@ -12,7 +12,7 @@
 //! reproduces it exactly and a deviation is a reading of the edit.
 
 use field_game_core::field::{
-    self, BoundaryState, FieldLayer, NodeKind, PortState, RouteState,
+    self, BoundaryState, FieldLayer, NodeKind, PhysicalCompartment, PortState, RouteState,
 };
 use field_game_core::fx::{Vec2, ONE_UNIT};
 use field_game_core::state::{
@@ -102,7 +102,11 @@ pub fn circuit() -> FieldState {
         current_ids: Vec::new(),
         port_ids: vec![1, 2, 3, 4, 5, 6],
     }];
-    field.boundaries = BoundaryState { drawn: Vec::new(), authored: Vec::new(), leak_frac: 0 };
+    field.physical_compartment = PhysicalCompartment {
+        members: vec![2, 3, 4],
+        leak_per_exposed_contact_per_step: 0,
+    };
+    field.boundaries = BoundaryState { drawn: Vec::new(), authored: Vec::new() };
     field
 }
 
@@ -195,7 +199,11 @@ pub fn drained() -> FieldState {
         current_ids: Vec::new(),
         port_ids: vec![1],
     }];
-    field.boundaries = BoundaryState { drawn: Vec::new(), authored: Vec::new(), leak_frac: 0 };
+    field.physical_compartment = PhysicalCompartment {
+        members: vec![1],
+        leak_per_exposed_contact_per_step: 0,
+    };
+    field.boundaries = BoundaryState { drawn: Vec::new(), authored: Vec::new() };
     field
 }
 
@@ -220,7 +228,6 @@ pub fn played(opening: FieldState, steps: usize, view: ViewDeclaration) -> RunSt
         let outcome = field::advance(
             &mut now,
             ControlState::default(),
-            &view.inside,
             FRAC_ONE,
             &mut field::Unstaged::default().staging(),
         );
