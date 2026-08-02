@@ -906,13 +906,13 @@ fn every_starting_form_completes_the_whole_chapter() {
     }
     // The same script, eight different Fields at the end of it — but **not**
     // eight different readings, and the chapter says why rather than asserting
-    // a count it does not mean. The opening View seals the Form's own Node
-    // inside the boundary, so Leakage does nothing here and the Charge
-    // arithmetic is Form-independent: six of the eight end identically **by
-    // construction**, and the two that do not are the two whose authored
-    // ability changes what the Field holds. The magnitudes are stated, so a
-    // change that flattens either one fails here rather than reading as one
-    // fewer distinct triple.
+    // a count it does not mean. The physical compartment, never the opening
+    // View, owns leakage. Six Forms add neither a Trail nor linked Nodes, so
+    // they run under the same chapter-authored members, coefficient, and edge
+    // topology; their other parameters do not separate these closing readings.
+    // Wake and Chorus change the causal Field through their authored abilities.
+    // The magnitudes are stated, so a change that flattens either one fails here
+    // rather than reading as one fewer distinct triple.
     let of = |form: &str| readings.iter().find(|held| held.0 == form).expect("a reading");
     let mut distinct: Vec<(i64, i64, usize)> =
         readings.iter().map(|held| (held.1, held.2, held.3)).collect();
@@ -958,22 +958,40 @@ fn every_starting_form_completes_the_whole_chapter() {
         of("thread").2,
     );
 
-    // And the chapter is not the same length for all of them. Vault authors the
-    // smallest `steer_scale` of the eight, so it is the slowest to cross the
-    // Field and the last to close — stated as an ordering and a magnitude
-    // rather than as "at least two lengths stand".
-    let mut spans: Vec<Step> = lengths.clone();
-    spans.sort_unstable();
+    // And the chapter is not the same length for all of them. Chorus's three
+    // linked Form Nodes stand outside the physical compartment but adjacent to
+    // its Form member, adding three exposed contacts under Echo's coefficient.
+    // Its resulting ring stalls now outlast the travel difference. Among the
+    // seven single-body Forms, Vault still authors the smallest `steer_scale`,
+    // so it is the slowest to cross the Field. Both effects are kept explicit:
+    // accepting Chorus's causal cost must not flatten the steering distinction.
     let slowest = *lengths.iter().max().expect("eight readings");
-    let quickest = *lengths.iter().min().expect("eight readings");
-    let vault = lengths[field_game_core::run::FORMS.iter().position(|held| *held == "vault")
-        .expect("Vault is authored")];
-    assert_eq!(vault, slowest, "Vault authors the smallest steer_scale and is the last to close");
+    let duration = |named: &str| {
+        lengths[field_game_core::run::FORMS
+            .iter()
+            .position(|held| *held == named)
+            .expect("the Form is authored")]
+    };
+    let chorus = duration("chorus");
+    assert_eq!(chorus, slowest, "Chorus is last to close under its linked-group resource burden");
+
+    let single_body: Vec<Step> = field_game_core::run::FORMS
+        .into_iter()
+        .filter(|held| *held != "chorus")
+        .map(|held| duration(held))
+        .collect();
+    let single_slowest = *single_body.iter().max().expect("seven single-body Forms");
+    let single_quickest = *single_body.iter().min().expect("seven single-body Forms");
+    let vault = duration("vault");
+    assert_eq!(
+        vault, single_slowest,
+        "Vault authors the smallest steer_scale and is the last single-body Form to close"
+    );
     assert!(
-        slowest - quickest >= 20,
-        "the eight Forms close within {} steps of each other, which is not a difference the \
-         authored steering makes",
-        slowest - quickest,
+        single_slowest - single_quickest >= 20,
+        "the single-body Forms close within {} steps of each other, which is not a difference \
+         the authored steering makes",
+        single_slowest - single_quickest,
     );
 }
 
