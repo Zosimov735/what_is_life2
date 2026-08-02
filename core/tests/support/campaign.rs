@@ -134,11 +134,11 @@ pub fn the_pull() -> Vec<Phase> {
 ///
 /// The positions are the authored content's own, in whole units: the bright
 /// current the reserve stands in, the two outer stores a Pulse opens, and the
-/// deep current the back half asks for. The run takes no queued change at all —
-/// the chapter's three strategies are alternates rather than requirements, and
-/// what is being driven here is the runner — and it lets the optional test go,
-/// which is what keeps a driven campaign's completed list the campaign's
-/// required objectives exactly.
+/// deep current the back half asks for. Its edge objective is causal: the run
+/// moves one handle of the authored physical compartment through a paid Still
+/// Mode commit, then advances one step so the objective can read the changed
+/// Field. It lets the optional test go, which is what keeps a driven campaign's
+/// completed list the campaign's required objectives exactly.
 pub fn the_edge() -> Vec<Phase> {
     vec![
         play(Act::Toward(2000, 2000), 800),
@@ -154,6 +154,10 @@ pub fn the_edge() -> Vec<Phase> {
         // Standing clear of the band, so the inside takes the whole of what the
         // current delivers, and holding while it does.
         play(Act::Toward(2500, 2200), 8_500),
+        // Observation cannot satisfy this objective. Reshape the material
+        // compartment from {2, 3} to {2, 4} through the public, paid causal
+        // plan path; the following stepped phase supplies the qualifying step.
+        edit(&["{\"plan\":{\"members\":[2,4],\"op\":\"reshape_compartment\"}}"]),
         play(Act::Toward(1620, 2200), 11_300),
         // Depth, and the optional test let go.
         play(Act::Toward(2080, 2380), 1_300),
