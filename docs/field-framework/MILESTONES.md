@@ -8,86 +8,64 @@ hide a failed check, blocked platform gate, or panel dissent.
 
 ## Active
 
-### M-002 — Causal compartment and passive View split V2
+### M-003 — Immutable GeneratorSpec and embodied state split
 
 Selected by: science, game-design, and engine panel
 
-Outcome: the physical compartment is the only source of leakage membership and
-coefficient. An Observation View is an independent, free analysis selection
-whose creation, movement, replacement, or clearing cannot change the simulated
-trajectory.
+Outcome: frozen generator rules and declared topology constraints live in an
+immutable `GeneratorSpec`; positions, inventories, active Routes, compartment
+state, and other changing quantities remain in embodied `FieldState`.
 
-Why now: the current transition reads `RunState.view.inside` as physical
-membership, so observation changes the system being observed. It also copies a
-selected Form's leakage value into the whole generator. Both violate D-001 and
-block every credible Observe, Holdout, Archive, and Renewal feature.
+Why now: M-002 removed the View from causal state, but authored rules and
+changing state still share broad structures and initialization paths. That
+ambiguity blocks honest inheritance, Holdout, Renewal, and specification-cost
+work and makes later mechanic changes harder to reason about.
 
 Scope:
 
-- add an authoritative `PhysicalCompartment` to causal `FieldState`;
-- remove View or generic `inside` arguments from live, cached, replayed, and
-  perturbed transition paths so the separation is compile-enforced;
-- make physical-compartment membership and its leakage coefficient
-  chapter/regime-authored rather than Form-authored;
-- keep a compartment edit queued, paid, causal, and trace-ending;
-- make View selection immediate, free, and unable to mutate causal state,
-  Intervention Budget, the plan queue, or the retained trajectory;
-- version content, saves, worker protocol, and frame layout together and provide
-  one deterministic V1-to-V2 save migration;
-- render the physical compartment as a thick material edge and the View as a
-  thin violet aperture, with separate physical and observational readings;
-- retain the dedicated Worker and Rust/WASM delivery architecture.
+- introduce an immutable `GeneratorSpec` owned by authoritative Rust state;
+- move frozen local rules, declared Component kinds, topology constraints, and
+  addressed trial inputs into the specification;
+- keep positions, inventories, active Routes, compartment state, and other
+  changing quantities in embodied state;
+- make transition, replay, perturbation, save, and worker paths consume the
+  split explicitly;
+- preserve deterministic V2 save compatibility while versioning any necessary
+  V3 boundary once, end to end;
+- expose only player-meaningful specification and embodied readings in the UI.
 
 Non-goals:
 
-- no complete `GeneratorSpec`/embodied-state migration;
 - no typed material, local recruitment, or genuine autonomous Renewal;
 - no synchronous Route allocation or segment-based Supply capture correction;
-- no entropy, support, capacity, or external-category-sufficiency claim;
-- no redesign of the legacy candidate-ranking procedures;
-- no full Observe Bench, Atlas expansion, or broad Number 2 polish pass;
-- no multiple compartments, material families, or editable permeability.
+- no entropy, capacity, or information-threshold claim;
+- no Atlas integration or broad candidate-ranking redesign;
+- no second simulation path outside the existing Rust/WASM Worker architecture.
 
 Completion gates:
 
-- implementation precedes all new validation;
-- no transition, cache, or physical replay API accepts a View or View member
-  list;
-- arbitrary View edits leave causal Field bytes, step records, leakage,
-  random-stream position, retained span, and Intervention Budget unchanged;
-- a committed compartment edit can change leakage but leaves the active View
-  unchanged, and every Charge ledger remains exactly balanced;
-- Thread and Ring open the same authored compartment under the same regime;
-- a verified V1 save migrates deterministically and a V2 export/import remains
-  byte-identical;
-- the frame carries separate physical, proposed-physical, and View membership;
-- direct play shows a free thin View moving independently of a paid thick
-  compartment edge;
-- the 32 KiB frame cap, 8 MiB save cap, 30-step-per-second simulation contract,
-  and server-free static production boundary remain intact;
+- implementation and direct inspection precede validation;
+- immutable specification data cannot be changed through embodied transition or
+  plan APIs;
+- replay and perturbation preserve one frozen specification while changing only
+  embodied state and explicit external inputs;
+- save/export/import remains deterministic across the split;
+- direct play continues through one representative chapter without changing
+  the established visual and control surface;
+- focused build, type, protocol, migration, and direct-play checks pass;
 - exact results and documentation are published to `main`.
 
 Panel resolution:
 
-- Science required a View-blind transition and prohibited any claim that this
-  implements the preprint's information threshold.
-- Game design defined the playable contrast as harmless scanning versus
-  consequential compartment work, with both objects visible at once.
-- Engine required the separation to cross state, replay, content, save,
-  protocol, and frame boundaries together rather than leaving a compatibility
-  seam that could re-couple them.
-- Game design proposed deferring Form-independent leakage ownership. Science
-  and engine rejected that deferral because it would preserve a known false
-  global coupling. M-002 therefore moves the provisional coefficient into the
-  chapter/regime contract now; later tuning remains content-only.
-
-Migration concern: a V1 run was produced while View and physical membership
-were coupled. Migration copies that verified legacy membership into both V2
-objects, clears stale analysis evidence, and labels its origin. It does not
-pretend the earlier run supplied passive-observation evidence.
+- Science requires the split before any genomic-specification analogy.
+- Game design requires no interruption to the playable Field while the internal
+  ownership model changes.
+- Engine requires one explicit migration boundary and compile-visible ownership
+  rather than parallel compatibility structures.
 
 ## Completed
 
 | ID | Outcome | Main commit | Direct evidence | Validation | Panel review / next |
 |---|---|---|---|---|---|
+| M-002 | Physical Compartment is causal and paid; Observation View is independent, immediate, free, and passive. The Number 2 Still surface now renders both with distinct readings and authored field texture. | [`f187f6e`](https://github.com/Zosimov735/what_is_life2/commit/f187f6e) | Direct play selected Thread, entered Still Mode, switched from View to Physical Compartment, preserved budget 3 / queued edits 0 / cost 0, and produced no browser warnings or errors. Same-state source/implementation evidence is recorded in `design-qa.md` and `design-qa-comparison.png`; narrow 319 × 699 inspection found no region collisions after correction. | Release WASM and Vite production builds passed; TypeScript passed; focused validation passed 99 Vitest checks, 30 bridge checks, 1 budget assertion with 6 measurement checks ignored, and lexicon validation over 181 files / 281 entries. A later full suite passed build, typecheck, bridge, budget, campaign, and canonical JSON sections before the user explicitly stopped exhaustive validation in favor of rapid milestone implementation during the slow chapter simulations. | Panel selected M-003, the immutable `GeneratorSpec` / embodied-state split. Exhaustive campaign regression is deferred until the gameplay baseline is implemented far enough to evaluate. |
 | M-001 | Reproducible remote-to-laptop static build baseline | [`9df748b`](https://github.com/Zosimov735/what_is_life2/commit/9df748ba76a83df566afaec9263b73b4b79448f4) | Clean Ubuntu 24.04 run [`30765055465`](https://github.com/Zosimov735/what_is_life2/actions/runs/30765055465); exact toolchain doctor; eight-file production artifact, 1,423,134 bytes unpacked and 472,476 bytes archived; worker bundle contains content hash `6aa41dc6…`; WASM is 662,243 bytes. macOS package, signing, launch, frame-time, memory, and energy evidence remain pending. | Release Rust/WASM build passed; app and test TypeScript passed; 534 Rust checks passed and 6 were ignored; 30 Vitest files / 313 checks passed; 35 tool checks passed and 76 lost-document checks remained explicitly skipped; lexicon checked 181 files with no violations. The inherited unoptimized core suite consumed about 25 minutes and is recorded as an iteration-cost issue. | Panel selected M-002, the compile-enforced physical-compartment / passive-View split. |

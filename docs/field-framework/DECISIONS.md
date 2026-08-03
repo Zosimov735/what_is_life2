@@ -146,3 +146,16 @@ WKWebView. Both initially run the deterministic Rust/WASM core in the dedicated
 Worker. A native desktop Rust host requires profiling evidence and a later
 superseding decision; packaging convenience alone is not sufficient reason to
 create a second simulation path.
+
+## D-015 — Reach the playable baseline through rapid implementation slices
+
+Status: accepted.
+
+Until the documented gameplay and visual dependency chain is implemented far
+enough to evaluate as a coherent product, milestone work prioritizes working
+code and direct play over exhaustive regression. Each slice still receives a
+production build, focused boundary checks, and browser inspection before
+publication. Slow broad suites and evaluative studies are deferred to explicit
+stabilization milestones; defects found during implementation are fixed as they
+surface. This does not permit test-driven development or claims unsupported by
+the implemented mechanics.
