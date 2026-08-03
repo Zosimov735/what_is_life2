@@ -185,7 +185,27 @@ resource virtualMachine 'Microsoft.Compute/virtualMachines@2024-11-01' = {
   }
 }
 
+resource autoShutdownSchedule 'Microsoft.DevTestLab/schedules@2018-09-15' = {
+  name: 'shutdown-computevm-${vmName}'
+  location: location
+  tags: tags
+  properties: {
+    status: 'Enabled'
+    taskType: 'ComputeVmShutdownTask'
+    dailyRecurrence: {
+      time: '0500'
+    }
+    timeZoneId: 'UTC'
+    notificationSettings: {
+      status: 'Disabled'
+      timeInMinutes: 0
+    }
+    targetResourceId: virtualMachine.id
+  }
+}
+
 output vmName string = virtualMachine.name
 output publicIpAddress string = publicIpAddress.properties.ipAddress
 output sshCommand string = 'ssh ${adminUsername}@${publicIpAddress.properties.ipAddress}'
 output tunnelCommand string = 'ssh -N -L 8080:127.0.0.1:8080 ${adminUsername}@${publicIpAddress.properties.ipAddress}'
+output autoShutdownUtc string = autoShutdownSchedule.properties.dailyRecurrence.time

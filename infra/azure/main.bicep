@@ -52,3 +52,4 @@ output vmName string = testHost.outputs.vmName
 output publicIpAddress string = testHost.outputs.publicIpAddress
 output sshCommand string = testHost.outputs.sshCommand
 output tunnelCommand string = testHost.outputs.tunnelCommand
+output autoShutdownUtc string = testHost.outputs.autoShutdownUtc

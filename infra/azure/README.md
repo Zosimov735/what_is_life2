@@ -22,11 +22,32 @@ prints the VM address and exact SSH/tunnel commands.
 
 ## Inspect the placeholder
 
-Run `./infra/azure/tunnel.sh`, then browse to
+Start the VM only when testing, then open the tunnel:
+
+```bash
+./infra/azure/vm-control.sh start
+./infra/azure/tunnel.sh
+```
+
+Browse to
 `http://127.0.0.1:18080`. The helper discovers the VM address from Azure and
 keeps the tunnel open until interrupted. The loopback URL is intentional:
 nginx is not exposed to the internet, and browser APIs treat localhost as a
 secure context. Set `LOCAL_PORT` to override the local port.
+
+Deallocate the VM when testing is finished:
+
+```bash
+./infra/azure/vm-control.sh stop
+```
+
+The VM has no automatic start. A defensive Azure schedule deallocates it every
+day at 05:00 UTC if it was left running. A resource-group budget named
+`what-is-life-test-monthly` tracks $5 of monthly cost and emails the Azure
+account at 50%, 80%, and 100%. A deallocated VM stops compute charges, although
+the managed disk and static public IPv4 address can continue to incur small
+charges. Delete the resource group for zero persistent infrastructure when the
+test environment is no longer needed; the Bicep template recreates it.
 
 ## Access changes
 

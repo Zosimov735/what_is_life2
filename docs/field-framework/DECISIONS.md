@@ -172,3 +172,9 @@ the guest firewall. Builds occupy versioned release directories and activation
 uses an atomic `current` symlink so rollback does not require rebuilding. Azure
 does not become the source of truth and does not introduce an application
 server or a second simulation runtime.
+
+The VM remains deallocated except during active testing and has no automatic
+start. A daily 05:00 UTC shutdown schedule is a backstop for forgotten test
+sessions. The resource group carries a low monthly budget with staged alerts;
+deleting and rebuilding the entire environment remains the zero-persistent-cost
+path because the host contains no canonical data.

@@ -53,6 +53,12 @@ release directories provide the application rollback path. A later public
 delivery decision may replace the VM with a managed static host without
 changing the Worker/WASM application architecture.
 
+The host is deallocated outside active test sessions and never starts on a
+schedule. A 05:00 UTC daily shutdown is the forgotten-session backstop. The
+managed disk and static public address remain the only persistent billable
+resources while stopped; the entire resource group may be deleted and rebuilt
+from Bicep when zero persistent infrastructure cost is preferred.
+
 The production artifact is not designed to be opened directly with `file://`.
 Module Workers, root-relative assets, and WASM loading use the static host or
 the desktop shell's asset protocol.
