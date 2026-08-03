@@ -1,7 +1,7 @@
 # What Is Life 2 — Current Codebase State
 
 Status: dated implementation snapshot  
-Baseline reviewed: `f187f6e`
+Baseline reviewed: `27932ad`
 Date: 2026-08-02
 
 ## What exists on the baseline `main`
@@ -32,6 +32,8 @@ It includes:
 - eight authored chapters and a campaign runner;
 - save/export/import, checkpoints, branch recovery, and content hashing;
 - a causal `PhysicalCompartment` separated from the passive Observation View;
+- an initial immutable `GeneratorSpec` boundary owning content identity and
+  authored pressure rules separately from live run quantities;
 - React/Pixi WebGL rendering with a Canvas2D fallback;
 - the Number 2 graphite Field treatment, authored texture, and separate physical
   and observational Still Mode instruments;

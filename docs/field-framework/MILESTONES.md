@@ -63,6 +63,18 @@ Panel resolution:
 - Engine requires one explicit migration boundary and compile-visible ownership
   rather than parallel compatibility structures.
 
+Implementation progress:
+
+- [`27932ad`](https://github.com/Zosimov735/what_is_life2/commit/27932ad) moves
+  authored content identity and pressure rules behind private `GeneratorSpec`
+  fields. Live transitions, replay, ranking, protocol, restore, and save paths
+  now read those rules through the specification while the canonical V2 save
+  bytes remain unchanged.
+- Focused evidence: every Rust test target compiles; 30 bridge, frame, export,
+  import, and migration checks pass; rebuilt development WASM opens Thread and
+  enters Still Mode with both Physical Compartment and Observation View present
+  and no browser warning or error entries.
+
 ## Completed
 
 | ID | Outcome | Main commit | Direct evidence | Validation | Panel review / next |
