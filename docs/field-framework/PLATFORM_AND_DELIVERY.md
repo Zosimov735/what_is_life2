@@ -37,6 +37,22 @@ JavaScript, and WASM in its webview and recommends Vite for SPA applications:
 | Static web release | Any static-file host | WASM in module Worker | None after assets load |
 | Installed macOS game | Tauri asset protocol in WKWebView | WASM in module Worker | None for play |
 
+## Private Azure test host
+
+The initial shared test environment is a small, reproducible Ubuntu VM in
+Azure. It serves a versioned copy of `app/dist` through nginx bound only to
+`127.0.0.1:8080`. Testers connect through an SSH tunnel from an explicitly
+allowlisted management address; the Azure network security group exposes no
+public HTTP or HTTPS rule. Infrastructure source and operating instructions
+live under `infra/azure/`.
+
+The host stores no canonical source, authored content, database, or required
+build toolchain. Codex builds and validates locally, uploads a new release
+directory, verifies it, and atomically changes a `current` symlink. Prior
+release directories provide the application rollback path. A later public
+delivery decision may replace the VM with a managed static host without
+changing the Worker/WASM application architecture.
+
 The production artifact is not designed to be opened directly with `file://`.
 Module Workers, root-relative assets, and WASM loading use the static host or
 the desktop shell's asset protocol.

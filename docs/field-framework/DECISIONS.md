@@ -159,3 +159,16 @@ publication. Slow broad suites and evaluative studies are deferred to explicit
 stabilization milestones; defects found during implementation are fixed as they
 surface. This does not permit test-driven development or claims unsupported by
 the implemented mechanics.
+
+## D-016 — The Azure test host is private and serves versioned static builds
+
+Status: accepted.
+
+The first Azure test environment is a rebuildable Ubuntu VM that serves the
+existing static `app/dist` artifact from nginx. Nginx listens on loopback and is
+reached through an SSH tunnel; public web ingress is absent, and SSH is limited
+to an explicit management address in both the Azure network security group and
+the guest firewall. Builds occupy versioned release directories and activation
+uses an atomic `current` symlink so rollback does not require rebuilding. Azure
+does not become the source of truth and does not introduce an application
+server or a second simulation runtime.
