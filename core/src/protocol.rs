@@ -119,7 +119,7 @@ impl Session {
     fn chapter(&self) -> Option<&Chapter> {
         let content = self.content.as_ref().ok()?;
         let run = self.run.as_ref()?;
-        if run.state().content_hash != content.hash {
+        if run.state().spec.content_hash() != content.hash {
             return None;
         }
         content.chapter(run.state().progress.chapter_index)
@@ -174,7 +174,9 @@ impl Session {
                 // because a step can be the one that carries the run into the
                 // next chapter and the step after it belongs to that one.
                 let campaign = match (self.content.as_ref(), self.run.as_ref()) {
-                    (Ok(content), Some(run)) if run.state().content_hash == content.hash => {
+                    (Ok(content), Some(run))
+                        if run.state().spec.content_hash() == content.hash =>
+                    {
                         Some(content)
                     }
                     _ => None,
@@ -737,7 +739,7 @@ fn read_payload(
     state.coherent().map_err(|fault| read::recode(fault, code))?;
     // A restore under a different content hash continues, and says so; the
     // framework reproducibility of pre-restore records is no longer claimed.
-    let changed = state.content_hash != hash;
+    let changed = state.spec.content_hash() != hash;
     Ok((state, changed))
 }
 
@@ -749,7 +751,7 @@ fn opened_body(run: &Run, content_changed: bool, migrated_from: Option<i64>) -> 
     object.int("branch_nonce", i64::from(state.branch_nonce));
     object.int("chapter_index", i64::from(state.progress.chapter_index));
     object.bool("content_changed", content_changed);
-    object.text("content_hash", &state.content_hash);
+    object.text("content_hash", state.spec.content_hash());
     if let Some(version) = migrated_from {
         object.int("migrated_from", version);
     }

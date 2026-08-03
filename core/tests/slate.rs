@@ -24,8 +24,8 @@ use field_game_core::json::{parse, write_text, Json};
 use field_game_core::rng::RngState;
 use field_game_core::slate::{self, CandidateSlate, Source, SLATE_CAP};
 use field_game_core::state::{
-    ControlState, FieldState, InputConfig, Progress, RunState, Step, Surround, Trace, TraceStep,
-    ViewDeclaration,
+    ControlState, FieldState, GeneratorSpec, InputConfig, Progress, RunState, Step, Surround, Trace,
+    TraceStep, ViewDeclaration,
 };
 use field_game_core::Session;
 
@@ -191,7 +191,7 @@ fn state_of(mut field: FieldState, view: ViewDeclaration, steps: Vec<TraceStep>)
     RunState {
         run_id: KEY.to_string(),
         rng: field_game_core::rng::trajectory_stream(KEY, 0),
-        content_hash: NO_CONTENT.to_string(),
+        spec: GeneratorSpec::new(NO_CONTENT.to_string(), Default::default()),
         branch_nonce: 0,
         progress: Progress::opening(),
         now: field,
@@ -200,7 +200,6 @@ fn state_of(mut field: FieldState, view: ViewDeclaration, steps: Vec<TraceStep>)
         slate: None,
         input_config: InputConfig::default_config(),
         pressures: Vec::new(),
-        schedule: Default::default(),
         anchors: Vec::new(),
     }
 }

@@ -36,7 +36,7 @@ fn the_hash_init_run_reports_is_the_digest_over_the_bytes_that_arrived() {
     );
     // And the run records it, which is what a restore compares against.
     let run = session.run().expect("a run is loaded");
-    assert_eq!(run.state().content_hash, support::content_hash());
+    assert_eq!(run.state().spec.content_hash(), support::content_hash());
 }
 
 #[test]

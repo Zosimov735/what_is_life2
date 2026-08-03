@@ -26,8 +26,8 @@ use crate::rng::trajectory_stream;
 use crate::sha256;
 use crate::slate::CandidateSlate;
 use crate::state::{
-    CheckpointState, ControlState, FieldState, Frac, InputConfig, Progress, RecordKind, RunState,
-    Trace, TraceStep, ViewDeclaration, AUTOSAVE_STEPS, SAVE_PAYLOAD_CAP,
+    CheckpointState, ControlState, FieldState, Frac, GeneratorSpec, InputConfig, Progress,
+    RecordKind, RunState, Trace, TraceStep, ViewDeclaration, AUTOSAVE_STEPS, SAVE_PAYLOAD_CAP,
 };
 
 /// The eight starting Forms, as their machine ids.
@@ -410,7 +410,10 @@ impl Run {
         let state = RunState {
             run_id: run_id.to_string(),
             rng: trajectory_stream(run_id, branch_nonce),
-            content_hash: content_hash.to_string(),
+            spec: GeneratorSpec::new(
+                content_hash.to_string(),
+                crate::pressure::Schedule::default(),
+            ),
             branch_nonce,
             progress: Progress::opening(),
             trace: Trace::opening(now.clone()),
@@ -419,7 +422,6 @@ impl Run {
             slate: None,
             input_config: InputConfig::default_config(),
             pressures: Vec::new(),
-            schedule: crate::pressure::Schedule::default(),
             anchors: Vec::new(),
         };
         Ok(Run {
@@ -559,7 +561,7 @@ impl Run {
     /// whose content hash has moved gets none, which is the same reading the
     /// authored sequence takes of a chapter it can no longer trust.
     pub fn set_schedule(&mut self, schedule: crate::pressure::Schedule) {
-        self.state.schedule = schedule;
+        self.state.spec = GeneratorSpec::new(self.state.spec.content_hash().to_string(), schedule);
     }
 
     /// Seats the chapter's authored schedule as queued pressures.
@@ -645,7 +647,7 @@ impl Run {
             let mut copy = self.state.pressures.clone();
             crate::pressure::settle_boundary(
                 &mut copy,
-                &self.state.schedule,
+                self.state.spec.schedule(),
                 &staged.spent,
                 &staged.pressed,
                 next_step,
@@ -705,7 +707,8 @@ impl Run {
                         // the entry.
                         let held = self
                             .state
-                            .schedule
+                            .spec
+                            .schedule()
                             .table(pressure.pressure)
                             .map_or(0, |table| table.level(*stage));
                         let floored = match pressure.displaced {
@@ -733,7 +736,7 @@ impl Run {
         self.end_window();
         let settled = crate::pressure::settle_boundary(
             &mut self.state.pressures,
-            &self.state.schedule,
+            self.state.spec.schedule(),
             &staged.spent,
             &staged.pressed,
             next_step,
@@ -1362,7 +1365,7 @@ impl Run {
             self.state.input_config.pointer_speed,
             &mut field::Staging {
                 pressures: &mut self.state.pressures,
-                schedule: &self.state.schedule,
+                schedule: self.state.spec.schedule(),
                 stream: &mut self.state.rng,
             },
         );
@@ -1722,7 +1725,7 @@ impl Run {
                 &recorded,
                 self.state.input_config.pointer_speed,
                 &self.state.pressures,
-                &self.state.schedule,
+                self.state.spec.schedule(),
                 &cache,
             );
             self.state.trace.start_step = recorded.step;
@@ -2218,7 +2221,7 @@ impl Run {
                 &recorded,
                 self.state.input_config.pointer_speed,
                 &self.state.pressures,
-                &self.state.schedule,
+                self.state.spec.schedule(),
                 &cache,
             );
             self.state.trace.start_step = recorded.step;

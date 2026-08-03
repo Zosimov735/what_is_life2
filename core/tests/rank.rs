@@ -24,8 +24,8 @@ use field_game_core::slate::{
     TAU_DEFAULT,
 };
 use field_game_core::state::{
-    ControlState, FieldState, Frac, InputConfig, Progress, RunState, Surround, Trace,
-    TraceStep, ViewDeclaration, FRAC_ONE,
+    ControlState, FieldState, Frac, GeneratorSpec, InputConfig, Progress, RunState, Surround,
+    Trace, TraceStep, ViewDeclaration, FRAC_ONE,
 };
 
 const KEY: &str = "0123456789abcdef";
@@ -236,7 +236,7 @@ fn played(steps: usize, view: ViewDeclaration) -> RunState {
     RunState {
         run_id: KEY.to_string(),
         rng: field_game_core::rng::trajectory_stream(KEY, 0),
-        content_hash: NO_CONTENT.to_string(),
+        spec: GeneratorSpec::new(NO_CONTENT.to_string(), Default::default()),
         branch_nonce: 0,
         progress: Progress::opening(),
         now,
@@ -245,7 +245,6 @@ fn played(steps: usize, view: ViewDeclaration) -> RunState {
         slate: None,
         input_config: InputConfig::default_config(),
         pressures: Vec::new(),
-        schedule: Default::default(),
         anchors: Vec::new(),
     }
 }

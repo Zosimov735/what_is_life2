@@ -16,8 +16,8 @@ use field_game_core::field::{
 };
 use field_game_core::fx::{Vec2, ONE_UNIT};
 use field_game_core::state::{
-    ControlState, FieldState, InputConfig, Progress, RunState, Surround, Trace, TraceStep,
-    ViewDeclaration, FRAC_ONE,
+    ControlState, FieldState, GeneratorSpec, InputConfig, Progress, RunState, Surround, Trace,
+    TraceStep, ViewDeclaration, FRAC_ONE,
 };
 
 pub const KEY: &str = "0123456789abcdef";
@@ -241,7 +241,7 @@ pub fn played(opening: FieldState, steps: usize, view: ViewDeclaration) -> RunSt
     RunState {
         run_id: KEY.to_string(),
         rng: field_game_core::rng::trajectory_stream(KEY, 0),
-        content_hash: NO_CONTENT.to_string(),
+        spec: GeneratorSpec::new(NO_CONTENT.to_string(), Default::default()),
         branch_nonce: 0,
         progress: Progress::opening(),
         now,
@@ -250,7 +250,6 @@ pub fn played(opening: FieldState, steps: usize, view: ViewDeclaration) -> RunSt
         slate: None,
         input_config: InputConfig::default_config(),
         pressures: Vec::new(),
-        schedule: Default::default(),
         anchors: Vec::new(),
     }
 }

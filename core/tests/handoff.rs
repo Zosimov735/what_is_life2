@@ -826,7 +826,7 @@ fn a_handoff_under_content_whose_hash_has_moved_reads_the_authored_default() {
     let answer = carried.command("import_run", &import_body(&file));
     assert!(answer.contains("\"ok\":true"), "{answer}");
     assert_ne!(
-        carried.run().expect("a run").state().content_hash,
+        carried.run().expect("a run").state().spec.content_hash(),
         digest,
         "the run stands under content whose hash has moved",
     );

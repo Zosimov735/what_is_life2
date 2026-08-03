@@ -368,7 +368,7 @@ impl<'a> Window<'a> {
                 pointer_speed,
                 &mut field::Staging {
                     pressures: &mut scratch,
-                    schedule: &state.schedule,
+                    schedule: state.spec.schedule(),
                     stream: &mut stream,
                 },
                 &cache,
@@ -381,7 +381,7 @@ impl<'a> Window<'a> {
             pointer_speed,
             cache,
             pressures: state.pressures.clone(),
-            schedule: state.schedule.clone(),
+            schedule: state.spec.schedule().clone(),
         }
     }
 

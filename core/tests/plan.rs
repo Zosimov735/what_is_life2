@@ -24,8 +24,8 @@ use field_game_core::plan::{
     self, PlanCommand, PlanQueue, Projection, RouteEnd, CONNECTED_ROUTE_CAPACITY, PLAN_QUEUE_DEPTH,
 };
 use field_game_core::state::{
-    FieldState, InputConfig, Progress, RunState, Surround, Trace, ViewDeclaration, IMPULSE_CAP,
-    OPENING_IMPULSE,
+    FieldState, GeneratorSpec, InputConfig, Progress, RunState, Surround, Trace, ViewDeclaration,
+    IMPULSE_CAP, OPENING_IMPULSE,
 };
 use field_game_core::Session;
 
@@ -137,7 +137,7 @@ fn state_with(impulse: u8) -> RunState {
     RunState {
         run_id: KEY.to_string(),
         rng: field_game_core::rng::trajectory_stream(KEY, 0),
-        content_hash: NO_CONTENT.to_string(),
+        spec: GeneratorSpec::new(NO_CONTENT.to_string(), Default::default()),
         branch_nonce: 0,
         progress,
         trace: Trace::opening(field.clone()),
@@ -146,7 +146,6 @@ fn state_with(impulse: u8) -> RunState {
         slate: None,
         input_config: InputConfig::default_config(),
         pressures: Vec::new(),
-        schedule: Default::default(),
         anchors: Vec::new(),
     }
 }

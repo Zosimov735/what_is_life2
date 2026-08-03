@@ -288,7 +288,8 @@ fn whole_slate_job() {
 
 fn whole_slate_job_at(window: u16) {
     use field_game_core::state::{
-        InputConfig, Progress, RunState, Surround, Trace, TraceStep, ViewDeclaration,
+        GeneratorSpec, InputConfig, Progress, RunState, Surround, Trace, TraceStep,
+        ViewDeclaration,
     };
 
     let keyframe = caps_field();
@@ -322,7 +323,7 @@ fn whole_slate_job_at(window: u16) {
     let state = RunState {
         run_id: "0123456789abcdef".to_string(),
         rng: field_game_core::rng::trajectory_stream("0123456789abcdef", 0),
-        content_hash: "00".repeat(32),
+        spec: GeneratorSpec::new("00".repeat(32), Default::default()),
         branch_nonce: 0,
         progress: Progress::opening(),
         now,
@@ -331,7 +332,6 @@ fn whole_slate_job_at(window: u16) {
         slate: None,
         input_config: InputConfig::default_config(),
         pressures: Vec::new(),
-        schedule: Default::default(),
         anchors: Vec::new(),
     };
 
@@ -367,7 +367,8 @@ fn whole_slate_job_at(window: u16) {
 #[ignore = "measurement, not an assertion: run in release with --nocapture"]
 fn on_demand_jobs() {
     use field_game_core::state::{
-        InputConfig, Progress, RunState, Surround, Trace, TraceStep, ViewDeclaration,
+        GeneratorSpec, InputConfig, Progress, RunState, Surround, Trace, TraceStep,
+        ViewDeclaration,
     };
 
     let keyframe = caps_field();
@@ -400,7 +401,7 @@ fn on_demand_jobs() {
     let state = RunState {
         run_id: "0123456789abcdef".to_string(),
         rng: field_game_core::rng::trajectory_stream("0123456789abcdef", 0),
-        content_hash: "00".repeat(32),
+        spec: GeneratorSpec::new("00".repeat(32), Default::default()),
         branch_nonce: 0,
         progress: Progress::opening(),
         now,
@@ -409,7 +410,6 @@ fn on_demand_jobs() {
         slate: None,
         input_config: InputConfig::default_config(),
         pressures: Vec::new(),
-        schedule: Default::default(),
         anchors: Vec::new(),
     };
     let sigma = field_game_core::slate::evaluation_stream("0123456789abcdef", 0, 1);

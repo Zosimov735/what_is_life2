@@ -2194,7 +2194,10 @@ fn the_densest_step_and_a_full_trajectory_stay_inside_the_locked_caps() {
     let state = RunState {
         run_id: KEY.to_string(),
         rng: trajectory_stream(KEY, 0),
-        content_hash: support::content_hash(),
+        spec: field_game_core::state::GeneratorSpec::new(
+            support::content_hash(),
+            Default::default(),
+        ),
         branch_nonce: 0,
         progress: Progress::opening(),
         now: field,
@@ -2203,7 +2206,6 @@ fn the_densest_step_and_a_full_trajectory_stay_inside_the_locked_caps() {
         slate: None,
         input_config: InputConfig::default_config(),
         pressures: Vec::new(),
-        schedule: Default::default(),
         // Checkpoint metadata is measured beside the slate and the pressures,
         // in the headroom the document leaves past this figure.
         anchors: Vec::new(),

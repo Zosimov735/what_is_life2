@@ -1028,13 +1028,41 @@ impl CheckpointState {
     }
 }
 
+/// Authored rules pinned for the life of a run.
+///
+/// The fields stay private so embodied transitions cannot rewrite the content
+/// identity or pressure schedule in place. A restored run receives the same
+/// content-pinned specification from the session that opened it.
+#[derive(Clone, Debug)]
+pub struct GeneratorSpec {
+    content_hash: String,
+    schedule: crate::pressure::Schedule,
+}
+
+impl GeneratorSpec {
+    pub fn new(content_hash: String, schedule: crate::pressure::Schedule) -> Self {
+        GeneratorSpec {
+            content_hash,
+            schedule,
+        }
+    }
+
+    pub fn content_hash(&self) -> &str {
+        &self.content_hash
+    }
+
+    pub fn schedule(&self) -> &crate::pressure::Schedule {
+        &self.schedule
+    }
+}
+
 /// The root authoritative aggregate, whose serialized form is exactly the
 /// current save payload.
 #[derive(Clone, Debug)]
 pub struct RunState {
     pub run_id: String,
     pub rng: RngState,
-    pub content_hash: String,
+    pub spec: GeneratorSpec,
     pub branch_nonce: u32,
     pub progress: Progress,
     pub now: FieldState,
@@ -1055,14 +1083,6 @@ pub struct RunState {
     /// changes it ends the window, and `stage` and `level` are derived at the
     /// step being replayed.
     pub pressures: Vec<crate::pressure::PressureState>,
-    /// The authored pressure tables the stage machine reads. Content rather
-    /// than state: never serialized, never compared, and set by the session
-    /// that opened the run from the bundle it holds — exactly as
-    /// `input_config.pointer_speed` is a step input the trace does not carry,
-    /// this is one, and it is immutable for the life of a run because the
-    /// content hash pins the bundle. A payload read back starts with the empty
-    /// one and the session fills it in.
-    pub schedule: crate::pressure::Schedule,
     /// Checkpoint metadata, ascending by `anchor_id`. The payloads themselves
     /// live in the persistence records these name.
     pub anchors: Vec<CheckpointState>,
@@ -1147,10 +1167,11 @@ impl RunState {
             (FieldState::read(field, "now")?, Trace::read(field, "trace")?)
         };
 
+        let content_hash = read::hex(payload, "content_hash", 64)?.to_string();
         Ok(RunState {
             run_id: read::hex(payload, "run_id", 16)?.to_string(),
             rng: RngState::read(payload, "rng")?,
-            content_hash: read::hex(payload, "content_hash", 64)?.to_string(),
+            spec: GeneratorSpec::new(content_hash, crate::pressure::Schedule::default()),
             branch_nonce: read::int(payload, "branch_nonce", 0, i64::from(u32::MAX))? as u32,
             progress: Progress::read(payload, "progress")?,
             now,
@@ -1159,7 +1180,6 @@ impl RunState {
             slate,
             input_config: InputConfig::read(payload, "input_config")?,
             pressures,
-            schedule: crate::pressure::Schedule::default(),
             anchors,
         })
     }
@@ -1177,7 +1197,7 @@ impl RunState {
             anchors.end();
         }
         object.int("branch_nonce", i64::from(self.branch_nonce));
-        object.text("content_hash", &self.content_hash);
+        object.text("content_hash", self.spec.content_hash());
         {
             let mut field = object.object("field");
             {

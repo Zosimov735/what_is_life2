@@ -819,7 +819,7 @@ fn a_drawing_noise_pressure_spreads_the_confidence_ranges() {
     let state = field_game_core::state::RunState {
         run_id: "00aa00aa00aa00aa".to_string(),
         rng: stream,
-        content_hash: support::content_hash(),
+        spec: field_game_core::state::GeneratorSpec::new(support::content_hash(), schedule),
         branch_nonce: 0,
         progress: Progress::opening(),
         now,
@@ -828,7 +828,6 @@ fn a_drawing_noise_pressure_spreads_the_confidence_ranges() {
         slate: None,
         input_config: field_game_core::state::InputConfig::default_config(),
         pressures: vec![bearing],
-        schedule,
         anchors: Vec::new(),
     };
 
@@ -1188,7 +1187,10 @@ fn run_with(
     let state = field_game_core::state::RunState {
         run_id: "00bb00bb00bb00bb".to_string(),
         rng: field_game_core::rng::trajectory_stream("00bb00bb00bb00bb", 0),
-        content_hash: support::content_hash(),
+        spec: field_game_core::state::GeneratorSpec::new(
+            support::content_hash(),
+            Schedule::of(vec![held]).expect("one table per pressure"),
+        ),
         branch_nonce: 0,
         progress: Progress::opening(),
         now: field.clone(),
@@ -1202,7 +1204,6 @@ fn run_with(
         slate: None,
         input_config: InputConfig::default_config(),
         pressures: vec![pressure],
-        schedule: Schedule::of(vec![held]).expect("one table per pressure"),
         anchors: Vec::new(),
     };
     state.coherent().expect("the fixture is a coherent run");
@@ -1606,7 +1607,10 @@ fn run_with_table(
     let state = field_game_core::state::RunState {
         run_id: "00ee00ee00ee00ee".to_string(),
         rng: field_game_core::rng::trajectory_stream("00ee00ee00ee00ee", 0),
-        content_hash: support::content_hash(),
+        spec: field_game_core::state::GeneratorSpec::new(
+            support::content_hash(),
+            Schedule::of(vec![content]).expect("one table per pressure"),
+        ),
         branch_nonce: 0,
         progress: Progress::opening(),
         now: field.clone(),
@@ -1620,7 +1624,6 @@ fn run_with_table(
         slate: None,
         input_config: InputConfig::default_config(),
         pressures: vec![pressure],
-        schedule: Schedule::of(vec![content]).expect("one table per pressure"),
         anchors: Vec::new(),
     };
     state.coherent().expect("the fixture is a coherent run");

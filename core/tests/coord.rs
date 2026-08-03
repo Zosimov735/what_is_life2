@@ -214,7 +214,10 @@ fn upkeep_readings_over_a_synthetic_schedule_check_the_two_formulas_by_hand() {
     let state = field_game_core::state::RunState {
         run_id: support::measure::KEY.to_string(),
         rng: field_game_core::rng::trajectory_stream(support::measure::KEY, 0),
-        content_hash: support::measure::NO_CONTENT.to_string(),
+        spec: field_game_core::state::GeneratorSpec::new(
+            support::measure::NO_CONTENT.to_string(),
+            Default::default(),
+        ),
         branch_nonce: 0,
         progress: field_game_core::state::Progress::opening(),
         now,
@@ -223,7 +226,6 @@ fn upkeep_readings_over_a_synthetic_schedule_check_the_two_formulas_by_hand() {
         slate: None,
         input_config: field_game_core::state::InputConfig::default_config(),
         pressures: Vec::new(),
-        schedule: Default::default(),
         anchors: Vec::new(),
     };
     assert_eq!(state.effective_window(4), 4);
