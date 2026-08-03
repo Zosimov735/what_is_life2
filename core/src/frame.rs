@@ -251,6 +251,14 @@ pub fn encode(snapshot: &Snapshot<'_>) -> Vec<u8> {
     out[17] = snapshot.progress.chapter_index;
     put_u16(&mut out, 18, snapshot.objective_ordinal);
     out[20] = present.len() as u8;
+    // The material law is a physical reading, not an observation setting. The
+    // V2 header keeps it beside the physical membership flags so the shell can
+    // name the actual coefficient while View edits remain frame-local analysis.
+    put_u32(
+        &mut out,
+        22,
+        field.physical_compartment.leak_per_exposed_contact_per_step as u32,
+    );
 
     for (place, (kind, count, width)) in present.iter().enumerate() {
         let at = HEADER_BYTES + place * SECTION_ENTRY_BYTES;

@@ -265,5 +265,15 @@ export function FieldSurface({
     };
   }, [frames]);
 
-  return <canvas className="field" ref={surface} />;
+  return (
+    <div className="field-stage">
+      <img
+        className="field-texture"
+        src="/assets/number-2-field-texture.png"
+        alt=""
+        aria-hidden="true"
+      />
+      <canvas className="field" ref={surface} />
+    </div>
+  );
 }

@@ -28,6 +28,14 @@
     },
 
     "instruction.choose_form": { "kind": "instruction", "text": "Choose a Form." },
+    "instruction.move_view": {
+      "kind": "instruction",
+      "text": "Move the View. Physics stays unchanged."
+    },
+    "instruction.shape_compartment": {
+      "kind": "instruction",
+      "text": "Shape the compartment, then commit."
+    },
 
     "label.still_mode": { "kind": "label", "text": "Still Mode" },
     "label.observation_view": { "kind": "label", "text": "Observation View" },
@@ -47,6 +55,24 @@
     "label.pulse": { "kind": "label", "text": "Pulse" },
     "label.queue": { "kind": "label", "text": "Queued physical edits" },
     "label.cost": { "kind": "label", "text": "Cost" },
+    "label.view_protocol": { "kind": "label", "text": "View Protocol" },
+    "label.view_members": { "kind": "label", "text": "Observed members" },
+    "label.physical_members": { "kind": "label", "text": "Physical members" },
+    "label.proposed_members": { "kind": "label", "text": "Proposed members" },
+    "label.exposed_members": { "kind": "label", "text": "Exposed edge" },
+    "label.leak_coefficient": { "kind": "label", "text": "Leak coefficient" },
+    "label.measurement_grain": { "kind": "label", "text": "Measurement Grain" },
+    "label.analysis_window": { "kind": "label", "text": "Analysis Window" },
+    "label.comparison_neighborhood": {
+      "kind": "label",
+      "text": "Comparison Neighborhood"
+    },
+    "label.surround_adjacent": { "kind": "label", "text": "Adjacent" },
+    "label.surround_double": { "kind": "label", "text": "Two contacts" },
+    "label.surround_whole": { "kind": "label", "text": "Whole Field" },
+    "label.not_available": { "kind": "label", "text": "Not available" },
+    "unit.steps": { "kind": "label", "text": "steps" },
+    "unit.per_contact_step": { "kind": "label", "text": "per contact / step" },
     "label.chapter_review": { "kind": "label", "text": "Chapter complete" },
     "label.continue": { "kind": "label", "text": "Continue" },
     "label.ending": { "kind": "label", "text": "Campaign complete" },

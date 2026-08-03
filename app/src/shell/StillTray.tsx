@@ -36,6 +36,7 @@ import type { CandidateSlate, QueueState } from './worker-client';
 import type {
   PrivilegeValue,
   SlateCandidate,
+  Surround,
   ViewDeclaration,
 } from '../../../worker/src/protocol';
 import type { FrameState } from '../../../worker/src/frame-state';
@@ -127,6 +128,24 @@ interface StillTrayProps {
   setTool?: (tool: StillTool) => void;
   /** Immediately moves the passive View to one candidate. */
   setFocus?: (position: number) => void;
+  /** Current authoritative physical members, read from frame flags. */
+  physicalMembers?: number;
+  /** Membership a queued physical edit would install, or zero when none stands. */
+  proposedPhysicalMembers?: number;
+  /** Current exposed physical members. */
+  exposedPhysicalMembers?: number;
+  /** Raw Q0.16 leakage per exposed external contact per simulation step. */
+  leakPerExposedContactPerStep?: number;
+}
+
+const SURROUND_KEYS: Readonly<Record<Surround, string>> = {
+  adjacent: 'label.surround_adjacent',
+  double: 'label.surround_double',
+  whole: 'label.surround_whole',
+};
+
+function leakagePercent(raw: number): string {
+  return `${((raw / WHOLE) * 100).toFixed(raw === 0 ? 0 : 3)}%`;
 }
 
 /**
@@ -173,6 +192,10 @@ export function StillTray({
   tool = 'view',
   setTool = () => {},
   setFocus = () => {},
+  physicalMembers = 0,
+  proposedPhysicalMembers = 0,
+  exposedPhysicalMembers = 0,
+  leakPerExposedContactPerStep = 0,
 }: StillTrayProps) {
   if (!mode || !SHOWN_IN.includes(mode)) return null;
 
@@ -184,49 +207,86 @@ export function StillTray({
       <p className="tray-name" role="status" aria-live="polite">
         {copy('label.still_mode')}
       </p>
-      <div className="tray-tools" role="group" aria-label={copy('label.still_mode')}>
-        <button
-          type="button"
-          className="tray-tool"
-          data-tool="view"
-          aria-pressed={tool === 'view'}
-          onClick={() => setTool('view')}
-        >
-          <span>{copy('label.observation_view')}</span>
-          <small>{copy('label.passive_free')}</small>
-        </button>
-        <button
-          type="button"
-          className="tray-tool"
-          data-tool="compartment"
-          aria-pressed={tool === 'compartment'}
-          onClick={() => setTool('compartment')}
-        >
-          <span>{copy('label.physical_compartment')}</span>
-          <small>{copy('label.causal_paid')}</small>
-        </button>
+      <div className="tray-mode-panel">
+        <div className="tray-tools" role="group" aria-label={copy('label.still_mode')}>
+          <button
+            type="button"
+            className="tray-tool"
+            data-tool="view"
+            aria-pressed={tool === 'view'}
+            onClick={() => setTool('view')}
+          >
+            <span>{copy('label.observation_view')}</span>
+            <small>{copy('label.passive_free')}</small>
+          </button>
+          <button
+            type="button"
+            className="tray-tool"
+            data-tool="compartment"
+            aria-pressed={tool === 'compartment'}
+            onClick={() => setTool('compartment')}
+          >
+            <span>{copy('label.physical_compartment')}</span>
+            <small>{copy('label.causal_paid')}</small>
+          </button>
+        </div>
+        <div className="tray-physical-readings">
+          <p className="tray-reading">
+            <span className="tray-term">{copy('label.physical_members')}</span>
+            <span className="tray-value">{physicalMembers}</span>
+          </p>
+          <p className="tray-reading">
+            <span className="tray-term">{copy('label.exposed_members')}</span>
+            <span className="tray-value">{exposedPhysicalMembers}</span>
+          </p>
+          <p className="tray-reading">
+            <span className="tray-term">{copy('label.leak_coefficient')}</span>
+            <span className="tray-value tray-value-unit">
+              {leakagePercent(leakPerExposedContactPerStep)}
+              <small>{copy('unit.per_contact_step')}</small>
+            </span>
+          </p>
+          {proposedPhysicalMembers > 0 ? (
+            <p className="tray-reading tray-proposed-reading">
+              <span className="tray-term">{copy('label.proposed_members')}</span>
+              <span className="tray-value">{proposedPhysicalMembers}</span>
+            </p>
+          ) : null}
+        </div>
       </div>
-      <button
-        type="button"
-        className="tray-clear-view"
-        disabled={!slate || tool !== 'view' || mode !== 'still' || !view || view.inside.length === 0}
-        onClick={() => setFocus(0)}
-      >
-        {copy('label.clear_view')}
-      </button>
-      <p className="tray-reading">
-        <span className="tray-term">{copy('label.impulse')}</span>
-        <span className="tray-value">{impulse}</span>
-      </p>
-      <p className="tray-reading">
-        <span className="tray-term">{copy('label.queue')}</span>
-        <span className="tray-value">{queue.entries.length}</span>
-      </p>
-      {/* What the queue would spend, which is what a commit does spend. */}
-      <p className="tray-reading" data-total="cost">
-        <span className="tray-term">{copy('label.cost')}</span>
-        <span className="tray-value">{queue.cost_total}</span>
-      </p>
+      <section className="tray-view-panel" aria-label={copy('label.observation_view')}>
+        <p className="tray-panel-kicker">{copy('label.view_protocol')}</p>
+        <div className="tray-view-readings">
+          <p className="tray-reading">
+            <span className="tray-term">{copy('label.view_members')}</span>
+            <span className="tray-value">{view?.inside.length ?? 0}</span>
+          </p>
+          <p className="tray-reading">
+            <span className="tray-term">{copy('label.measurement_grain')}</span>
+            <span className="tray-value">{view?.resolution ?? 0}</span>
+          </p>
+          <p className="tray-reading">
+            <span className="tray-term">{copy('label.analysis_window')}</span>
+            <span className="tray-value tray-value-unit">
+              {view?.window ?? 0}
+              <small>{copy('unit.steps')}</small>
+            </span>
+          </p>
+          <p className="tray-reading">
+            <span className="tray-term">{copy('label.comparison_neighborhood')}</span>
+            <span className="tray-value">
+              {view ? copy(SURROUND_KEYS[view.surround]) : copy('label.not_available')}
+            </span>
+          </p>
+        </div>
+        <button
+          type="button"
+          className="tray-clear-view"
+          disabled={!slate || tool !== 'view' || mode !== 'still' || !view || view.inside.length === 0}
+          onClick={() => setFocus(0)}
+        >
+          {copy('label.clear_view')}
+        </button>
       {/* The candidates the standing slate holds, in presentation order, each
           named by the source it came from. A deficient slate is not compared
           and not adopted from, so it lists nothing. */}
@@ -306,19 +366,37 @@ export function StillTray({
           ) : null}
         </>
       ) : null}
-      <ul className="tray-queue">
-        {queue.entries.map((entry) => (
-          <li
-            key={entry.position}
-            className="tray-entry"
-            data-conflict={entry.conflict}
-            data-op={entry.plan.op}
-          >
-            <span className="tray-mark" />
-            <span className="tray-entry-cost">{entry.cost}</span>
-          </li>
-        ))}
-      </ul>
+      </section>
+      <div className="tray-budget">
+        <p className="tray-reading">
+          <span className="tray-term">{copy('label.impulse')}</span>
+          <span className="tray-value">{impulse}</span>
+        </p>
+        <p className="tray-reading">
+          <span className="tray-term">{copy('label.queue')}</span>
+          <span className="tray-value">{queue.entries.length}</span>
+        </p>
+        <p className="tray-reading" data-total="cost">
+          <span className="tray-term">{copy('label.cost')}</span>
+          <span className="tray-value">{queue.cost_total}</span>
+        </p>
+        <ul className="tray-queue">
+          {queue.entries.map((entry) => (
+            <li
+              key={entry.position}
+              className="tray-entry"
+              data-conflict={entry.conflict}
+              data-op={entry.plan.op}
+            >
+              <span className="tray-mark" />
+              <span className="tray-entry-cost">{entry.cost}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <p className="tray-guidance">
+        {copy(tool === 'view' ? 'instruction.move_view' : 'instruction.shape_compartment')}
+      </p>
     </div>
   );
 }

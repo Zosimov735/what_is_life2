@@ -314,6 +314,14 @@ export function App({ open = openSession, sound = openSound }: ShellProps) {
         setFocus={(position) => {
           if (slate) void client.setFocus?.(slate.ordinal, position);
         }}
+        physicalMembers={(client.snapshot()?.ports ?? []).filter((port) => port.member).length}
+        proposedPhysicalMembers={
+          (client.snapshot()?.ports ?? []).filter((port) => port.proposedMember).length
+        }
+        exposedPhysicalMembers={(client.snapshot()?.ports ?? []).filter((port) => port.shell).length}
+        leakPerExposedContactPerStep={
+          client.snapshot()?.header.leakPerExposedContactPerStep ?? 0
+        }
       />
       <ChapterReview review={review} ending={ending} clearReview={client.clearReview} />
       {recovering ? <p className="notice">{copy('notice.run_resumed')}</p> : null}

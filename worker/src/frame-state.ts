@@ -73,6 +73,8 @@ export interface FrameHeader {
   chapterIndex: number;
   objectiveOrdinal: number;
   sectionCount: number;
+  /** Raw Q0.16 leakage per exposed external contact per simulation step. */
+  leakPerExposedContactPerStep: number;
 }
 
 export interface FrameForm {
@@ -308,6 +310,7 @@ export function decodeFrameState(buffer: ArrayBuffer): FrameState {
     chapterIndex: bytes[17],
     objectiveOrdinal: view.getUint16(18, true),
     sectionCount: bytes[20],
+    leakPerExposedContactPerStep: view.getUint32(22, true),
   };
 
   const decoded: FrameState = {

@@ -476,6 +476,7 @@ test('the surface hands the sound the same snapshots it draws', async () => {
       chapterIndex: 0,
       objectiveOrdinal: 0,
       sectionCount: 0,
+      leakPerExposedContactPerStep: 0,
     },
     forms: [],
     ports: [],

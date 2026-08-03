@@ -1062,7 +1062,13 @@ fn the_render_snapshot_carries_the_locked_header_and_section_table() {
     assert_eq!(view[17], 0);
     assert_eq!(u16::from_le_bytes([view[18], view[19]]), 0, "no objective is offered yet");
     assert_eq!(view[20], 6, "Forms, Ports, Routes, currents, the inside, and the path");
-    assert_eq!(&view[21..32], &[0u8; 11], "the header's tail is zero pad");
+    assert_eq!(view[21], 0, "the physical-reading alignment byte is zero pad");
+    assert_eq!(
+        u32::from_le_bytes([view[22], view[23], view[24], view[25]]),
+        4096,
+        "the material leakage coefficient crosses independently of the View"
+    );
+    assert_eq!(&view[26..32], &[0u8; 6], "the header's remaining tail is zero pad");
     assert!(view.len() <= FRAME_BUFFER_CAP);
 
     // The section table: each entry names a kind, a count, and where its

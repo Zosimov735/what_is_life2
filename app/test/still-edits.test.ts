@@ -105,6 +105,7 @@ function inspectable(mode: FrameMode = 'still'): FrameState {
       chapterIndex: 0,
       objectiveOrdinal: 0,
       sectionCount: 0,
+      leakPerExposedContactPerStep: 0,
     },
     forms: [],
     ports,

@@ -471,6 +471,7 @@ function fieldOf(
       chapterIndex: 0,
       objectiveOrdinal: 0,
       sectionCount: 2,
+      leakPerExposedContactPerStep: 0,
     },
     forms: [],
     ports,
