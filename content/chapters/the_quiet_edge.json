@@ -24,7 +24,7 @@
     },
     {
       "layer": 1,
-      "drain": 65536,
+      "drain": 819,
       "noise": 8192,
       "gain": 65536
     }
@@ -528,7 +528,7 @@
       "at": 1,
       "kind": "set_layer_drain",
       "layer": 0,
-      "drain": 410
+      "drain": 205
     },
     {
       "objective": "objective.the_quiet_edge.hold_past_the_deep_stop",
@@ -549,7 +549,7 @@
       "at": 1,
       "kind": "set_layer_drain",
       "layer": 0,
-      "drain": 819
+      "drain": 410
     }
   ],
   "pressure_schedule": [

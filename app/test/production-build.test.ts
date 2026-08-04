@@ -61,7 +61,7 @@ test(
     const loaded: string[] = [];
     const mentioned = new Set<string>();
     for (const file of files) {
-      if (file.endsWith('.wasm')) continue;
+      if (!/\.(?:css|html|js|json|map|txt)$/i.test(file)) continue;
       const text = readFileSync(file, 'utf8');
       for (const [reference] of text.matchAll(
         /(?:src|href)\s*=\s*["']?(?:https?:)?\/\/[^\s"'>]*|url\(\s*["']?(?:https?:)?\/\/[^\s"')]*|(?:import|fetch)\(\s*["'](?:https?:)?\/\/[^\s"']*/g,

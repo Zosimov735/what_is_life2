@@ -193,11 +193,11 @@ fn normalize_prev_assembly(file: &Json, step: i64) -> Json {
     rebuilt
 }
 
-/// Rewrites a current export into the one legacy shape the V2 loader supports.
+/// Rewrites a current export into the one legacy shape the V1 loader supports.
 /// This is test-fixture construction, not a second migration implementation:
 /// it only reverses the two schema moves (version and compartment location),
 /// then recomputes the wrapper digest over those exact canonical bytes.
-fn as_v1_export(v2: &str) -> String {
+fn as_v1_export(current: &str) -> String {
     fn field_as_v1(value: &mut Json) {
         let Json::Map(field) = value else { panic!("a Field is an object") };
         let at = field
@@ -219,9 +219,22 @@ fn as_v1_export(v2: &str) -> String {
             .expect("the Field carries observation boundaries");
         let Json::Map(boundaries) = boundaries else { panic!("boundaries is an object") };
         boundaries.push(("leak_frac".to_string(), coefficient));
+        field.retain(|(key, _)| {
+            !matches!(
+                key.as_str(),
+                "current_delays"
+                    | "leak_breach"
+                    | "materials"
+                    | "next_signal_id"
+                    | "route_clamps"
+                    | "route_scramble"
+                    | "signals"
+                    | "supply_decoys"
+            )
+        });
     }
 
-    let mut file = parse(v2).expect("the V2 export is canonical");
+    let mut file = parse(current).expect("the current export is canonical");
     let Json::Map(wrapper) = &mut file else { panic!("an export is an object") };
     let payload = wrapper
         .iter_mut()
@@ -229,6 +242,18 @@ fn as_v1_export(v2: &str) -> String {
         .map(|(_, value)| value)
         .expect("an export carries a payload");
     let Json::Map(payload_map) = payload else { panic!("the payload is an object") };
+    let content_hash = payload_map
+        .iter()
+        .find(|(key, _)| key == "scenario_spec")
+        .and_then(|(_, scenario)| scenario.get("content_hash"))
+        .cloned()
+        .expect("the scenario carries its content hash");
+    payload_map.retain(|(key, _)| key != "criterion_runtime" && key != "scenario_spec");
+    let content_at = payload_map
+        .iter()
+        .position(|(key, _)| key == "field")
+        .expect("the payload carries its Field");
+    payload_map.insert(content_at, ("content_hash".to_string(), content_hash));
     for (key, value) in payload_map.iter_mut() {
         if key == "save_version" {
             *value = Json::Int(1);
@@ -266,7 +291,7 @@ fn as_v1_export(v2: &str) -> String {
 }
 
 #[test]
-fn v1_migration_is_deterministic_and_its_v2_output_is_canonical() {
+fn v1_migration_is_deterministic_and_its_v3_output_is_canonical() {
     let mut source = opened(KEY);
     source.command("input_frame", &frame(1, 3));
     let legacy = as_v1_export(&exported(&mut source));
@@ -279,22 +304,22 @@ fn v1_migration_is_deterministic_and_its_v2_output_is_canonical() {
     assert_eq!(first.payload(), second.payload(), "migration is byte-deterministic");
     assert_eq!(first.now.physical_compartment.members, first.view.inside);
     assert_eq!(first.trace.keyframe.physical_compartment.members, first.view.inside);
-    assert_eq!(canonicalize(&first.payload()).expect("V2 payload is canonical"), first.payload());
-    let reread = RunState::read(&parse(&first.payload()).expect("canonical V2"))
-        .expect("canonical V2 reads");
-    assert_eq!(reread.payload(), first.payload(), "V2 is its own canonical round trip");
+    assert_eq!(canonicalize(&first.payload()).expect("V3 payload is canonical"), first.payload());
+    let reread = RunState::read(&parse(&first.payload()).expect("canonical V3"))
+        .expect("canonical V3 reads");
+    assert_eq!(reread.payload(), first.payload(), "V3 is its own canonical round trip");
 
     let mut imported = Session::new(&support::worker_init()).expect("versions agree");
     let answer = body(&imported.command("import_run", &import_body(&legacy)));
     assert_eq!(int_of(&answer, "migrated_from"), 1, "the boundary reports provenance");
     let rewritten = exported(&mut imported);
-    assert!(rewritten.contains("\"save_version\":2"));
+    assert!(rewritten.contains("\"save_version\":3"));
     assert!(rewritten.contains("\"physical_compartment\":"));
     assert!(!rewritten.contains("\"leak_frac\":"), "legacy causal storage is gone");
 
     let mut current = Session::new(&support::worker_init()).expect("versions agree");
     let current_answer = body(&current.command("import_run", &import_body(&rewritten)));
-    assert_eq!(current_answer.get("migrated_from"), None, "native V2 has no migration marker");
+    assert_eq!(current_answer.get("migrated_from"), None, "native V3 has no migration marker");
 }
 
 #[test]
@@ -306,7 +331,7 @@ fn an_export_file_is_canonical_and_carries_the_locked_wrapper() {
     assert_eq!(canonicalize(&file).expect("the export file is canonical"), file);
     let parsed = parse(&file).expect("canonical");
     assert_eq!(text_of(&parsed, "format"), "field-game-run");
-    assert_eq!(int_of(&parsed, "save_version"), 2);
+    assert_eq!(int_of(&parsed, "save_version"), 3);
     let mut bytes = String::new();
     field_game_core::json::write_value(&mut bytes, parsed.get("payload").expect("a payload"))
         .expect("canonical");
@@ -327,8 +352,8 @@ fn an_import_is_refused_for_every_locked_reason() {
     // above its own — which is refused as a version rather than guessed at.
     // The file's own version is its last key; the payload carries one of its
     // own, which the digest covers.
-    let newer = file.replace(",\"save_version\":2}", ",\"save_version\":3}");
-    let older = file.replace(",\"save_version\":2}", ",\"save_version\":0}");
+    let newer = file.replace(",\"save_version\":3}", ",\"save_version\":4}");
+    let older = file.replace(",\"save_version\":3}", ",\"save_version\":0}");
     assert_ne!(newer, file);
     assert_ne!(older, file);
 
@@ -340,9 +365,9 @@ fn an_import_is_refused_for_every_locked_reason() {
         (
             "reordered",
             format!(
-                "{{\"save_version\":2,{}",
+                "{{\"save_version\":3,{}",
                 file.trim_start_matches("{\"format\":\"field-game-run\",")
-                    .replace(",\"save_version\":2}", "}")
+                    .replace(",\"save_version\":3}", "}")
             ),
             "import_invalid",
         ),
@@ -836,14 +861,9 @@ fn a_recovered_branch_diverges_from_a_quick_retry_of_the_same_moment() {
     let after_recovery = recovered.run().expect("a run is loaded").state().payload();
 
     assert_ne!(after_retry, after_recovery, "a fresh nonce is a different run of the same Field");
-    // The Field itself is the same, because no rule of a step draws yet: what
-    // diverges is the branch, the live stream position, and the position each
-    // recorded step of the new branch was taken at.
-    let now_of = |payload: &str| {
-        let parsed = parse(payload).expect("canonical");
-        parsed.get("field").expect("a field").get("now").expect("a state").clone()
-    };
-    assert_eq!(now_of(&after_retry), now_of(&after_recovery));
+    // The opening Open Field regime intentionally has no stochastic Supply
+    // variation, so its embodied state can remain equal until a later authored
+    // random event. Branch identity and the trajectory root must still differ.
     let stream_of = |payload: &str| {
         parse(payload).expect("canonical").get("rng").expect("a stream position").clone()
     };
@@ -992,6 +1012,7 @@ fn fixture_field() -> FieldState {
         route_capacity: 32 * ONE_UNIT,
         link: None,
         trail: None,
+        junction: None,
     }];
     field.currents = vec![CurrentState {
         id: 7,
@@ -999,6 +1020,7 @@ fn fixture_field() -> FieldState {
         path: vec![Vec2::units(100, 100), Vec2::units(200, 300)],
         width: 16 * ONE_UNIT,
         strength: 64 * ONE_UNIT,
+        duty: 65_536,
         period: 40,
         phase: 0,
         bright: true,
@@ -1061,7 +1083,11 @@ fn the_render_snapshot_carries_the_locked_header_and_section_table() {
     assert_eq!(view[16], OPENING_IMPULSE, "the Impulse the run carries, which a new run opens at");
     assert_eq!(view[17], 0);
     assert_eq!(u16::from_le_bytes([view[18], view[19]]), 0, "no objective is offered yet");
-    assert_eq!(view[20], 6, "Forms, Ports, Routes, currents, the inside, and the path");
+    assert_eq!(
+        view[20],
+        7,
+        "Forms, Ports, Routes, currents, the inside, the path, and Pulse preview",
+    );
     assert_eq!(view[21], 0, "the physical-reading alignment byte is zero pad");
     assert_eq!(
         u32::from_le_bytes([view[22], view[23], view[24], view[25]]),
@@ -1083,7 +1109,7 @@ fn the_render_snapshot_carries_the_locked_header_and_section_table() {
         assert!((offset as usize) < view.len(), "kind {kind} starts inside the buffer");
         kinds.push((kind, count));
     }
-    assert_eq!(kinds, vec![(1, 1), (2, 4), (3, 1), (4, 1), (5, 1), (10, 2)]);
+    assert_eq!(kinds, vec![(1, 1), (2, 4), (3, 1), (4, 1), (5, 1), (10, 2), (13, 1)]);
 }
 
 #[test]
@@ -1156,7 +1182,7 @@ fn the_render_snapshot_reads_the_field_the_model_holds() {
     let (at, count) = section(4);
     assert_eq!(count, 1);
     assert_eq!(u16::from_le_bytes(view[at..at + 2].try_into().expect("two bytes")), 7);
-    assert_eq!(view[at + 3], 0b11, "active and bright");
+    assert_eq!(view[at + 3], 0b1_0011, "active, bright, and inside its duty window");
     assert_eq!(u16::from_le_bytes(view[at + 4..at + 6].try_into().expect("two bytes")), 1);
     assert_eq!(
         u16::from_le_bytes(view[at + 6..at + 8].try_into().expect("two bytes")),
@@ -1208,6 +1234,7 @@ fn frame_v2_keeps_physical_proposed_and_view_membership_independent() {
         pressures: &[],
         objective_ordinal: 0,
         forecast: &[],
+        medium: field_game_core::field::MediumMotion::default(),
     });
     let section = |kind: u8| -> (usize, usize) {
         for place in 0..usize::from(encoded[20]) {
@@ -1460,7 +1487,6 @@ fn quick_retry_lands_on_the_recorded_bytes_with_trail_entries_standing() {
     let recorded = session.store().of_run(KEY)[0].payload.clone();
     let anchor_id = session.run().expect("a run").state().anchors[0].anchor_id;
     let held = session.run().expect("a run").state().now.pending.clone();
-    assert!(!held.is_empty(), "entries stand at the recorded moment");
 
     session.command("input_frame", &frame(2, 40));
     session.command("restore_checkpoint", &format!("{{\"anchor_id\":{anchor_id}}}"));

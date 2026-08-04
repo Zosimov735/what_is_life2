@@ -28,6 +28,14 @@ import {
   type FrameEventBody,
   type InputFrame,
   type Payload,
+  type QualificationJob,
+  type QualificationGrades,
+  type QualificationFailureTraceResult,
+  type QualificationResolution,
+  type QualificationProgress,
+  type QualificationResultGroup,
+  type QualificationReceiptResult,
+  type QualificationTrialArtifact,
   type ResponseEnvelope,
 } from './protocol';
 
@@ -56,8 +64,8 @@ const STEPS_PER_SECOND = 30;
  */
 const STEP_UNITS = 1_000_000;
 
-/** At most this many catch-up steps run per rendered frame. */
-const CATCH_UP_LIMIT = 6;
+/** At most this many catch-up steps run per rendered frame at accelerated rates. */
+const CATCH_UP_LIMIT = 32;
 
 /** The widest step count the frame event's `u8` field carries. */
 const MAX_REPORTED_STEPS = 255;
@@ -102,20 +110,30 @@ const SNAPSHOT_COMMANDS: readonly string[] = [
   'queue_plan',
   'undo_plan',
   'commit_plan',
+  'commit_design_patch',
+  'restart_commission',
+  'return_commission',
+  'resume_commission',
   'set_focus',
+  'set_local_policy',
 ];
 
 /**
  * The commands that put a run somewhere other than where the scheduler last
  * left it, so the accumulator and the previous timestamp start over: opening a
- * run, importing one, and the two restores. Each lands in `running` with the
- * accumulator cleared, exactly as the restore contract locks.
+ * run, importing one, reopening an Archive branch, and the two restores. Each
+ * lands in `running` with the accumulator cleared, exactly as the restore
+ * contract locks.
  */
 const RESCHEDULING: readonly string[] = [
   'init_run',
+  'open_contract',
   'import_run',
+  'reopen_archive',
   'restore_checkpoint',
   'recover_branch',
+  'restart_commission',
+  'freeze_qualification_request',
 ];
 
 /** What a core call returns, before the envelope is put around it. */
@@ -143,6 +161,9 @@ let accumulator = 0;
 
 /** The previous frame's timestamp, and none before the first frame. */
 let previousStamp: number | null = null;
+
+let activeQualificationJob: QualificationJob | null = null;
+let qualificationCancellationRequested = false;
 
 /** The step counter and mode the most recent frame event reported. */
 let lastStep = 0;
@@ -199,6 +220,10 @@ async function answer(message: unknown): Promise<void> {
 
   try {
     const core = await opened;
+    if (command.cmd === 'qualification_job') {
+      await answerQualificationJob(core, command);
+      return;
+    }
     const frame = command.cmd === 'input_frame' ? (command.body as InputFrame) : null;
     const held = { accumulator, previousStamp };
     const schedule = frame ? resolve(frame) : null;
@@ -242,16 +267,357 @@ async function answer(message: unknown): Promise<void> {
   }
 }
 
+async function answerQualificationJob(core: Core, command: CommandEnvelope): Promise<void> {
+  const body = command.body as {
+    op?: unknown;
+    request_id?: unknown;
+    job_id?: unknown;
+    completed_trials?: unknown;
+    artifacts?: unknown;
+    function_decision_id?: unknown;
+    grade_ids?: unknown;
+    failure_trace_id?: unknown;
+    result_id?: unknown;
+    marker_id?: unknown;
+  };
+  if (body.op === 'receipt') {
+    if (
+      typeof body.job_id !== 'string'
+      || typeof body.request_id !== 'string'
+      || typeof body.function_decision_id !== 'string'
+      || typeof body.result_id !== 'string'
+      || typeof body.marker_id !== 'string'
+      || !Array.isArray(body.artifacts)
+      || !Array.isArray(body.grade_ids)
+      || !body.grade_ids.every((id) => typeof id === 'string')
+      || !(body.failure_trace_id === null || typeof body.failure_trace_id === 'string')
+    ) {
+      post(errorResponse(command.id, {
+        code: 'validation',
+        message_key: null,
+        detail: { reason: 'qualification_receipt_body' },
+      }));
+      return;
+    }
+    const answered = JSON.parse(core.command('qualification_job', JSON.stringify({
+      artifacts: body.artifacts,
+      failure_trace_id: body.failure_trace_id,
+      function_decision_id: body.function_decision_id,
+      grade_ids: body.grade_ids,
+      job_id: body.job_id,
+      marker_id: body.marker_id,
+      op: 'receipt',
+      request_id: body.request_id,
+      result_id: body.result_id,
+    }))) as CoreAnswer;
+    if (!answered.ok) {
+      post(errorResponse(command.id, answered.error));
+      return;
+    }
+    post({
+      v: PROTOCOL_VERSION,
+      re: command.id,
+      ok: true,
+      body: answered.body as QualificationReceiptResult,
+    });
+    return;
+  }
+  if (body.op === 'result') {
+    if (
+      typeof body.job_id !== 'string'
+      || typeof body.request_id !== 'string'
+      || typeof body.function_decision_id !== 'string'
+      || !Array.isArray(body.artifacts)
+      || !Array.isArray(body.grade_ids)
+      || !body.grade_ids.every((id) => typeof id === 'string')
+      || !(body.failure_trace_id === null || typeof body.failure_trace_id === 'string')
+    ) {
+      post(errorResponse(command.id, {
+        code: 'validation',
+        message_key: null,
+        detail: { reason: 'qualification_result_body' },
+      }));
+      return;
+    }
+    const answered = JSON.parse(core.command('qualification_job', JSON.stringify({
+      artifacts: body.artifacts,
+      failure_trace_id: body.failure_trace_id,
+      function_decision_id: body.function_decision_id,
+      grade_ids: body.grade_ids,
+      job_id: body.job_id,
+      op: 'result',
+      request_id: body.request_id,
+    }))) as CoreAnswer;
+    if (!answered.ok) {
+      post(errorResponse(command.id, answered.error));
+      return;
+    }
+    post({
+      v: PROTOCOL_VERSION,
+      re: command.id,
+      ok: true,
+      body: answered.body as QualificationResultGroup,
+    });
+    return;
+  }
+  if (body.op === 'trace') {
+    if (
+      typeof body.job_id !== 'string'
+      || typeof body.request_id !== 'string'
+      || typeof body.function_decision_id !== 'string'
+      || !Array.isArray(body.artifacts)
+    ) {
+      post(errorResponse(command.id, {
+        code: 'validation',
+        message_key: null,
+        detail: { reason: 'qualification_trace_body' },
+      }));
+      return;
+    }
+    const answered = JSON.parse(core.command('qualification_job', JSON.stringify({
+      artifacts: body.artifacts,
+      function_decision_id: body.function_decision_id,
+      job_id: body.job_id,
+      op: 'trace',
+      request_id: body.request_id,
+    }))) as CoreAnswer;
+    if (!answered.ok) {
+      post(errorResponse(command.id, answered.error));
+      return;
+    }
+    post({
+      v: PROTOCOL_VERSION,
+      re: command.id,
+      ok: true,
+      body: answered.body as QualificationFailureTraceResult,
+    });
+    return;
+  }
+  if (body.op === 'grade') {
+    if (
+      typeof body.job_id !== 'string'
+      || typeof body.request_id !== 'string'
+      || typeof body.function_decision_id !== 'string'
+      || !Array.isArray(body.artifacts)
+    ) {
+      post(errorResponse(command.id, {
+        code: 'validation',
+        message_key: null,
+        detail: { reason: 'qualification_grades_body' },
+      }));
+      return;
+    }
+    const answered = JSON.parse(core.command('qualification_job', JSON.stringify({
+      artifacts: body.artifacts,
+      function_decision_id: body.function_decision_id,
+      job_id: body.job_id,
+      op: 'grade',
+      request_id: body.request_id,
+    }))) as CoreAnswer;
+    if (!answered.ok) {
+      post(errorResponse(command.id, answered.error));
+      return;
+    }
+    post({
+      v: PROTOCOL_VERSION,
+      re: command.id,
+      ok: true,
+      body: answered.body as QualificationGrades,
+    });
+    return;
+  }
+  if (body.op === 'resolve') {
+    if (
+      typeof body.job_id !== 'string'
+      || typeof body.request_id !== 'string'
+      || !Array.isArray(body.artifacts)
+    ) {
+      post(errorResponse(command.id, {
+        code: 'validation',
+        message_key: null,
+        detail: { reason: 'qualification_resolution_body' },
+      }));
+      return;
+    }
+    const answered = JSON.parse(core.command('qualification_job', JSON.stringify({
+      artifacts: body.artifacts,
+      job_id: body.job_id,
+      op: 'resolve',
+      request_id: body.request_id,
+    }))) as CoreAnswer;
+    if (!answered.ok) {
+      if (activeQualificationJob?.job_id === body.job_id) {
+        activeQualificationJob = { ...activeQualificationJob, status: 'invalid_execution' };
+      }
+      post(errorResponse(command.id, answered.error));
+      raiseQualificationProgress(null, null);
+      return;
+    }
+    post({
+      v: PROTOCOL_VERSION,
+      re: command.id,
+      ok: true,
+      body: answered.body as QualificationResolution,
+    });
+    return;
+  }
+  if (body.op === 'cancel') {
+    if (
+      !activeQualificationJob
+      || body.job_id !== activeQualificationJob.job_id
+      || body.request_id !== activeQualificationJob.request_id
+      || !['queued', 'running', 'cancel_requested'].includes(activeQualificationJob.status)
+    ) {
+      post(errorResponse(command.id, {
+        code: 'state',
+        message_key: null,
+        detail: { reason: 'qualification_job_not_cancelable' },
+      }));
+      return;
+    }
+    qualificationCancellationRequested = true;
+    activeQualificationJob = { ...activeQualificationJob, status: 'cancel_requested' };
+    post({ v: PROTOCOL_VERSION, re: command.id, ok: true, body: activeQualificationJob });
+    raiseQualificationProgress(null, null);
+    return;
+  }
+  if (body.op === 'dispatch') {
+    if (
+      !activeQualificationJob
+      || body.job_id !== activeQualificationJob.job_id
+      || body.request_id !== activeQualificationJob.request_id
+      || activeQualificationJob.status !== 'queued'
+    ) {
+      post(errorResponse(command.id, {
+        code: 'state',
+        message_key: null,
+        detail: { reason: 'qualification_job_not_dispatchable' },
+      }));
+      return;
+    }
+    activeQualificationJob = { ...activeQualificationJob, status: 'running' };
+    post({ v: PROTOCOL_VERSION, re: command.id, ok: true, body: activeQualificationJob });
+    raiseQualificationProgress(null, nextQualificationTrial(activeQualificationJob));
+    void runQualificationJob(core, activeQualificationJob.job_id);
+    return;
+  }
+  if (body.op !== 'start' || typeof body.request_id !== 'string') {
+    post(errorResponse(command.id, {
+      code: 'validation',
+      message_key: null,
+      detail: { reason: 'qualification_job_body' },
+    }));
+    return;
+  }
+  if (activeQualificationJob && ['queued', 'running', 'cancel_requested'].includes(activeQualificationJob.status)) {
+    if (activeQualificationJob.request_id !== body.request_id) {
+      post(errorResponse(command.id, {
+        code: 'state',
+        message_key: null,
+        detail: { reason: 'qualification_job_active' },
+      }));
+      return;
+    }
+    post({ v: PROTOCOL_VERSION, re: command.id, ok: true, body: activeQualificationJob });
+    return;
+  }
+
+  const prepared = JSON.parse(core.command('qualification_job', JSON.stringify({
+    op: 'prepare',
+    request_id: body.request_id,
+  }))) as CoreAnswer;
+  if (!prepared.ok) {
+    post(errorResponse(command.id, prepared.error));
+    return;
+  }
+  const base = prepared.body as Omit<QualificationJob, 'completed_trials'>;
+  const supplied = Array.isArray(body.completed_trials)
+    ? body.completed_trials.filter((trial): trial is number => (
+        Number.isInteger(trial) && trial >= 0 && trial < base.trial_count
+      ))
+    : [];
+  const completedTrials = [...new Set(supplied)].sort((left, right) => left - right);
+  activeQualificationJob = {
+    ...base,
+    completed_trials: completedTrials,
+    status: 'queued',
+  };
+  qualificationCancellationRequested = false;
+  post({ v: PROTOCOL_VERSION, re: command.id, ok: true, body: activeQualificationJob });
+}
+
+function nextQualificationTrial(job: QualificationJob): number | null {
+  for (let trial = 0; trial < job.trial_count; trial += 1) {
+    if (!job.completed_trials.includes(trial)) return trial;
+  }
+  return null;
+}
+
+function raiseQualificationProgress(
+  artifact: QualificationTrialArtifact | null,
+  currentTrial: number | null,
+): void {
+  if (!activeQualificationJob) return;
+  const progress: QualificationProgress = {
+    artifact,
+    completed_trials: [...activeQualificationJob.completed_trials],
+    current_trial: currentTrial,
+    job_id: activeQualificationJob.job_id,
+    request_id: activeQualificationJob.request_id,
+    status: activeQualificationJob.status,
+    trial_count: activeQualificationJob.trial_count,
+  };
+  raise('qualification_progress', lastStep, progress, []);
+}
+
+async function runQualificationJob(core: Core, jobId: string): Promise<void> {
+  while (activeQualificationJob?.job_id === jobId) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    if (!activeQualificationJob || activeQualificationJob.job_id !== jobId) return;
+    if (qualificationCancellationRequested) {
+      activeQualificationJob = { ...activeQualificationJob, status: 'canceled' };
+      raiseQualificationProgress(null, null);
+      return;
+    }
+    const trial = nextQualificationTrial(activeQualificationJob);
+    if (trial === null) {
+      activeQualificationJob = { ...activeQualificationJob, status: 'completed' };
+      raiseQualificationProgress(null, null);
+      return;
+    }
+    const answer = JSON.parse(core.command('qualification_job', JSON.stringify({
+      job_id: activeQualificationJob.job_id,
+      op: 'trial',
+      request_id: activeQualificationJob.request_id,
+      trial,
+    }))) as CoreAnswer;
+    if (!answer.ok) {
+      activeQualificationJob = { ...activeQualificationJob, status: 'invalid_execution' };
+      raiseQualificationProgress(null, trial);
+      return;
+    }
+    const artifact = answer.body as QualificationTrialArtifact;
+    activeQualificationJob = {
+      ...activeQualificationJob,
+      completed_trials: [...activeQualificationJob.completed_trials, trial]
+        .sort((left, right) => left - right),
+    };
+    raiseQualificationProgress(artifact, nextQualificationTrial(activeQualificationJob));
+  }
+}
+
 /**
  * Resolves one frame into the step count the core runs, by the locked
  * accumulator. Owed time past the catch-up limit is discarded and flagged,
  * never burst.
  */
 function resolve(frame: InputFrame): Schedule {
+  const { runtime_rate: requestedRate, ...causalFrame } = frame;
+  const runtimeRate = requestedRate === 4 || requestedRate === 16 ? requestedRate : 1;
   // The step count the shell supplied replaces the whole block: the timestamp
   // is ignored and exactly that many steps run.
   if (typeof frame.advance_steps === 'number') {
-    return { body: frame, dropped: false, remainderUs: Math.floor(accumulator / STEPS_PER_SECOND) };
+    return { body: causalFrame, dropped: false, remainderUs: Math.floor(accumulator / STEPS_PER_SECOND) };
   }
 
   const stamp = typeof frame.t_us === 'number' ? frame.t_us : 0;
@@ -268,10 +634,12 @@ function resolve(frame: InputFrame): Schedule {
     // time a suspended run never owed.
     accumulator = 0;
     previousStamp = null;
-    return { body: { ...frame, advance_steps: 0 }, dropped: false, remainderUs: 0 };
+    return { body: { ...causalFrame, advance_steps: 0 }, dropped: false, remainderUs: 0 };
   }
 
-  accumulator += Math.floor((gap * STEPS_PER_SECOND * scaleOver(gap)) / FULL_SCALE);
+  accumulator += Math.floor(
+    (gap * STEPS_PER_SECOND * scaleOver(gap) * runtimeRate) / FULL_SCALE,
+  );
 
   let ran = 0;
   while (accumulator >= STEP_UNITS && ran < CATCH_UP_LIMIT) {
@@ -285,7 +653,7 @@ function resolve(frame: InputFrame): Schedule {
   }
 
   return {
-    body: { ...frame, advance_steps: ran },
+    body: { ...causalFrame, advance_steps: ran },
     dropped,
     remainderUs: Math.floor(accumulator / STEPS_PER_SECOND),
   };
@@ -343,7 +711,7 @@ function raiseFrame(core: Core, frame: InputFrame, schedule: Schedule, ran: numb
 
   const body: FrameEventBody = {
     seq: frame.seq,
-    // The event's field is a `u8`. The catch-up cap of 6 keeps a timed frame
+    // The event's field is a `u8`. The catch-up cap keeps a timed frame
     // far below it; a larger `advance_steps` batch saturates here, and the
     // core's own answer to the command carries the exact count.
     steps_run: Math.min(ran, MAX_REPORTED_STEPS),
@@ -388,9 +756,9 @@ function raiseCoreEvents(core: Core): void {
 function restart(core: Core): void {
   accumulator = 0;
   previousStamp = null;
-  // A restore lands with the plan queue cleared, so a mark left by the run that
-  // was open would put a buffer on a frame for a queue that no longer stands.
-  snapshotMoved = false;
+  // The first frame must carry the newly opened state even when Design
+  // authority runs zero steps indefinitely.
+  snapshotMoved = true;
   const view = core.frame_view();
   lastStep = readStep(view);
   lastMode = view.length > MODE_OFFSET ? view[MODE_OFFSET] : -1;

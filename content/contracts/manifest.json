@@ -1,0 +1,4 @@
+{
+  "contract_version": 2,
+  "contracts": ["intake", "transfer", "buffer"]
+}

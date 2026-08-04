@@ -10,15 +10,10 @@
  * Two derivations are worth stating, because neither is written in the
  * snapshot and both are read straight out of it:
  *
- * - **Delivered Charge.** A Port whose stored Charge rose between two
- *   snapshots, with no Route carrying flow into it, took that Charge from a
- *   current. `docs/field-framework/ARCHITECTURE.md` locks the two sources — the
- *   Route phase and the current phase — so the absence of the first names the
- *   second.
- *   Where a current runs is the current's own business — its record carries its
- *   path — so this reading is not about placing it. It is about which Nodes are
- *   taking Charge right now, which is a different thing and worth its own mark:
- *   a Port standing in a current lights as it gains.
+ * - **Accepted Supply.** Cue 13 is raised by the authoritative Current phase
+ *   only after one addressed Node accepts Charge. The renderer retains only
+ *   its short visual decay; Coupling, Route inflow, and other Charge increases
+ *   cannot be mistaken for accepted environmental Supply.
  */
 
 import type { FramePort, FrameState } from '../../../worker/src/frame-state';
@@ -37,6 +32,7 @@ const DELIVERY_DECAY_STEPS = 30;
 
 /** How long a cue stands, in steps. */
 const CUE_STEPS = 18;
+const CUE_SUPPLY_ACCEPTED = 13;
 
 /** How much of the way the camera closes on its target each step. */
 const CAMERA_EASE = 0.22;
@@ -151,7 +147,7 @@ export class Ephemera {
    * computed once per step rather than once per rendered frame, so a display
    * running at twice the step rate does the work once.
    */
-  observe(previous: FrameState, next: FrameState): void {
+  observe(_previous: FrameState, next: FrameState): void {
     const step = next.header.step;
     if (step === this.seen) return;
     // A restart, a restore, or a branch can move the step backwards. What was
@@ -167,12 +163,14 @@ export class Ephemera {
       if (!next.forms.some((form) => form.id === id)) this.trails.delete(id);
     }
 
-    this.readDeliveries(previous, next, step);
-
     // The Form record carries its radius as Q8.8 units.
     const reach = (next.forms.find((form) => form.controlled)?.radius ?? 0) / 256;
     for (const cue of next.cues) {
+      if (cue.kind === CUE_SUPPLY_ACCEPTED) this.delivered.set(cue.b, step);
       this.cues.push({ kind: cue.kind, a: cue.a, b: cue.b, step, reach });
+    }
+    for (const [node, at] of this.delivered) {
+      if (step - at > DELIVERY_DECAY_STEPS) this.delivered.delete(node);
     }
     while (this.cues.length > 0 && step - this.cues[0].step > CUE_STEPS) this.cues.shift();
   }
@@ -279,26 +277,4 @@ export class Ephemera {
     trail.step = step;
   }
 
-  /**
-   * Which Nodes took Charge from a current this step: those whose stored
-   * Charge rose with no Route carrying flow into them.
-   */
-  private readDeliveries(previous: FrameState, next: FrameState, step: number): void {
-    const before = new Map<number, number>();
-    for (const port of previous.ports) before.set(port.node, port.charge);
-    const fedByRoute = new Set<number>();
-    for (const route of next.routes) {
-      if (route.flow > 0) fedByRoute.add(route.head);
-    }
-    for (const port of next.ports) {
-      const was = before.get(port.node);
-      if (was === undefined || port.charge <= was) continue;
-      if (fedByRoute.has(port.node)) continue;
-      this.delivered.set(port.node, step);
-    }
-    for (const [node, at] of this.delivered) {
-      if (step - at > DELIVERY_DECAY_STEPS) this.delivered.delete(node);
-    }
-  }
 }
-

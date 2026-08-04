@@ -14,7 +14,7 @@ const KEY: &str = "00112233445566aa";
 #[test]
 fn versions_are_the_locked_ones() {
     assert_eq!(PROTOCOL_VERSION, 2);
-    assert_eq!(SAVE_VERSION, 2);
+    assert_eq!(SAVE_VERSION, 3);
 }
 
 #[test]
@@ -26,18 +26,18 @@ fn agreement_opens_a_session_in_idle() {
 
 #[test]
 fn disagreement_yields_the_protocol_envelope() {
-    let refused = Session::new("{\"protocol\":3,\"save_version\":2}")
+    let refused = Session::new("{\"protocol\":3,\"save_version\":3}")
         .err()
         .expect("a version the core does not speak is refused");
     assert_eq!(
         refused,
-        "{\"code\":\"protocol\",\"detail\":{\"protocol\":2,\"save_version\":2},\
+        "{\"code\":\"protocol\",\"detail\":{\"protocol\":2,\"save_version\":3},\
          \"message_key\":null}"
     );
 
     assert!(Session::new("{}").is_err(), "a missing version is refused");
     assert!(
-        Session::new("{\"protocol\":2,\"save_version\":3}").is_err(),
+        Session::new("{\"protocol\":2,\"save_version\":2}").is_err(),
         "a save version the core does not read is refused"
     );
 }
@@ -57,7 +57,7 @@ fn a_new_run_opens_on_the_run_key_the_shell_supplies() {
         format!(
             "{{\"body\":{{\"branch_nonce\":0,\"chapter_index\":0,\"content_changed\":false,\
              \"content_hash\":\"{}\",\
-             \"protocol\":2,\"run_id\":\"{KEY}\",\"save_version\":2,\"step\":0,\
+             \"protocol\":2,\"run_id\":\"{KEY}\",\"save_version\":3,\"step\":0,\
              \"view\":{{\"inside\":[2,3,4],\"resolution\":1,\"surround\":\"adjacent\",\"window\":45}}}},\
              \"ok\":true}}",
             support::content_hash(),

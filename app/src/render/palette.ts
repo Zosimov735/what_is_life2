@@ -36,6 +36,9 @@ export const BACKDROP_EDGE: Tone = 0x06070a;
 /** The haze a layer behind the camera's own is read through. */
 export const HAZE: Tone = 0x11151b;
 
+/** A low mineral glint used for etched field structure and dormant paths. */
+export const GRAPHITE_GLOW: Tone = 0x28323a;
+
 /**
  * What a mark on another plane is mixed toward. A plane further off loses
  * contrast rather than light: mixing toward the backdrop would take it away
@@ -48,6 +51,7 @@ export const HAZE_TINT: Tone = 0x3c4552;
 export const CHARGE_LOW: Tone = 0x6b4f2a;
 export const CHARGE_HIGH: Tone = 0xffd39a;
 export const CHARGE_CORE: Tone = 0xffa93a;
+export const CHARGE_SPARK: Tone = 0xffe6b8;
 
 /** A Node that holds more than its own threshold. */
 export const OVERLOAD: Tone = 0xe0684f;
@@ -58,6 +62,8 @@ export const PORT_BASE: Tone = 0x4e5865;
 /** A Route, and the states its record can report. */
 export const ROUTE_BASE: Tone = 0x39424e;
 export const ROUTE_FLOW: Tone = 0xa9c2d6;
+/** A dark keyline that keeps a Route legible where it crosses a Current. */
+export const ROUTE_SEPARATION: Tone = 0x080b0e;
 export const ROUTE_CUT_QUEUED: Tone = 0x6b5f4a;
 
 /**
@@ -71,14 +77,46 @@ export const ROUTE_CUT_QUEUED: Tone = 0x6b5f4a;
  */
 export const ROUTE_PROPOSED: Tone = 0x67d6b0;
 export const ROUTE_MOVE_QUEUED: Tone = 0x4f9c85;
+/** Local automation register: active throttle and a positively disabled gate. */
+export const ROUTE_AUTOMATION: Tone = 0x52b7ad;
+export const ROUTE_AUTOMATION_DISABLED: Tone = 0x6f7782;
+
+/** Frozen local-policy execution: quiet, applied, waiting, and refused. */
+export const POLICY_IDLE: Tone = 0x7d8995;
+export const POLICY_ACTIVE: Tone = 0x62d8bd;
+export const POLICY_WAIT: Tone = 0xd7ad63;
+export const POLICY_BLOCKED: Tone = 0xe77a62;
+export const POLICY_TARGET: Tone = 0xa8eee0;
+export const POLICY_PREVIEW: Tone = 0xf2c86e;
+
+/**
+ * Design-authority assembly preview. Gold is the accepted candidate, while
+ * the graphite origin remains visibly prior/noncausal. Material and Current
+ * retain their physical families inside the shared bracket grammar.
+ */
+export const ASSEMBLY_DRAFT: Tone = 0xf0cf78;
+export const ASSEMBLY_DRAFT_ORIGIN: Tone = 0x75808b;
+export const ASSEMBLY_DRAFT_MATERIAL: Tone = 0x9edfc8;
+export const ASSEMBLY_DRAFT_CURRENT: Tone = 0xaddcf0;
+
+/** Paid intervention register: one causal operation, one stable local hue. */
+export const INTERVENTION_CLAMP: Tone = 0x72b7d6;
+export const INTERVENTION_SCRAMBLE: Tone = 0xd987b3;
+export const INTERVENTION_DECOY: Tone = 0x5ed6b3;
+export const INTERVENTION_DELAY: Tone = 0xe6b35c;
+export const INTERVENTION_BREACH: Tone = 0xf07b62;
 
 /** The two currents: the one the opening objective names, and every other. */
 export const CURRENT_BRIGHT: Tone = 0xcdf0ff;
 export const CURRENT_PLAIN: Tone = 0x4a7f9c;
+export const CURRENT_GLASS: Tone = 0x7ed8f2;
 
 /** The controlled Form: the brightest mark the surface carries. */
 export const FORM_CONTROLLED: Tone = 0xf4f8ff;
 export const FORM_CONTROLLED_RING: Tone = 0x9fd2ff;
+export const FORM_FACET: Tone = 0xffffff;
+export const FORM_FACET_SHADOW: Tone = 0x202936;
+export const FORM_KEYLINE: Tone = 0x05070a;
 
 /** Every Form the player does not steer. */
 export const FORM_PLAIN: Tone = 0x76828f;
@@ -92,6 +130,11 @@ export const PHYSICAL_COMPARTMENT_PROPOSED: Tone = 0x67d6b0;
 
 /** The passive aperture that determines what the instruments measure. */
 export const OBSERVATION_VIEW: Tone = 0xc3a4ff;
+
+/** Embodied Renewal stock, distinguished by the work each material can perform. */
+export const MATERIAL_JUNCTION: Tone = 0x72d6aa;
+export const MATERIAL_BOUNDARY: Tone = 0xd7cbb8;
+export const MATERIAL_CONDUCTOR: Tone = 0x79c9d5;
 
 /** Compatibility names for consumers that have not adopted the split yet. */
 export const BOUNDARY: Tone = OBSERVATION_VIEW;

@@ -116,32 +116,30 @@ struct AnalysisWorkspace {
 }
 ```
 
-### Target protocol additions
+### Protocol additions
 
-The current protocol is deliberately closed at version 1. These additions
-therefore require an explicit version 2 rather than ad-hoc optional fields.
+The protocol remains a closed set at version 2. The implemented additions are
+top-level commands rather than ad-hoc optional fields.
 
 ```ts
 type CommandNameV2 =
   | ExistingV1Commands
-  | 'open_regime'
-  | 'inspect_view'
-  | 'preview_intervention'
-  | 'apply_intervention'
-  | 'run_divergence'
-  | 'start_analysis_job'
-  | 'cancel_analysis_job'
-  | 'save_archive_metadata'
-
-type EventNameV2 =
-  | ExistingV1Events
-  | 'analysis_progress'
-  | 'analysis_complete'
-  | 'analysis_failed'
+  | 'reopen_archive'
+  | 'run_analysis'
+  | 'sample_instrument'
+  | 'inspect_field'
+  | 'compile_scenario'
+  | 'run_scenario'
+  | 'sample_lens'
+  | 'renewal_trial'
+  | 'renewal_inventory'
 ```
 
-`inspect_view` receives the complete View with the request. It does not mutate
-the causal world, spend Intervention Budget, or end a causal trace window.
+`sample_instrument` reads the standing complete View and does not mutate the
+causal world, spend Intervention Budget, or end a causal trace window.
+`inspect_field` resolves a rendered local target into exact authoritative state
+on demand. The dedicated analysis worker reports progress outside the core
+event set while each job arm enters Rust through `run_analysis`.
 
 ### Render layers
 
@@ -382,18 +380,34 @@ Form. The screen may not imply advection until `MediumVelocityField` exists.
 
 ### Controls
 
-- Pointer offset or WASD: steering vector.
-- Hold primary pointer or Shift: increase coupling radius.
-- Release: apply the coupling Pulse.
+- WASD or Arrow keys: steering vector. Pointer motion never steers.
+- Hold E: increase coupling radius.
+- Release E: apply the coupling Pulse.
 - Wheel or brackets: change layer.
 - Space: enter Still Mode.
 - Ability key: execute the selected Form's implemented ability.
+
+Pointer input remains inspection-only during active play. While E is held, the
+true radius is drawn in world space; affected objects receive target locks and
+effect-direction animation before release. The compact shell instrument lists
+only nonzero predicted outcomes. Port locks consume exact Node ids from the
+core's cloned release projection; screen-space proximity is not an admissible
+substitute. A dormant Route is visibly broken at every closed endpoint and an
+operational Route carries a persistent tail-to-head notch even when its current
+flow is zero.
+
+The upper edge carries a compact campaign-position rail whenever authored
+chapter content is active. `chapter_changed` supplies chapter and objective
+counts and the frame supplies current objective ordinal and the continuous
+campaign step. The rail shows chapter title, `Chapter N / total`, `Objective N
+/ total`, elapsed campaign time, chapter progress, and overall progress. It is
+not shown on the Atlas or Form selection surfaces.
 
 ### Implementation pseudocode
 
 ```ts
 function useFieldControls(surface) {
-  steering = resolvePointerOrKeyboardVector(surface)
+  steering = resolveKeyboardVector()
   pulse = resolveHeldAndReleaseEdges()
   depth = resolveWheelOrBracketStep()
   ability = resolveAbilityEdge()
@@ -519,8 +533,9 @@ function InterventionBench() {
   disclosed.
 - Delayed replay: existing replay.
 - Full replacement: external substitution, not renewal.
-- Capacity limit, misrouting, supply diversion as an experimental tool, and
-  true transplant require new core models.
+- Capacity limit and raised boundary leakage now have paid, duration-bounded
+  live core models. Misrouting, supply diversion as an experimental tool, and
+  true transplant still require new core models.
 
 Unsupported tools do not appear as interactive cards.
 
@@ -548,7 +563,10 @@ type InstrumentKind =
   | 'initial_stock_estimate'
 ```
 
-`response_lag` remains unavailable unless a named periodic causal input exists.
+`response_lag` resolves only when a named periodic causal input exists and the
+retained window carries enough samples. The implemented passive reading uses
+the addressed Current's exact duty-cycle ceiling and selected stored-Charge
+trace; absence of either returns an explicit unavailable provenance.
 `initial_stock_estimate` is labelled as an estimate until tagged provenance is
 implemented.
 
@@ -945,7 +963,8 @@ state supplied for exact replay is side information.
 
 The player freezes a generator and preregisters a vector of pass criteria.
 Editing and rescue lock before the hidden condition schedule is revealed. Each
-result entry can be opened as a replay.
+result entry can be selected to inspect its recorded causal trace without
+revealing the sealed schedule.
 
 ### Job matrix
 
@@ -1001,6 +1020,16 @@ marked contaminated and cannot support a fresh Holdout claim. Human/adaptive
 external control is not represented by an action hash; admitting it would
 require accounting for its sensing, memory, communication, and actuation
 channel.
+
+The local implementation seals a randomized suite identity, candidate hash,
+and suite-version hash before passing the suite seed into the authoritative Rust
+trial family. IndexedDB preserves contamination and retirement state; this is
+local preregistration, not independent server custody. The Holdout table opens
+each selected condition as a recorded throughput preview with outcome and
+failure evidence; it does not synthesize or expose the hidden condition inputs.
+Once sealed, the laboratory fades ordinary header and navigation chrome,
+surfaces the frozen suite-version seal, and leaves no rescue control inside the
+Holdout workspace.
 
 ---
 
@@ -1125,6 +1154,11 @@ Mutation, recombination, transposition, and end maintenance remain unavailable
 until a concrete heritable representation, operator semantics, and causal
 copying mechanism exist. Linked Chorus Forms are not descendants and cannot
 substitute for this assay.
+
+The implemented assay copies the immutable specification hash, partitions
+embodied Component/material/Route state externally, runs both children through
+ordinary hands-off Rust transitions, and returns exact inherited Component and
+Route identity sets with recovery evidence.
 
 ---
 
@@ -1266,6 +1300,14 @@ The first implementation should emit the existing discrete content model. It
 must not offer unsupported conversion, reaction, or arbitrary `6.2 Hz`
 oscillators.
 
+The implemented compiler offers all four versioned discrete-transport lawsets,
+explicit Component position, kind, Charge, capacity, upkeep, and open state,
+Directed Routes with capacity scaling, physical membership, placed typed
+material, Supply position and width, a power-of-two observation protocol, a
+hands-off trial family, and one constrained `Blade`, `Clamp`, or `Breach` plan.
+Rust validates, canonicalizes, hashes, instantiates, and executes that draft;
+the React editor does not maintain a second trial model.
+
 ---
 
 ## 20. Open Field, equation-heavy study
@@ -1285,9 +1327,10 @@ reuse layout groups
   -> hide unavailable categories
 ```
 
-At `30 steps/s`, a periodic input must use an integer step period or a declared
-discrete approximation. The UI may not print a frequency that the scheduler
-cannot represent as authored.
+At `30 steps/s`, periodic Supply uses an integer step period and an integer
+on-window `ceil(period × duty)`. The Atlas states both the duty and compensated
+on-window delivery rather than printing a frequency the scheduler cannot
+represent.
 
 ---
 
@@ -1365,9 +1408,11 @@ function ArchiveScreen() {
 }
 ```
 
-Existing export/import, anchors, branch nonce, and exact payloads are useful
-primitives. Current record storage is memory-only; IndexedDB durability is the
-first required Archive implementation.
+Existing export/import, anchors, branch nonce, and exact payloads remain the
+core primitives. The rapid implementation pass now stores canonical exports
+and evidence in IndexedDB, projects selectable run lineages, and reopens a
+selected durable record through a loaded-state branch command that preserves
+the archived source.
 
 ---
 
@@ -1397,6 +1442,12 @@ type ShellRoute =
 | Fixed-step schedule, analysis-job coordination, transferables | Worker |
 | Passive instrument calculations and counterfactual replays | Rust analysis path, invoked on demand |
 | Durable records and metadata | Shell IndexedDB |
+
+The implemented cold path transfers a canonical export to a dedicated module
+worker, imports it into Rust/WASM, restores one cloned `RunState` per addressed
+trial, and advances the ordinary transition. The Observe path is a separate
+non-mutating Rust command over the loaded Field and selected View; the React
+shell only renders returned readings.
 
 ## Implementation sequence implied by the mock-ups
 

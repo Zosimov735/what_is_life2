@@ -482,6 +482,11 @@ test('the surface hands the sound the same snapshots it draws', async () => {
     ports: [],
     routes: [],
     currents: [],
+    materials: [],
+    localSignals: [],
+    pulsePreview: null,
+    wakeCaches: [],
+    mediumMotion: null,
     inside: [],
     pressures: [],
     cues: [],
@@ -894,8 +899,11 @@ function renderedClasses(): Set<string> {
   return found;
 }
 
-test('every class the shell renders carries a rule in the one stylesheet', () => {
-  const stylesheet = readFileSync(path.join(SHELL, 'shell.css'), 'utf8');
+test('every class the shell renders carries a rule in the shell stylesheets', () => {
+  const stylesheet = readdirSync(SHELL)
+    .filter((entry) => entry.endsWith('.css'))
+    .map((entry) => readFileSync(path.join(SHELL, entry), 'utf8'))
+    .join('\n');
   const rendered = [...renderedClasses()].sort();
   expect(rendered.length).toBeGreaterThan(30);
 

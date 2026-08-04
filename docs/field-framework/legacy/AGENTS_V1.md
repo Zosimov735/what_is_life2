@@ -536,7 +536,7 @@ locked byte layout, read back through the shared decoder, so the renderer sees
 exactly what the worker would send it. Nothing behind it reaches the core, so
 nothing behind it can be steered.
 
-`?field_run` opens `app/src/shell/dev-run.ts` instead: an export file carrying a
+`?field_stand_in` opens `app/src/shell/dev-run.ts` instead: an export file carrying a
 small Field with one controlled Form, which the session opens with `import_run`
 rather than `init_run`. It carries the content hash of a build with no content
 at all, so a session opened on it reports `content_changed` and runs no authored

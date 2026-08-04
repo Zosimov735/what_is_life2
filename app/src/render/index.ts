@@ -21,10 +21,13 @@
 import { startCanvas2dEngine } from './canvas2d';
 import { Ephemera } from './history';
 import {
+  captureEngineeringTransitionOrigin,
   createScene,
   projectScene,
   FULL_MOTION,
   type CandidateOutline,
+  type EngineeringTransitionCompanion,
+  type EngineeringTransitionOrigin,
   type MotionProfile,
   type PlaybackReading,
   type Scene,
@@ -33,9 +36,12 @@ import {
 } from './scene';
 import type { Engine, RendererKind } from './engine';
 import type { FrameState } from '../../../worker/src/frame-state';
+import type { EngineeringAssemblyPreview, PolicyPreview } from '../../../worker/src/protocol';
+import { boundedDensity } from './quality';
 
 export type {
   CandidateOutline,
+  EngineeringTransitionCompanion,
   HandleMark,
   MotionProfile,
   PlaybackReading,
@@ -79,6 +85,12 @@ export interface Renderer {
    * step.
    */
   set_playback(reading: PlaybackReading | null): void;
+  /** Takes one pure Rust draft projection, or null to remove it. */
+  set_policy_preview(preview: PolicyPreview | null): void;
+  /** Takes one Rust-accepted Design assembly candidate, or null to remove it. */
+  set_assembly_preview(preview: EngineeringAssemblyPreview | null): void;
+  /** Takes one guarded reconstruction preview/receipt, or null to remove it. */
+  set_engineering_transition(companion: EngineeringTransitionCompanion | null): void;
   /** Releases the surface and everything drawn on it. */
   dispose(): void;
   /** Which engine is drawing, and none before one has started. */
@@ -144,6 +156,12 @@ export function create_renderer(
   let candidates: readonly CandidateOutline[] = [];
   /** The playback reading the shell last handed over, and none between. */
   let playback: PlaybackReading | null = null;
+  let policyPreview: PolicyPreview | null = null;
+  let assemblyPreview: EngineeringAssemblyPreview | null = null;
+  let engineeringTransition: EngineeringTransitionCompanion | null = null;
+  let engineeringTransitionOrigin: EngineeringTransitionOrigin | null = null;
+  let engineeringTransitionClock = 0;
+  let engineeringTransitionAt: number | null = null;
   /**
    * The playback position, in window steps, and the last instant it advanced.
    *
@@ -163,10 +181,12 @@ export function create_renderer(
   let heldNext: FrameState | null = null;
   let heldAlpha = 0;
 
-  const density = (): number =>
-    typeof globalThis.devicePixelRatio === 'number' && globalThis.devicePixelRatio > 0
+  const density = (width: number, height: number): number => {
+    const device = typeof globalThis.devicePixelRatio === 'number' && globalThis.devicePixelRatio > 0
       ? globalThis.devicePixelRatio
       : 1;
+    return boundedDensity(width, height, device);
+  };
 
   function adopt(started: Engine): RendererKind {
     if (disposed) {
@@ -212,6 +232,21 @@ export function create_renderer(
     } else {
       playbackAt = null;
     }
+    if (engineeringTransition && !engineeringTransitionOrigin) {
+      engineeringTransitionOrigin = captureEngineeringTransitionOrigin(next);
+    }
+    if (engineeringTransition?.status === 'committed') {
+      const now = typeof performance !== 'undefined' ? performance.now() : 0;
+      if (engineeringTransitionAt !== null) {
+        engineeringTransitionClock = Math.min(
+          1,
+          engineeringTransitionClock + Math.max(0, now - engineeringTransitionAt) / 3200,
+        );
+      }
+      engineeringTransitionAt = now;
+    } else {
+      engineeringTransitionAt = null;
+    }
     projectScene(
       scene,
       previous,
@@ -224,6 +259,11 @@ export function create_renderer(
       playback,
       playbackClock,
       stillTool,
+      policyPreview,
+      assemblyPreview,
+      engineeringTransition,
+      engineeringTransitionOrigin,
+      engineeringTransitionClock,
     );
     engine.draw(scene);
   }
@@ -236,7 +276,7 @@ export function create_renderer(
 
   return {
     resize(width, height) {
-      const dpr = density();
+      const dpr = density(width, height);
       viewport = {
         width: Math.max(1, Math.round(width * dpr)),
         height: Math.max(1, Math.round(height * dpr)),
@@ -271,6 +311,36 @@ export function create_renderer(
       // takes its clock with it.
       playbackClock = 0;
       playbackAt = null;
+      redraw();
+    },
+    set_policy_preview(next) {
+      policyPreview = next;
+      redraw();
+    },
+    set_assembly_preview(next) {
+      assemblyPreview = next;
+      redraw();
+    },
+    set_engineering_transition(next) {
+      const changedPreview = next?.preview.preview_id !== engineeringTransition?.preview.preview_id;
+      const changedStatus = next?.status !== engineeringTransition?.status;
+      if (!next) {
+        engineeringTransition = null;
+        engineeringTransitionOrigin = null;
+        engineeringTransitionClock = 0;
+        engineeringTransitionAt = null;
+      } else {
+        if (changedPreview || !engineeringTransitionOrigin) {
+          engineeringTransitionOrigin = captureEngineeringTransitionOrigin(heldNext);
+        }
+        if (changedPreview || changedStatus) {
+          engineeringTransitionClock = 0;
+          engineeringTransitionAt = next.status === 'committed'
+            ? (typeof performance !== 'undefined' ? performance.now() : 0)
+            : null;
+        }
+        engineeringTransition = next;
+      }
       redraw();
     },
     dispose() {

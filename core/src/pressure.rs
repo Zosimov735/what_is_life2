@@ -51,7 +51,7 @@
 //! it.
 
 use crate::fault::{Code, Fault};
-use crate::json::{Json, Obj};
+use crate::json::{Arr, Json, Obj};
 use crate::read;
 use crate::rng::RngState;
 use crate::state::{Frac, Step, FRAC_ONE};
@@ -551,6 +551,32 @@ impl PressureContent {
         }
         Ok(PressureContent { pressure, target, stages })
     }
+
+    fn write(&self, out: &mut String) {
+        let mut object = Obj::new(out);
+        object.text("id", self.pressure.name());
+        {
+            let mut stages = object.list("stages");
+            for row in &self.stages {
+                let mut written = String::new();
+                let mut stage = Obj::new(&mut written);
+                stage.int("level", row.level);
+                stage.text("stage", row.stage.name());
+                stage.int("steps", row.steps);
+                stage.end();
+                stages.raw(&written);
+            }
+            stages.end();
+        }
+        object.text("target", self.target.name());
+        object.end();
+    }
+
+    fn written(&self) -> String {
+        let mut out = String::new();
+        self.write(&mut out);
+        out
+    }
 }
 
 /// One entry of a chapter's authored `pressure_schedule`.
@@ -590,14 +616,14 @@ impl ScheduleEntry {
 /// under a different one carries on with `content_changed` set — so this is a
 /// step input of the same class as `input_config.pointer_speed`: immutable
 /// while the run plays, and so outside what a window has to carry.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Schedule {
     tables: Vec<PressureContent>,
 }
 
 impl Schedule {
     /// The tables the manifest listed, held to one entry per pressure.
-    pub fn of(tables: Vec<PressureContent>) -> Result<Self, Fault> {
+    pub fn of(mut tables: Vec<PressureContent>) -> Result<Self, Fault> {
         let ordinals: Vec<u8> = tables.iter().map(|table| table.pressure.ordinal()).collect();
         let mut sorted = ordinals.clone();
         sorted.sort_unstable();
@@ -605,7 +631,28 @@ impl Schedule {
         if sorted.len() != ordinals.len() {
             return Err(Fault::because(Code::ContentInvalid, "pressures"));
         }
+        tables.sort_by_key(|table| table.pressure.ordinal());
         Ok(Schedule { tables })
+    }
+
+    /// Reads the frozen pressure tables carried by a generator specification.
+    pub fn read(value: &Json, key: &str) -> Result<Self, Fault> {
+        let mut tables = Vec::new();
+        for entry in read::list(value, key, PRESSURES.len())? {
+            tables.push(PressureContent::read(entry)?);
+        }
+        Schedule::of(tables).map_err(|fault| read::recode(fault, Code::Validation))
+    }
+
+    /// Writes the frozen tables in pressure ordinal order.
+    pub fn written(&self) -> String {
+        let mut out = String::new();
+        let mut tables = Arr::new(&mut out);
+        for table in &self.tables {
+            tables.raw(&table.written());
+        }
+        tables.end();
+        out
     }
 
     /// The authored table for one pressure, and none when the manifest listed
@@ -860,17 +907,16 @@ pub fn opened_level(pressure: &PressureState, schedule: &Schedule, step: Step) -
     }
 }
 
-/// The per-layer flow scales the Noise rule draws, one entry per layer index
-/// — the one drawing rule of version 1, at its locked drawing point: the
-/// start of the Route phase, layers ascending, one draw per layer whose
-/// effective noise is above zero, from the step's supplied stream.
+/// The per-layer flow scales the Noise rule draws, one entry per layer index,
+/// at the start of the Route phase: layers ascending, one addressed draw per layer
+/// whose effective noise is above zero, from `(route_noise, layer, step)`.
 ///
 /// `noise_eff(L) = min(65536, noise(L) + level_eff)`: the layer's authored
 /// base, plus an active Noise pressure's effective level when it targets L,
 /// additive with saturation. The scale is `65536 - fixed_mul(noise_eff, j)`
 /// with `j = draw(stream, 65537)`, flooring; a layer with effective noise 0
 /// draws nothing and keeps the whole scale, so a run without noise consumes
-/// no words and every pre-Noise byte pin stands. The drawn scale moves no
+/// no event draw and every pre-Noise byte pin stands. The drawn scale moves no
 /// Charge of its own: it only narrows what Route flow may move.
 pub fn noise_flow_scales(
     layers: &[crate::field::FieldLayer],
@@ -899,7 +945,7 @@ pub fn noise_flow_scales(
         if effective <= 0 {
             continue;
         }
-        let word = stream.draw(65_537) as Frac;
+        let word = stream.addressed("route_noise", u32::from(layer.layer), step, 65_537) as Frac;
         scales[usize::from(layer.layer)] =
             FRAC_ONE - crate::fx::fixed_mul(effective, word);
     }

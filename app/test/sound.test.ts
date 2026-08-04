@@ -169,6 +169,8 @@ interface Framing {
   scale?: number;
   /** The layer the controlled Form stands on. */
   layer?: number;
+  /** Whether the held Coupling preview has acquired an effective target. */
+  connected?: boolean;
 }
 
 /** A snapshot carrying one controlled Form and the cues named. */
@@ -217,7 +219,20 @@ function framed(
     view.setUint32(offset + 4, cue.b ?? 1, true);
     offset += 8;
   }
-  return decodeFrameState(buffer);
+  const state = decodeFrameState(buffer);
+  if (framing.connected) {
+    state.pulsePreview = {
+      radius: 8 * 65_536,
+      gathered: 16 * 65_536,
+      reserveReleased: 0,
+      openedPorts: 0,
+      displacedPressures: 0,
+      diversionBefore: 0,
+      diversionAfter: 0,
+      actuationCost: 0,
+    };
+  }
+  return state;
 }
 
 /** Gives a decoded frame independent physical-compartment and View members. */
@@ -236,6 +251,8 @@ function withRegisters(
       member: physical.includes(node),
       shell: false,
       proposedMember: false,
+      decoyReceiver: false,
+      breached: false,
       charge: 1_000,
       x: node * 16,
       y: node * 16,
@@ -289,10 +306,10 @@ test('the level scales the one gain everything passes through', () => {
   gesture(target);
   sound.observe(framed(1, [{ kind: 2 }]));
   const master = context()?.gains[0];
-  expect(master?.gain.value).toBeCloseTo(0.4 * 0.25, 6);
+  expect(master?.gain.value).toBeCloseTo(0.3 * 0.25, 6);
 
   sound.setLevel(FULL_SOUND);
-  expect(master?.gain.value).toBeCloseTo(0.4, 6);
+  expect(master?.gain.value).toBeCloseTo(0.3, 6);
 });
 
 // ---------------------------------------------------------------------------
@@ -362,41 +379,41 @@ test('each cue of the Pulse is its own short scheduled shape', () => {
   // A Pulse that reached something: the emission falls away, and the gather
   // confirms above it.
   sound.observe(framed(1, [{ kind: 1 }, { kind: 2 }]));
-  expect(sound.scheduled()).toBe(3);
+  expect(sound.scheduled()).toBe(4);
   const emitted = held.oscillators[0];
   expect(emitted.type).toBe('sine');
-  expect(emitted.frequency.values()).toEqual([520, 260]);
+  expect(emitted.frequency.values()).toEqual([104, 62]);
   expect(emitted.started).toBe(0);
-  expect(emitted.stopped).toBeCloseTo(0.18, 6);
+  expect(emitted.stopped).toBeCloseTo(0.3, 6);
   // Every cue opens from nothing and closes back to it, so none of them clicks.
   const gain = held.gains[1];
   expect(gain.gain.values()[0]).toBe(0);
   expect(gain.gain.values()[gain.gain.values().length - 1]).toBe(0);
-  expect(held.oscillators[1].frequency.values()[0]).toBe(660);
+  expect(held.oscillators[2].frequency.values()).toEqual([247, 330]);
 
   // A Pulse that reached nothing: low, short, and covered by a filter.
   held.currentTime = 1;
   sound.observe(framed(2, [{ kind: 1 }]));
-  const dull = held.oscillators[3];
-  expect(dull.type).toBe('triangle');
-  expect(dull.frequency.values()[0]).toBe(120);
-  expect(dull.stopped).toBeCloseTo(1.09, 6);
-  expect(held.filters).toHaveLength(1);
+  const dull = held.oscillators[4];
+  expect(dull.type).toBe('sine');
+  expect(dull.frequency.values()).toEqual([88, 72]);
+  expect(dull.stopped).toBeCloseTo(1.14, 6);
+  expect(held.filters).toHaveLength(3);
 
   // A Port opening is the one cue that resolves: it rises, and stands longest.
   held.currentTime = 2;
   sound.observe(framed(3, [{ kind: 3 }]));
-  const port = held.oscillators[4];
-  expect(port.frequency.values()).toEqual([330, 396]);
-  expect((port.stopped ?? 0) - (port.started ?? 0)).toBeCloseTo(0.36, 6);
+  const port = held.oscillators[5];
+  expect(port.frequency.values()).toEqual([220, 294]);
+  expect((port.stopped ?? 0) - (port.started ?? 0)).toBeCloseTo(0.44, 6);
 
-  // Interference pushed away: a square, swept down, filtered.
+  // Interference pushed away: a covered triangle settling down.
   held.currentTime = 3;
   sound.observe(framed(4, [{ kind: 12 }]));
-  const shove = held.oscillators[6];
-  expect(shove.type).toBe('square');
-  expect(shove.frequency.values()).toEqual([190, 70]);
-  expect(held.filters).toHaveLength(2);
+  const shove = held.oscillators[8];
+  expect(shove.type).toBe('triangle');
+  expect(shove.frequency.values()).toEqual([146, 92]);
+  expect(held.filters).toHaveLength(4);
 
   // Nothing is left running: every cue stops itself.
   for (const oscillator of held.oscillators) {
@@ -404,7 +421,7 @@ test('each cue of the Pulse is its own short scheduled shape', () => {
   }
 });
 
-test('a held Pulse sounds one rising voice, and the release ends it', () => {
+test('a held Coupling sounds one rising dyad, and the release ends it', () => {
   const { sound, target, context } = sounding();
   gesture(target);
   const held = context();
@@ -414,28 +431,30 @@ test('a held Pulse sounds one rising voice, and the release ends it', () => {
   // against exactly that: full charge is the top of the range.
   for (let step = 1; step <= 33; step += 1) {
     held.currentTime = step / 30;
-    sound.observe(framed(step, [], { charging: true }));
+    sound.observe(framed(step, [], { charging: true, connected: step >= 17 }));
   }
 
-  // One voice for the whole hold rather than one per step, and it rises.
-  expect(shapes(held).filter((kind) => kind === 'triangle')).toHaveLength(1);
+  // One quiet dyad for the whole hold rather than one attack per step, and it
+  // rises. Acquiring the first effective target adds one short resolving dyad.
+  expect(held.oscillators.slice(0, 2).map((voice) => voice.type)).toEqual(['sine', 'sine']);
+  expect(sound.scheduled()).toBe(2);
   const rising = held.oscillators[0];
   const written = rising.frequency.values();
-  expect(written[0]).toBe(180);
+  expect(written[0]).toBe(108);
   for (let index = 2; index < 33; index += 1) {
     expect(written[index]).toBeGreaterThan(written[index - 1]);
   }
   // The top of the range at a full charge.
-  expect(written[32]).toBe(660);
+  expect(written[32]).toBe(216);
   // Holding past full changes nothing, exactly as the charge sits at the clamp.
-  expect(written[written.length - 1]).toBe(660);
+  expect(written[written.length - 1]).toBe(216);
   expect(rising.stopped).toBeNull();
 
   // The release ends the voice and sounds the emission.
   held.currentTime = 1;
   sound.observe(framed(34, [{ kind: 1 }, { kind: 2 }]));
-  expect(rising.stopped).toBeCloseTo(1.06, 6);
-  expect(shapes(held).filter((kind) => kind === 'triangle')).toHaveLength(1);
+  expect(rising.stopped).toBeCloseTo(1.1, 6);
+  expect(rising.stopped).not.toBeNull();
 });
 
 test('one snapshot sounds once however many times it is read', () => {
@@ -670,7 +689,7 @@ test('reduced motion does not silence a single cue', () => {
   sound.observe(framed(1, [{ kind: 1 }, { kind: 2 }], { charging: true, reduced: true }));
   // The two settings are separate channels of `InputConfig`, and a player who
   // asked for less movement has not asked for less sound.
-  expect(sound.scheduled()).toBe(3);
+  expect(sound.scheduled()).toBe(4);
 });
 
 test('the stand-in Field sounds its scripted Pulse the same way', () => {
@@ -681,7 +700,10 @@ test('the stand-in Field sounds its scripted Pulse the same way', () => {
   // release sounds.
   for (let step = 0; step <= 24; step += 1) sound.observe(fixtureSnapshot(step));
   const held = context();
-  expect(shapes(held as RecordingContext).filter((kind) => kind === 'triangle')).toHaveLength(1);
+  expect((held as RecordingContext).oscillators.slice(0, 2).map((voice) => voice.type)).toEqual([
+    'sine',
+    'sine',
+  ]);
   expect(sound.scheduled()).toBeGreaterThan(0);
 });
 
@@ -696,7 +718,7 @@ function charging(sound: Sound, context: RecordingContext): RecordingOscillator 
     sound.observe(framed(step, [], { charging: true }));
   }
   const voice = context.oscillators[0];
-  expect(voice.type).toBe('triangle');
+  expect(voice.type).toBe('sine');
   expect(voice.stopped).toBeNull();
   return voice;
 }
@@ -789,12 +811,12 @@ test('a run that stops running lets the charging voice go', () => {
 
   // And nothing starts again while the run is suspended.
   sound.observe(framed(5, [], { charging: true, mode: 4 }));
-  expect(shapes(held).filter((kind) => kind === 'triangle')).toHaveLength(1);
+  expect(shapes(held).filter((kind) => kind === 'sine')).toHaveLength(2);
 
   // When the run comes back and the player holds again, a fresh voice sounds.
   held.currentTime = 2;
   sound.observe(framed(6, [], { charging: true }));
-  expect(shapes(held).filter((kind) => kind === 'triangle')).toHaveLength(2);
+  expect(shapes(held).filter((kind) => kind === 'sine')).toHaveLength(4);
 });
 
 test('a blurred window lets the charging voice go before any frame says so', () => {

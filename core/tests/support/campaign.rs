@@ -114,7 +114,7 @@ pub fn the_pull() -> Vec<Phase> {
         play(Act::Toward(3220, 2340), 300),
         play(Act::Charge(3220, 2340), FULL_CHARGE_STEPS),
         play(Act::Release, 1),
-        play(Act::Toward(2700, 2100), 7600),
+        play(Act::Toward(2700, 2100), 26_000),
         // The back half: over the deep current, down a layer, and hold it.
         play(Act::Toward(1550, 2200), 900),
         play(Act::Depth(1), 1),
@@ -326,7 +326,30 @@ impl Driver {
                 Act::Hand(_) => ((0, 0), false, false, 0),
             };
             let now = left.min(u32::from(BATCH)) as u16;
+            let layer_before = session
+                .run()
+                .expect("a run")
+                .state()
+                .now
+                .forms
+                .iter()
+                .find(|held| held.controlled)
+                .expect("a controlled Form")
+                .layer;
             self.depth_frame(session, now, steer, held, release, depth);
+            if depth != 0 {
+                let layer_after = session
+                    .run()
+                    .expect("a run")
+                    .state()
+                    .now
+                    .forms
+                    .iter()
+                    .find(|held| held.controlled)
+                    .expect("a controlled Form")
+                    .layer;
+                assert_ne!(layer_after, layer_before, "the scripted depth edge changes layer");
+            }
             left -= u32::from(now);
         }
     }
@@ -517,13 +540,63 @@ pub fn play_chapter(session: &mut Session, driver: &mut Driver, chapter: &Chapte
     };
     match script_for(&chapter.id) {
         Some(phases) => {
-            for phase in phases {
+            let mut phase_trace = Vec::new();
+            for (phase_index, phase) in phases.into_iter().enumerate() {
                 if stop(session) {
                     break;
                 }
                 driver.phase_until(session, &phase, &stop);
+                if chapter.id == "the_quiet_edge" {
+                    let state = session.run().expect("a run").state();
+                    phase_trace.push((
+                        phase_index,
+                        state.progress.objective.id.clone(),
+                        state.progress.objective.progress,
+                        state.now.ports.iter().map(|port| port.q).sum::<i64>(),
+                    ));
+                }
             }
-            assert!(stop(session), "{} completes under its own driven script", chapter.id);
+            let objective = &session.run().expect("a run").state().progress.objective;
+            let controlled = session
+                .run()
+                .expect("a run")
+                .state()
+                .now
+                .forms
+                .iter()
+                .find(|form| form.controlled)
+                .expect("a controlled Form");
+            assert!(
+                stop(session),
+                "{} completes under its own driven script; standing objective {} at {}/{:?}; \
+                 Form layer {} at ({}, {}); phase_trace={:?}; routes={:?}; nodes={:?}",
+                chapter.id,
+                objective.id,
+                objective.progress,
+                objective.target,
+                controlled.layer,
+                controlled.pos.x,
+                controlled.pos.y,
+                phase_trace,
+                session
+                    .run()
+                    .expect("a run")
+                    .state()
+                    .now
+                    .routes
+                    .iter()
+                    .map(|route| (route.route, route.tail, route.head, route.flow))
+                    .collect::<Vec<_>>(),
+                session
+                    .run()
+                    .expect("a run")
+                    .state()
+                    .now
+                    .ports
+                    .iter()
+                    .map(|port| (port.node, port.q, port.capacity))
+                    .collect::<Vec<_>>(),
+            );
         }
         None => {
             driver.rest_until(session, span_of(chapter), &stop);

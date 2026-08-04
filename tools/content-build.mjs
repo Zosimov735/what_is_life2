@@ -51,6 +51,12 @@ export const CONTENT_DIR = 'content';
 /** The manifest, relative to the workspace root. */
 export const MANIFEST_RELATIVE = path.join(CONTENT_DIR, 'manifest.json');
 
+/** The automation-contract manifest, hashed after the legacy content files. */
+export const CONTRACT_MANIFEST_RELATIVE = path.join(CONTENT_DIR, 'contracts', 'manifest.json');
+
+/** Player copy resolved by contract presentation keys. */
+export const COPY_CATALOG_RELATIVE = path.join(CONTENT_DIR, 'copy', 'catalog.json');
+
 /** Where the generated digest is written, relative to the workspace root. */
 export const GENERATED_RELATIVE = path.join('worker', 'build', 'content.json');
 
@@ -96,15 +102,61 @@ export function contentFiles(workspace = WORKSPACE) {
       files.push({ id, kind: directory, relative, bytes: fs.readFileSync(absolute) });
     }
   }
-  return { manifest, manifestBytes, manifestRelative: MANIFEST_RELATIVE, files };
+  const contractManifestPath = path.join(workspace, CONTRACT_MANIFEST_RELATIVE);
+  const contractManifestBytes = fs.readFileSync(contractManifestPath);
+  let contractManifest;
+  try {
+    contractManifest = JSON.parse(contractManifestBytes.toString('utf8'));
+  } catch (cause) {
+    throw new Error(`the contract manifest does not parse: ${cause.message}`);
+  }
+  if (typeof contractManifest.contract_version !== 'number'
+      || !Array.isArray(contractManifest.contracts)) {
+    throw new Error('the contract manifest needs contract_version and contracts');
+  }
+  const contractFiles = contractManifest.contracts.map((id) => {
+    if (typeof id !== 'string' || !/^[a-z][a-z0-9_]*$/.test(id)) {
+      throw new Error(`contracts names an id that is not a machine id: ${String(id)}`);
+    }
+    const relative = path.join(CONTENT_DIR, 'contracts', `${id}.json`);
+    const absolute = path.join(workspace, relative);
+    if (!fs.existsSync(absolute)) {
+      throw new Error(`the contract manifest lists ${relative}, which is not there`);
+    }
+    return { id, kind: 'contracts', relative, bytes: fs.readFileSync(absolute) };
+  });
+  const copyCatalogPath = path.join(workspace, COPY_CATALOG_RELATIVE);
+  if (!fs.existsSync(copyCatalogPath)) {
+    throw new Error(`the copy catalog ${COPY_CATALOG_RELATIVE} is not there`);
+  }
+  const copyCatalogBytes = fs.readFileSync(copyCatalogPath);
+  return {
+    manifest,
+    manifestBytes,
+    manifestRelative: MANIFEST_RELATIVE,
+    files,
+    contractManifest,
+    contractManifestBytes,
+    contractFiles,
+    copyCatalogBytes,
+  };
 }
 
-/** The locked digest: the manifest bytes, then every listed file's bytes. */
+/** The locked digest across legacy content, contracts, then player copy. */
 export function contentHash(workspace = WORKSPACE) {
-  const { manifestBytes, files } = contentFiles(workspace);
+  const {
+    manifestBytes,
+    files,
+    contractManifestBytes,
+    contractFiles,
+    copyCatalogBytes,
+  } = contentFiles(workspace);
   const digest = crypto.createHash('sha256');
   digest.update(manifestBytes);
   for (const file of files) digest.update(file.bytes);
+  digest.update(contractManifestBytes);
+  for (const file of contractFiles) digest.update(file.bytes);
+  digest.update(copyCatalogBytes);
   return digest.digest('hex');
 }
 

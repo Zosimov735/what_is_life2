@@ -97,6 +97,7 @@ fn caps_field() -> FieldState {
                 radius: field::TRAIL_RADIUS_CAP,
                 magnitude: field::TRAIL_MAGNITUDE_CAP,
             }),
+            junction: None,
         })
         .collect();
 
@@ -115,6 +116,7 @@ fn caps_field() -> FieldState {
             path,
             width: 300 * ONE_UNIT,
             strength: 16 * ONE_UNIT,
+            duty: 65_536,
             period: 30,
             phase: 0,
             bright: true,
@@ -288,8 +290,7 @@ fn whole_slate_job() {
 
 fn whole_slate_job_at(window: u16) {
     use field_game_core::state::{
-        GeneratorSpec, InputConfig, Progress, RunState, Surround, Trace, TraceStep,
-        ViewDeclaration,
+        InputConfig, Progress, RunState, Surround, Trace, TraceStep, ViewDeclaration,
     };
 
     let keyframe = caps_field();
@@ -323,7 +324,8 @@ fn whole_slate_job_at(window: u16) {
     let state = RunState {
         run_id: "0123456789abcdef".to_string(),
         rng: field_game_core::rng::trajectory_stream("0123456789abcdef", 0),
-        spec: GeneratorSpec::new("00".repeat(32), Default::default()),
+        scenario: field_game_core::state::ScenarioSpec::legacy("00".repeat(32)),
+        criterion: None,
         branch_nonce: 0,
         progress: Progress::opening(),
         now,
@@ -367,8 +369,7 @@ fn whole_slate_job_at(window: u16) {
 #[ignore = "measurement, not an assertion: run in release with --nocapture"]
 fn on_demand_jobs() {
     use field_game_core::state::{
-        GeneratorSpec, InputConfig, Progress, RunState, Surround, Trace, TraceStep,
-        ViewDeclaration,
+        InputConfig, Progress, RunState, Surround, Trace, TraceStep, ViewDeclaration,
     };
 
     let keyframe = caps_field();
@@ -401,7 +402,8 @@ fn on_demand_jobs() {
     let state = RunState {
         run_id: "0123456789abcdef".to_string(),
         rng: field_game_core::rng::trajectory_stream("0123456789abcdef", 0),
-        spec: GeneratorSpec::new("00".repeat(32), Default::default()),
+        scenario: field_game_core::state::ScenarioSpec::legacy("00".repeat(32)),
+        criterion: None,
         branch_nonce: 0,
         progress: Progress::opening(),
         now,

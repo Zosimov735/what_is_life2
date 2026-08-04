@@ -592,10 +592,9 @@ pub(crate) fn replay_series(
     stream: RngState,
     mut drive: impl FnMut(usize, &mut FieldState, &crate::field::StepRecords),
 ) -> Vec<Fx> {
-    // The sample's stream passes through to the step function, exactly as it
-    // does in the privilege values since Goal 18: no rule of version 1 draws
-    // yet, so the position does not move, but the parameter is threaded and
-    // the rule that draws lands with no change of shape here.
+    // The sample's parent stream passes through to event-addressed Route Noise
+    // and Supply variability. Unaffected object/step addresses remain paired
+    // even when this prepared world differs structurally.
     let mut stream = stream;
     let mut scratch = window.pressures.clone();
     let mut state = prepared.start.clone();
@@ -609,6 +608,8 @@ pub(crate) fn replay_series(
                 pressures: &mut scratch,
                 schedule: &window.schedule,
                 stream: &mut stream,
+                medium: window.medium,
+                supply_jitter: window.supply_jitter,
             },
             &prepared.cache,
         );

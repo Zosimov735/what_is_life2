@@ -54,12 +54,13 @@ export function playbackSwell(radius: number, factor: number): number {
 }
 
 export function dashOf(mark: {
-  role: 'compartment' | 'view' | 'candidate';
+  role: 'compartment' | 'view' | 'candidate' | 'assembly-draft';
   proposed: boolean;
   candidate: number;
   tier: number;
 }): number[] {
   if (mark.candidate > 0) return [2, 4 + 4 * Math.max(1, mark.tier)];
   if (mark.role === 'compartment') return mark.proposed ? [4, 6] : [];
+  if (mark.role === 'assembly-draft') return [8, 4];
   return [12, 8];
 }

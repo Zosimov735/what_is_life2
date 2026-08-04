@@ -15,12 +15,12 @@
  *
  * | Reading | Source in the frame | Recipe |
  * |---|---|---|
- * | Charge building | the controlled Form's pulse-charging flag | one triangle, rising 180 → 660 Hz while the flag stands, under a soft gain |
- * | A Pulse that did something | cue 1 with an outcome cue in the same frame | a sine falling 520 → 260 Hz over 180 ms |
- * | A Pulse that did nothing | cue 1 alone | 120 Hz triangle through a low-pass, 90 ms: short, flat, and dull |
- * | Charge gathered | cue 2 | two sines a fifth apart, 660 and 990 Hz, 140 ms |
- * | A Port opened | cue 3 | two sines a fifth apart, 330 and 495 Hz, 360 ms, rising slightly: the one cue that resolves |
- * | Interference pushed | cue 12 | a square sweeping 190 → 70 Hz in 160 ms: a shove, away |
+ * | Coupling extending | the controlled Form's pulse-charging flag | two quiet sines, rising one octave while reach grows |
+ * | Target acquired | a held preview changing from empty to effective | a brief soft resolving dyad |
+ * | A Pulse emitted | cue 1 | a low sine body that expands and settles without a sharp transient |
+ * | Charge gathered | cue 2 | a warm rising fifth, moving inward |
+ * | A Port opened | cue 3 | a slow resolving dyad with a quiet upper glint |
+ * | Interference pushed | cue 12 | a filtered triangle settling downward |
  * | An objective completed | cue 11 | two sines a fourth apart, 440 and 587 Hz, 300 ms, rising: the shape of arriving |
  * | An Anchor written | cue 7 | two sines an octave apart, 220 and 440 Hz, 620 ms, flat: the longest and steadiest cue there is |
  * | The pattern gave way | cue 8 | a triangle falling 300 → 150 Hz over 420 ms, under a filter: the one cue that sinks |
@@ -70,6 +70,7 @@
  */
 
 import type { FrameState } from '../../../worker/src/frame-state';
+import type { EngineeringTransitionKind } from '../../../worker/src/protocol';
 
 /** The locked `InputConfig` default: full. */
 export const FULL_SOUND = 65_536;
@@ -91,14 +92,14 @@ const OUTCOME_CUES = [CUE_CHARGE_GATHERED, CUE_PORT_OPENED, CUE_INTERFERENCE_PUS
  * How loud the whole of it stands at full level. Cues are brief and the field
  * is quiet between them, so the headroom is generous on purpose.
  */
-const MASTER_GAIN = 0.4;
+const MASTER_GAIN = 0.3;
 
 /** One simulation step, in seconds: the ramp span while a hold is charging. */
 const STEP_SECONDS = 1 / 30;
 
 /** Where the charging voice starts and where holding carries it. */
-const CHARGE_LOW_HZ = 180;
-const CHARGE_HIGH_HZ = 660;
+const CHARGE_LOW_HZ = 108;
+const CHARGE_HIGH_HZ = 216;
 
 /**
  * How many steps of holding reach the top of that rise: the locked charging
@@ -108,7 +109,7 @@ const CHARGE_HIGH_HZ = 660;
 const CHARGE_STEPS = 32;
 
 /** How loud the charging voice stands, against the master gain. */
-const CHARGE_GAIN = 0.16;
+const CHARGE_GAIN = 0.055;
 
 /**
  * The depth cue: where a change of layer starts and ends, how long it takes,
@@ -223,6 +224,13 @@ export interface SoundOptions {
   target?: EventTarget;
 }
 
+export interface EngineeringSoundTransition {
+  commitAllowed: boolean;
+  operation: EngineeringTransitionKind;
+  previewId: string;
+  status: 'preview' | 'committed';
+}
+
 export interface Sound {
   /**
    * Reads one snapshot, once per rendered frame. Work is done once per
@@ -236,6 +244,8 @@ export interface Sound {
    * exactly as the first snapshot sets the depth and sounds nothing.
    */
   ranked: (ordinal: number | null) => void;
+  /** Sounds only an addressed refusal or an accepted reconstruction boundary. */
+  transition: (next: EngineeringSoundTransition | null) => void;
   /** Takes a new `sound_level`. Zero closes the context and builds no other. */
   setLevel: (level: number) => void;
   /** What the context is doing, and `idle` before there is one. */
@@ -267,13 +277,18 @@ export function openSound(options: SoundOptions = {}): Sound {
   let context: AudioContext | null = null;
   let master: GainNode | null = null;
   /** The voice a held Pulse sounds through, and none while nothing is held. */
-  let charging: { oscillator: OscillatorNode; gain: GainNode; since: number } | null = null;
+  let charging: {
+    voices: Array<{ oscillator: OscillatorNode; gain: GainNode; ratio: number }>;
+    since: number;
+    connected: boolean;
+  } | null = null;
   /** The newest step read, and −1 before the first snapshot. */
   let seen = -1;
   /** The depth the controlled Form stood at, and none before the first. */
   let depth: number | null = null;
   /** The mode the newest snapshot reported, and none before the first. */
   let mode: string | null = null;
+  let transitionReading: string | null = null;
   /** The active passive View the newest snapshot carried, and none before the first. */
   let inside: number | null = null;
   /** Which Form carried control, and none before the first snapshot. */
@@ -410,19 +425,51 @@ export function openSound(options: SoundOptions = {}): Sound {
     tone('sine', from * 1.5, to * 1.5, seconds * 0.86, loudness * 0.45);
   }
 
+  function soundTransition(next: EngineeringSoundTransition | null): void {
+    if (!next) {
+      transitionReading = null;
+      return;
+    }
+    const reading = `${next.previewId}:${next.status}:${next.commitAllowed ? 'ready' : 'refused'}`;
+    if (reading === transitionReading) return;
+    transitionReading = reading;
+    if (next.status === 'preview') {
+      if (!next.commitAllowed) tone('triangle', 116, 96, 0.18, 0.12, true);
+      return;
+    }
+    switch (next.operation) {
+      case 'restart_assembly':
+        pair(196, 196, 0.22, 0.13);
+        break;
+      case 'revert_generator':
+        pair(196, 247, 0.28, 0.14);
+        break;
+      case 'full_contract_reset':
+        pair(164, 246, 0.36, 0.15);
+        tone('sine', 328, 369, 0.42, 0.06, true);
+        break;
+    }
+  }
+
   /** Starts, carries, or stops the voice a held Pulse sounds through. */
-  function carryCharging(holding: boolean, step: number): void {
+  function carryCharging(holding: boolean, step: number, connected: boolean): void {
     if (!holding) {
       stopCharging();
       return;
     }
     if (!charging) {
-      const made = voice('triangle', CHARGE_LOW_HZ);
-      if (!made) return;
-      const at = made.held.currentTime;
-      made.gain.gain.linearRampToValueAtTime(CHARGE_GAIN, at + 0.04);
-      made.oscillator.start(at);
-      charging = { oscillator: made.oscillator, gain: made.gain, since: step };
+      const ratios = [1, 1.5];
+      const voices: Array<{ oscillator: OscillatorNode; gain: GainNode; ratio: number }> = [];
+      for (const [place, ratio] of ratios.entries()) {
+        const made = voice('sine', CHARGE_LOW_HZ * ratio);
+        if (!made) continue;
+        const at = made.held.currentTime;
+        made.gain.gain.linearRampToValueAtTime(CHARGE_GAIN * (place === 0 ? 1 : 0.46), at + 0.12);
+        made.oscillator.start(at);
+        voices.push({ oscillator: made.oscillator, gain: made.gain, ratio });
+      }
+      if (voices.length === 0) return;
+      charging = { voices, since: step, connected };
       return;
     }
     const held = context;
@@ -432,10 +479,16 @@ export function openSound(options: SoundOptions = {}): Sound {
     // it nowhere.
     const through = Math.min(1, (step - charging.since) / CHARGE_STEPS);
     const wanted = CHARGE_LOW_HZ + (CHARGE_HIGH_HZ - CHARGE_LOW_HZ) * through;
-    charging.oscillator.frequency.linearRampToValueAtTime(
-      wanted,
-      held.currentTime + STEP_SECONDS,
-    );
+    for (const voice of charging.voices) {
+      voice.oscillator.frequency.linearRampToValueAtTime(
+        wanted * voice.ratio,
+        held.currentTime + STEP_SECONDS,
+      );
+    }
+    if (connected && !charging.connected) {
+      pair(330, 392, 0.13, 0.14);
+    }
+    charging.connected = connected;
   }
 
   function stopCharging(): void {
@@ -444,8 +497,10 @@ export function openSound(options: SoundOptions = {}): Sound {
       return;
     }
     const at = context.currentTime;
-    charging.gain.gain.linearRampToValueAtTime(0, at + 0.05);
-    charging.oscillator.stop(at + 0.06);
+    for (const voice of charging.voices) {
+      voice.gain.gain.linearRampToValueAtTime(0, at + 0.09);
+      voice.oscillator.stop(at + 0.1);
+    }
     charging = null;
   }
 
@@ -591,19 +646,20 @@ export function openSound(options: SoundOptions = {}): Sound {
     for (const cue of cues) {
       switch (cue.kind) {
         case CUE_PULSE_EMITTED:
-          // A Pulse that reached something falls away like a struck thing; one
-          // that reached nothing is short, low, and covered.
-          if (outcome) tone('sine', 520, 260, 0.18, 0.5);
-          else tone('triangle', 120, 108, 0.09, 0.34, true);
+          // A low, rounded body makes the expansion audible without the former
+          // high downward whistle. Outcomes add their own local confirmation.
+          tone('sine', outcome ? 104 : 88, outcome ? 62 : 72, outcome ? 0.3 : 0.14, outcome ? 0.28 : 0.18, true);
+          if (outcome) tone('sine', 208, 124, 0.24, 0.1, true);
           break;
         case CUE_CHARGE_GATHERED:
-          pair(660, 660, 0.14, 0.38);
+          pair(247, 330, 0.19, 0.22);
           break;
         case CUE_PORT_OPENED:
-          pair(330, 396, 0.36, 0.42);
+          pair(220, 294, 0.44, 0.28);
+          tone('sine', 440, 588, 0.34, 0.1);
           break;
         case CUE_INTERFERENCE_PUSHED:
-          tone('square', 190, 70, 0.16, 0.3, true);
+          tone('triangle', 146, 92, 0.22, 0.18, true);
           break;
         case CUE_OBJECTIVE_COMPLETE:
           // An objective arriving: a fourth, rising, and short enough to sit
@@ -674,7 +730,14 @@ export function openSound(options: SoundOptions = {}): Sound {
       }
       seen = step;
       const steered = next.forms.find((form) => form.controlled);
-      carryCharging(steered?.pulseCharging === true, step);
+      const preview = next.pulsePreview;
+      const connected = Boolean(preview && (
+        preview.gathered > 0
+        || preview.reserveReleased > 0
+        || preview.openedPorts > 0
+        || preview.displacedPressures > 0
+      ));
+      carryCharging(steered?.pulseCharging === true, step, connected);
       carryDepth(steered?.layer);
       carryPressures(next);
       sound(next.cues);
@@ -685,6 +748,15 @@ export function openSound(options: SoundOptions = {}): Sound {
       ranked = ordinal;
       if (before === null || before === ordinal) return;
       pair(RANK_LOW_HZ, RANK_HIGH_HZ, RANK_SECONDS, RANK_GAIN);
+    },
+    transition(next) {
+      if (closed) return;
+      if (!next) {
+        soundTransition(null);
+        return;
+      }
+      if (level <= 0) return;
+      soundTransition(next);
     },
     setLevel(next) {
       level = Math.max(0, next);

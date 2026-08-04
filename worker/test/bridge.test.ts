@@ -340,7 +340,7 @@ test('the decoder reads the fixture the core encoder pins', async () => {
   expect(decoded.header.mode).toBe('running');
   expect(decoded.header.timeScale).toBe(65_535);
   expect(decoded.header.impulse).toBe(3);
-  expect(decoded.header.sectionCount).toBe(6);
+  expect(decoded.header.sectionCount).toBe(7);
   expect(decoded.header.leakPerExposedContactPerStep).toBe(4_096);
   expect(decoded.header.dropped).toBe(false);
   expect(decoded.header.reducedMotion).toBe(false);

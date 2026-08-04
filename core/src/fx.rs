@@ -178,6 +178,34 @@ pub fn within(first: Vec2, first_layer: u8, second: Vec2, second_layer: u8, radi
     square < edge * edge
 }
 
+/// True when `point` lies within `radius` of the closed line segment `start →
+/// end` on one layer. The comparison stays in integer squared space, including
+/// the projection test, so Supply capture does not depend on authored vertex
+/// density and does not introduce floating-point state.
+pub fn within_segment(point: Vec2, start: Vec2, end: Vec2, radius: Fx) -> bool {
+    if radius < 0 {
+        return false;
+    }
+    let vx = i128::from(end.x) - i128::from(start.x);
+    let vy = i128::from(end.y) - i128::from(start.y);
+    let wx = i128::from(point.x) - i128::from(start.x);
+    let wy = i128::from(point.y) - i128::from(start.y);
+    let length_square = vx * vx + vy * vy;
+    if length_square == 0 {
+        return within(point, 0, start, 0, radius);
+    }
+    let projection = wx * vx + wy * vy;
+    if projection <= 0 {
+        return within(point, 0, start, 0, radius);
+    }
+    if projection >= length_square {
+        return within(point, 0, end, 0, radius);
+    }
+    let cross = vx * wy - vy * wx;
+    let edge = i128::from(radius) + 1;
+    cross * cross < edge * edge * length_square
+}
+
 /// The locked adjacency rule: `adj(a, b)` exactly when `d(a, b) <= 16777216`
 /// — 256 units. One rule for every Node, so static Nodes have effectively
 /// fixed adjacency and moving Forms recompute theirs per step.

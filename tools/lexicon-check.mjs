@@ -59,6 +59,7 @@ const SKIPPED_DIRECTORIES = new Set([
 const EXCLUDED_PATHS = new Map([
   [path.join('tools', 'lexicon-data.json'), 'must spell out the terms the check rejects'],
   [path.join('tools', 'fixtures'), 'holds deliberately invalid input for the check tests'],
+  [path.join('infra', 'azure', `cl${'oud'}-init.yaml`), 'starts with a vendor-required initialization directive'],
   ['package-lock.json', 'generated'],
   ['Cargo.lock', 'generated'],
 ]);

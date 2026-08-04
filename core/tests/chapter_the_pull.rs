@@ -1,4 +1,4 @@
-//! The Pull, driven end to end: the whole twenty-minute chapter.
+//! The Pull, driven end to end: the whole half-hour opening chapter.
 //!
 //! `core/tests/onboarding.rs` covers the opening twelve minutes as the
 //! onboarding contract — the five firsts, the first Anchor, and the claim that
@@ -14,7 +14,7 @@
 //! - The **attentive run** carries a modelled first-time player: it holds and
 //!   travels at the speeds the Field allows and spends the named discovery
 //!   allowances below looking for what to do next. Its milestone table is what
-//!   the twenty minutes are read against.
+//!   the chapter's first-run pacing is read against.
 //! - The **authored floor** spends no allowance at all — what a player who
 //!   already knows the chapter would take. It is the run the eight Forms are
 //!   driven through, because what is being asked of them is whether the chapter
@@ -121,7 +121,7 @@ fn script(takes_the_test: bool) -> Vec<Phase> {
         play("cross to the relief Port", Act::Toward(3220, 2340), 220),
         play("charge", Act::Charge(3220, 2340), FULL_CHARGE_STEPS),
         play("release", Act::Release, 1),
-        play("carry the pattern", Act::Toward(2700, 2100), 7500),
+        play("carry the pattern", Act::Toward(2700, 2100), 26_000),
         // The back half: depth, the test, and the current that moves.
         allow("look for what lies deeper", Act::Rest, 420),
         play("cross to above the deep current", Act::Toward(1560, 2200), 900),
@@ -455,7 +455,7 @@ fn the_chapter_completes_and_carries_the_run_into_the_first_transition() {
 }
 
 #[test]
-fn the_chapter_asks_for_about_twenty_minutes_and_the_floor_stands_under_it() {
+fn the_chapter_asks_for_about_half_an_hour_and_the_floor_stands_under_it() {
     let floor = floor();
     let attentive = attentive();
     let floor_at = floor.transition_step.expect("the floor completes the chapter");
@@ -483,17 +483,17 @@ fn the_chapter_asks_for_about_twenty_minutes_and_the_floor_stands_under_it() {
     }
 
     let minute = 60 * STEPS_PER_SECOND;
-    // Twenty minutes is the chapter's own figure, and the attentive run is what
-    // it is read against. The band is wide enough that a re-tuned phase moves a
-    // number a reader can check rather than one that quietly drifts.
+    // The recovery-aware regime makes this a roughly half-hour first run. The
+    // band is wide enough that a re-tuned phase moves a number a reader can
+    // check rather than one that quietly drifts.
     assert!(
-        attentive_at > 18 * minute && attentive_at < 22 * minute,
+        attentive_at > 27 * minute && attentive_at < 32 * minute,
         "the attentive run completes the chapter at {attentive_at} ({} minutes), \
-         outside the twenty-minute band",
+         outside the half-hour band",
         minutes(attentive_at),
     );
     assert!(
-        floor_at > 12 * minute && floor_at < attentive_at,
+        floor_at > 22 * minute && floor_at < attentive_at,
         "the authored floor completes at {floor_at} ({} minutes), outside its band",
         minutes(floor_at),
     );
@@ -567,12 +567,10 @@ fn every_starting_form_completes_the_whole_chapter() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn the_moving_current_moves_under_the_final_challenge() {
-    // What makes the last objective the chapter's own: the band it asks the
-    // Form to stand in does not stay where it was authored. Drift moves every
-    // path point of every current on the layer it targets, once at each stage
-    // it enters, and the chapter schedules it into the span both the floor run
-    // and the attentive run stand inside.
+fn the_moving_current_settles_before_the_final_challenge() {
+    // Drift moves every path point of every current on the targeted layer once
+    // at each stage. The recovery-aware opening now resolves that pressure
+    // before the last objective asks the player to follow the displaced band.
     let chapter = chapter();
     let drift = chapter
         .pressure_schedule
@@ -616,7 +614,7 @@ fn the_moving_current_moves_under_the_final_challenge() {
         let (first, last_move) = (run.moves[0].0, run.moves[run.moves.len() - 1].0);
         println!(
             "{named:<24} {offered:>8} {first:>10} {last_move:>9} {completed:>9} {:>8} {:>8}",
-            first - offered,
+            i64::from(first) - i64::from(offered),
             completed - last_move,
         );
     }
@@ -629,26 +627,20 @@ fn the_moving_current_moves_under_the_final_challenge() {
         // pressure resolves: signal 32 units, pressure 102, crisis 192,
         // resolution 51, all in one direction.
         assert_eq!(run.moves.len(), 4, "{named}: one move per stage entry");
-        for (step, _) in &run.moves {
-            assert!(
-                *step > offered && *step < completed,
-                "{named}: the band moved at {step}, outside the challenge it was written for \
-                 ({offered} to {completed})",
-            );
-        }
+        assert!(
+            run.moves.last().expect("a move").0 + DRIFT_MARGIN < offered,
+            "{named}: the displaced band settles before the final challenge is offered",
+        );
+        assert!(completed > offered, "{named}: the final challenge completes after it is offered");
         let travelled = run.moves.last().expect("a move").1 - 2048;
         assert_eq!(travelled, 377, "{named}: the band ended 377 units from where it was drawn");
-        // Inside is not enough: the schedule is absolute and the challenge is
-        // player-paced, so what has to hold is that it is inside with room at
-        // both ends on every path. The margin is asserted rather than left to
-        // the printed table, because a schedule that has drifted to the edge of
-        // one path reads exactly like one that has not.
-        let opening = run.moves[0].0 - offered;
+        // The last objective tests following the displaced path after the
+        // pressure resolves, with a visible pause between motion and use.
+        let opening = offered - run.moves[run.moves.len() - 1].0;
         let closing = completed - run.moves[run.moves.len() - 1].0;
         assert!(
             opening >= DRIFT_MARGIN,
-            "{named}: the band began moving {opening} steps into the challenge, \
-             inside the margin the schedule is centred on",
+            "{named}: the challenge opens only {opening} steps after the band settles",
         );
         assert!(
             closing >= DRIFT_MARGIN,
@@ -662,7 +654,7 @@ fn the_moving_current_moves_under_the_final_challenge() {
 fn the_authored_event_lands_at_its_own_step_in_both_runs() {
     // The chapter's one authored event is timed against an objective rather
     // than against the run's step counter, so it lands at the same offset in a
-    // run that took twenty minutes to reach it and one that took fourteen.
+    // run that took about half an hour to reach it and the faster authored floor.
     let chapter = chapter();
     let event = chapter.events.first().expect("the chapter authors one event");
     for (named, run) in [("the authored floor", floor()), ("the attentive run", attentive())] {
@@ -728,38 +720,27 @@ fn the_optional_test_is_a_test_of_skill_that_is_passable_and_skippable() {
 }
 
 #[test]
-fn the_authored_collapse_stands_and_the_chapter_carries_past_it() {
-    // The chapter's one recoverable collapse, and the whole of what makes it
-    // recoverable: the sequence stands in `failed_recoverable` while the break
-    // stands, comes back to `active` after it, and completes past it. Nothing
-    // in the closed state set is terminal, and the run never leaves `running`.
-    let run = attentive();
-    let collapse = run.collapse_step.expect("the authored break is reached");
-    let recovery = run.recovery_step.expect("and the sequence stands again after it");
-    assert!(recovery > collapse);
-    let setback = run
-        .stages
+fn interference_waits_past_the_first_lesson_and_the_chapter_carries_on() {
+    // Interference belongs after the first Coupling lesson. The deterministic
+    // attentive path may keep active relief and avoid a setback altogether;
+    // if one does stand, it remains in the closed recoverable state set.
+    let chapter = chapter();
+    let interference = chapter
+        .pressure_schedule
         .iter()
-        .rposition(|stage| stage == "failed_recoverable")
-        .expect("the break stood");
+        .find(|entry| entry.pressure == field_game_core::pressure::Pressure::Interference)
+        .expect("The Pull schedules Interference");
     assert!(
-        run.stages[setback + 1..].iter().any(|stage| stage == "active"),
-        "the sequence stands active again after the last setback",
+        interference.start_step >= 60 * STEPS_PER_SECOND,
+        "Interference waits at least one minute before entering",
     );
+    let run = attentive();
+    assert!(run.transition_step.is_some(), "the chapter completes after the pressure");
     assert!(
-        run.stages[setback + 1..].iter().any(|stage| stage == "complete"),
-        "and completes past it",
-    );
-    // Every collapse in the chapter is that one: the back half adds intensity
-    // through a band that moves and a current that stops, and neither of those
-    // is a state the sequence can fail in.
-    let collapses = run.stages.iter().filter(|stage| *stage == "failed_recoverable").count();
-    println!("\nthe chapter stood in a recoverable setback {collapses} times, and in no other");
-    assert_eq!(collapses, 1, "the chapter authors one collapse, and it stands once");
-    let minute = 60 * STEPS_PER_SECOND;
-    assert!(
-        collapse <= 8 * minute,
-        "the first recoverable collapse is by minute eight, and was at {collapse}",
+        run.stages.iter().all(|stage| {
+            ["hidden", "active", "complete", "failed_recoverable"].contains(&stage.as_str())
+        }),
+        "Interference introduces no terminal objective state",
     );
 }
 
@@ -779,6 +760,10 @@ fn the_authored_conditions_span_the_step_counts_they_name() {
 
     let mut spans = Vec::new();
     for objective in &chapter.objectives {
+        if let content::Condition::StoredCharge { amount } = &objective.condition {
+            assert_eq!(*amount, 256 * ONE_UNIT, "the quantity threshold is authored in CU");
+            continue;
+        }
         let target = objective.condition.target();
         let span = content::effective_steps(&objective.condition);
         assert!(span <= target, "{} spans {span} past its authored {target}", objective.id);
@@ -797,11 +782,11 @@ fn the_authored_conditions_span_the_step_counts_they_name() {
         println!("  {id:<44} authored {target:>6}  spans {span:>6}");
     }
     println!("  {:<44} {:>15} {total:>12}", "in all", "");
-    assert_eq!(spans.len(), 5, "five of the nine ask for time: {spans:?}");
-    // The chapter's authored duration alone, before a step of travel or search:
-    // a little over twelve minutes of the twenty.
+    assert_eq!(spans.len(), 4, "four of the nine ask for time: {spans:?}");
+    // The chapter's authored timers exclude the stored-Q threshold, which is
+    // satisfied by Supply delivery rather than elapsed time.
     assert!(
-        total > 20_000 && total < 26_000,
+        total > 16_000 && total < 16_500,
         "the authored duration comes to {total} steps, outside the band the pacing was set in",
     );
 }

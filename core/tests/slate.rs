@@ -24,8 +24,8 @@ use field_game_core::json::{parse, write_text, Json};
 use field_game_core::rng::RngState;
 use field_game_core::slate::{self, CandidateSlate, Source, SLATE_CAP};
 use field_game_core::state::{
-    ControlState, FieldState, GeneratorSpec, InputConfig, Progress, RunState, Step, Surround, Trace,
-    TraceStep, ViewDeclaration,
+    ControlState, FieldState, InputConfig, Progress, RunState, Step, Surround, Trace, TraceStep,
+    ViewDeclaration,
 };
 use field_game_core::Session;
 
@@ -102,6 +102,7 @@ fn spread_field() -> FieldState {
         route_capacity: 32 * ONE_UNIT,
         link: None,
         trail: None,
+        junction: None,
     }];
     field.physical_compartment = PhysicalCompartment {
         members: vec![2, 3],
@@ -191,7 +192,8 @@ fn state_of(mut field: FieldState, view: ViewDeclaration, steps: Vec<TraceStep>)
     RunState {
         run_id: KEY.to_string(),
         rng: field_game_core::rng::trajectory_stream(KEY, 0),
-        spec: GeneratorSpec::new(NO_CONTENT.to_string(), Default::default()),
+        scenario: field_game_core::state::ScenarioSpec::legacy(NO_CONTENT.to_string()),
+        criterion: None,
         branch_nonce: 0,
         progress: Progress::opening(),
         now: field,

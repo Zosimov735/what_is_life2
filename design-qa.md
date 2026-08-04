@@ -1,56 +1,96 @@
-# Number 2 Visual Overhaul — Design QA
+# Number 2 Whole-Game Visual Overhaul - Design QA
 
-Final result: passed
+final result: passed
 
-## Target
+## Target and captures
 
-- Source: `docs/field-framework/assets/number-2/physical-compartment-and-view.png`
-- Source dimensions: 1487 × 1058 px
-- Canonical state: Still Mode with the passive Observation View and causal
-  Physical Compartment visible together
-- Implementation capture: `design-qa-implementation.png`
-- Implementation viewport: 1280 × 720 CSS px at DPR 1
-- Narrow capture: `design-qa-mobile.png`
-- Narrow viewport: 319 × 699 CSS px at DPR 1
+- Primary Atlas source: `docs/field-framework/assets/number-2/atlas.png`
+- Active Field source: `docs/field-framework/assets/number-2/active-commissioning.png`
+- Source dimensions: 1487 x 1058 px
+- Atlas implementation: `docs/field-framework/qa/ui-pass/26-final-atlas-verified.png`
+- Form implementation: `docs/field-framework/qa/ui-pass/27-final-form-verified.png`
+- Active Field implementation: `docs/field-framework/qa/ui-pass/28-final-field-verified.png`
+- Desktop viewport: 1280 x 720 CSS px at DPR 1
+- Narrow evidence: `docs/field-framework/qa/ui-pass/09-atlas-mobile-after.png`,
+  `10-form-mobile-after.png`, `12-active-mobile-after.png`,
+  `14-still-mobile-after.png`, and `23-lab-mobile-stable.png`
+- Narrow viewport: 319 x 699 CSS px at DPR 1
 
-## Same-State Comparison
+## Same-state comparisons
 
-- Combined evidence: `design-qa-comparison.png`
-- Layout: normalized source on the left, implementation on the right
-- Comparison dimensions: 2560 × 720 px
-- The source was center-cropped to the implementation's 16:9 viewport and
-  scaled to 1280 × 720 before both images were joined. No implementation crop
-  or independent visual judgment was used.
+- Atlas evidence: `docs/field-framework/qa/ui-pass/29-atlas-comparison.png`
+- Active Field evidence: `docs/field-framework/qa/ui-pass/30-field-comparison.png`
+- Comparison dimensions: 2560 x 720 px
+- Each source was center-cropped to 16:9 and scaled to 1280 x 720. The latest
+  1280 x 720 implementation capture is placed immediately to its right.
+- Atlas compares the source destination map with the implemented destination
+  map and selected-Regime contract. Active Field compares commissioning with a
+  newly commissioned deterministic run rather than replacing simulation
+  geometry with the source illustration.
 
-## Comparison History
+## Required surfaces
 
-1. The first direct-play capture used the browser's 319 × 699 default viewport.
-   The mode controls and View protocol collided, and the coordinate-profile
-   control touched the View region. The narrow breakpoint now reserves distinct
-   vertical bands for mode, protocol, profile, and budget surfaces.
-2. The first desktop comparison matched composition and hierarchy but muted too
-   much of the source texture's amber and violet variation. The final treatment
-   raises authored texture presence while keeping live causal marks dominant.
-3. The final 1280 × 720 comparison retains the source's graphite field,
-   filament density, restrained instrument typography, heavy material edge,
-   and thin violet observational layer without copying conceptual labels that
-   conflict with the product mechanics.
+- **Typography:** condensed instrument capitals, readable monospace values, and
+  a restrained hierarchy remain consistent across Atlas, Form selection,
+  active play, Still Mode, and laboratory benches.
+- **Spacing:** all primary desktop surfaces preserve the source's broad dark
+  Field, fine edge rails, and precise gutters. The 319 x 699 breakpoint gives
+  controls, contracts, results, and the Field independent vertical regions.
+- **Color:** graphite ground, living cyan transport, warm material, mint
+  selection, and violet observation remain distinct semantic channels.
+- **Imagery:** the authored living texture and generated material texture
+  establish whole-screen atmosphere; simulation objects remain live and do not
+  masquerade as decorative texture.
+- **Copy:** source composition is preserved while mechanics labels follow the
+  canonical Regime, Form, resource, control, intervention, and evidence terms.
+- **Models:** all eight Forms have distinct measured silhouettes. Components,
+  Routes, Supply, medium motion, pressure, intervention consequences, Wake
+  caches, local material, and signals have depth-aware marks in both renderers.
 
-## Interaction Evidence
+## Comparison history
 
-- Thread opens into the live Field and Space enters Still Mode.
-- Observation View is initially pressed and remains a free analysis surface.
-- Physical Compartment resolves to one control and changes to
-  `aria-pressed="true"` when selected.
-- Merely switching tools leaves the displayed Intervention Budget at 3, queued
-  physical edits at 0, and cost at 0.
-- The browser reported no warning or error console entries during the flow.
+1. The initial narrow pass allowed mode controls, the View protocol, and the
+   laboratory quality control to collide. Responsive bands and scroll
+   containment now keep every control reachable without covering results.
+2. The first active Field pass was too flat and diagrammatic. Layered material
+   texture, bounded network atmosphere, depth fog, living Supply edges,
+   chassis highlights, local glints, and restrained motion now carry the
+   living character of the Number 2 source.
+3. The first Atlas pass did not give the selected Regime enough authority. The
+   final composition balances a spatial constellation with one quiet contract
+   rail and a clear implemented selection.
+4. The final Atlas, Form, Field, Still, and laboratory states were inspected at
+   desktop and narrow widths. Atlas selection, Form confirmation, Why, keyboard
+   steering, Pulse, Still tools, and laboratory navigation remain operable.
+
+## Interaction evidence
+
+- Atlas pointer, arrows, and Enter move through implemented destinations.
+- Form pointer, arrows, and Enter select and confirm a measured chassis.
+- Thread opens into the live Field; WASD and Arrow keys steer while pointer
+  motion remains inspection-only.
+- Shift and Field primary press charge Pulse. Presses on Why or UI chrome do
+  not begin Pulse.
+- Why remains pointer-accessible during active play.
+- Space enters Still Mode; `C` and `V` switch between causal Physical
+  Compartment and passive Observation View tools.
+- Observe, Intervention, Divergence, Ensemble, Holdout, Archive, Renewal,
+  Inheritance, and Open Field benches were inspected in their integrated shell.
+- Archive created a local record and exposed comparison/reopen controls.
+- Browser inspection reported no warning or error entries in the verified
+  desktop and narrow flows.
 
 ## Findings
 
 - P0: none.
 - P1: none.
 - P2: none.
-- P3: live geometry follows the deterministic chapter state rather than the
-  mock-up's illustrative node placement; this is intentional and preserves the
-  simulation as the source of truth.
+- P3: the source Atlas and commissioning mock-ups use denser illustrative
+  geometry than a fresh deterministic run. The implementation keeps that
+  richness in atmosphere and uses authoritative simulation state for every
+  causal object; this is intentional.
+- P3: low and medium quality tiers deliberately remove secondary bloom and
+  particles while preserving object identity and intervention geometry.
+
+The visual system is coherent across the complete playable shell, matches the
+Number 2 art direction, and is ready for human playtest observation.

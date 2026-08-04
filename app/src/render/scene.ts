@@ -30,41 +30,83 @@
  */
 
 import {
+  ASSEMBLY_DRAFT,
+  ASSEMBLY_DRAFT_CURRENT,
+  ASSEMBLY_DRAFT_MATERIAL,
+  ASSEMBLY_DRAFT_ORIGIN,
   BACKDROP,
   CANDIDATE,
   CANDIDATE_FOCUSED,
   CHARGE_CORE,
   CHARGE_HIGH,
   CHARGE_LOW,
+  CHARGE_SPARK,
   CUE_HARD,
   CUE_SOFT,
   CURRENT_BRIGHT,
+  CURRENT_GLASS,
   CURRENT_PLAIN,
   FORECAST,
   FORM_CONTROLLED,
   FORM_CONTROLLED_RING,
+  FORM_FACET,
+  FORM_FACET_SHADOW,
   FORM_PLAIN,
   HANDLE_BOUNDARY,
   HANDLE_PORT,
   HANDLE_ROUTE,
   HAZE,
   HAZE_TINT,
+  INTERVENTION_BREACH,
+  INTERVENTION_CLAMP,
+  INTERVENTION_DECOY,
+  INTERVENTION_DELAY,
+  INTERVENTION_SCRAMBLE,
+  MATERIAL_CONDUCTOR,
+  MATERIAL_JUNCTION,
+  MATERIAL_BOUNDARY,
   mixTone,
   OVERLOAD,
   OBSERVATION_VIEW,
   PHYSICAL_COMPARTMENT,
   PHYSICAL_COMPARTMENT_PROPOSED,
+  POLICY_ACTIVE,
+  POLICY_BLOCKED,
+  POLICY_IDLE,
+  POLICY_TARGET,
+  POLICY_PREVIEW,
+  POLICY_WAIT,
   PORT_BASE,
   PRESSURE_TONES,
   ROUTE_BASE,
+  ROUTE_AUTOMATION,
+  ROUTE_AUTOMATION_DISABLED,
   ROUTE_CUT_QUEUED,
   ROUTE_FLOW,
   ROUTE_MOVE_QUEUED,
   ROUTE_PROPOSED,
   type Tone,
 } from './palette';
+import { renderQuality, type RenderQualityProfile } from './quality';
 import { Ephemera, FIELD_UNITS, portUnits } from './history';
-import type { FramePort, FrameState } from '../../../worker/src/frame-state';
+import type {
+  FramePolicyRuntime,
+  FramePort,
+  FramePressure,
+  FrameRouteTransferOutcome,
+  FrameState,
+} from '../../../worker/src/frame-state';
+import type {
+  EngineeringAssemblyDiffChange,
+  EngineeringAssemblyCompatibilityDisposition,
+  EngineeringAssemblyDraft,
+  EngineeringAssemblyPreview,
+  EngineeringRunTransitionPreview,
+  EngineeringRunTransitionReceipt,
+  EngineeringTransitionKind,
+  PolicyPreview,
+  PolicyTargetKind,
+} from '../../../worker/src/protocol';
 
 /**
  * The Route statuses that report a queued change rather than a standing Route:
@@ -90,6 +132,21 @@ const COMPARTMENT_EDGE_UNITS = 10;
 const VIEW_EDGE_UNITS = 2;
 const CANDIDATE_EDGE_UNITS = 2;
 
+/** Field bits carried by one accepted assembly candidate mark. */
+export const ASSEMBLY_DRAFT_FIELD = {
+  position: 1 << 0,
+  layer: 1 << 1,
+  charge: 1 << 2,
+  interface: 1 << 3,
+  reserve: 1 << 4,
+  blanks: 1 << 5,
+  amount: 1 << 6,
+  phase: 1 << 7,
+  active: 1 << 8,
+  members: 1 << 9,
+  leakage: 1 << 10,
+} as const;
+
 /** How far one layer of separation pushes a plane away. */
 const DEPTH_SCALE = 0.22;
 
@@ -99,14 +156,20 @@ const NEAR_SCALE = 0.3;
 /** How far above every other Form's mark the controlled one is held. */
 const CONTROLLED_MARGIN = 1.4;
 
-/** The eight Forms' drawn side counts, in the closed set's own order. */
-const FORM_SIDES = [3, 6, 4, 5, 8, 7, 3, 9];
-
-/** How many soft particles one band segment or flowing Route carries. */
-const PARTICLES_PER_SEGMENT = 5;
+/** The eight chassis profiles, in the closed Form set's own order. */
+const FORM_PROFILES = [
+  { sides: 3, inset: 0.68, stretchX: 1.04, stretchY: 1.16, turn: -Math.PI / 2, core: 0.42 },
+  { sides: 6, inset: 0.9, stretchX: 1.16, stretchY: 0.92, turn: Math.PI / 6, core: 0.5 },
+  { sides: 4, inset: 0.7, stretchX: 0.84, stretchY: 1.2, turn: Math.PI / 4, core: 0.46 },
+  { sides: 5, inset: 0.82, stretchX: 1.08, stretchY: 0.98, turn: -Math.PI / 2, core: 0.47 },
+  { sides: 8, inset: 0.91, stretchX: 1, stretchY: 1, turn: Math.PI / 8, core: 0.56 },
+  { sides: 7, inset: 0.76, stretchX: 1.12, stretchY: 0.94, turn: -Math.PI / 2, core: 0.45 },
+  { sides: 3, inset: 0.48, stretchX: 0.74, stretchY: 1.34, turn: -Math.PI / 2, core: 0.36 },
+  { sides: 9, inset: 0.78, stretchX: 1, stretchY: 1, turn: -Math.PI / 2, core: 0.48 },
+] as const;
 
 /** The most particles a scene carries, whatever the Field holds. */
-const PARTICLE_CAP = 384;
+const PARTICLE_CAP = 620;
 
 /** What the surface is, in device pixels and in the ratio it was sized at. */
 export interface Viewport {
@@ -156,6 +219,19 @@ export interface HazeMark {
   tone: Tone;
 }
 
+export interface MediumMark {
+  active: boolean;
+  dx: number;
+  dy: number;
+  speed: number;
+  drag: number;
+  collisionRadius: number;
+  collisionResponse: number;
+  alpha: number;
+  offset: number;
+  tone: Tone;
+}
+
 export interface PortMark {
   /** The Node this mark stands for, which is what a handle on it names. */
   node: number;
@@ -164,6 +240,8 @@ export interface PortMark {
   radius: number;
   /** The closed Node-kind set's own order: 0 port, 1 reserve, 2 module, 3 form. */
   kind: number;
+  /** Whether this Component participates in Routes. Closed Ports stay hollow. */
+  open: boolean;
   tone: Tone;
   /** How far the soft bloom around the mark reaches, in device pixels. */
   bloom: number;
@@ -174,13 +252,21 @@ export interface PortMark {
   shell: boolean;
   /** Whether a queued change would make this Node a member. A preview. */
   proposedMember: boolean;
+  decoyReceiver: boolean;
+  breached: boolean;
   /** 0 to 1: how lately a current delivered here. */
   delivered: number;
-  /** 0 to 1: the Charge held in reserve, against this Node's own threshold. */
+  /** 0 to 1: isolated Vault reserve against its finite reserve capacity. */
   reserve: number;
+  /** Signed latest-frame change in isolated reserve, normalized to capacity. */
+  reserveDelta: number;
   alpha: number;
   /** Layers away from the camera's own; only a Form's own Node is ever off it. */
   depth: number;
+  /** A targeted pressure's local strength and register, or zero when unaffected. */
+  stress: number;
+  stressTone: Tone;
+  stressCrisis: boolean;
 }
 
 export interface RouteMark {
@@ -195,8 +281,20 @@ export interface RouteMark {
   alpha: number;
   /** 0 to 1 of the Route's own capacity. */
   flow: number;
+  /** Exact latest-step demand and acceptance, normalized for visual stance. */
+  requested: number;
+  accepted: number;
+  transferOutcome: FrameRouteTransferOutcome;
   /** 0 standing, 1 cut queued, 2 overloaded, 3 move queued, 4 proposed. */
   status: number;
+  clamped: boolean;
+  scrambled: boolean;
+  automationEnabled: boolean;
+  automationLimited: boolean;
+  /** Exact endpoint gate state. A closed endpoint makes the Route dormant. */
+  tailOpen: boolean;
+  headOpen: boolean;
+  gated: boolean;
   /**
    * Whether this mark is a queued change rather than a standing Route. Both
    * engines draw a preview broken rather than solid, so what the queue would do
@@ -205,9 +303,14 @@ export interface RouteMark {
   preview: boolean;
   /** Layers away from the camera's own: the shallower of its two ends. */
   depth: number;
+  stress: number;
+  stressTone: Tone;
+  stressCrisis: boolean;
 }
 
 export interface FormMark {
+  form: number;
+  formOrdinal: number;
   x: number;
   y: number;
   radius: number;
@@ -221,10 +324,174 @@ export interface FormMark {
   /** 0 to 1 of the stored-Charge cap. */
   charge: number;
   sides: number;
+  /** Device-pixel pairs for the silhouette and inset chassis core. */
+  outline: number[];
+  core: number[];
+  facetTone: Tone;
+  facetShadow: Tone;
   /** The direction the Form is travelling, in radians. */
   heading: number;
   alpha: number;
   depth: number;
+  stress: number;
+  stressTone: Tone;
+  stressCrisis: boolean;
+}
+
+/** One exact retained local-policy decision projected onto its physical owner. */
+export interface PolicyMark {
+  address: number;
+  action: FramePolicyRuntime['action'];
+  outcome: FramePolicyRuntime['outcome'];
+  targetKind: FramePolicyRuntime['targetKind'];
+  rule: number;
+  x: number;
+  y: number;
+  radius: number;
+  /** Selected action radius in device pixels; zero for non-range actions. */
+  reach: number;
+  /** Draft condition sensor radius in device pixels; zero for live runtime marks. */
+  sensorReach: number;
+  hasTarget: boolean;
+  targetX: number;
+  targetY: number;
+  targetRadius: number;
+  tone: Tone;
+  targetTone: Tone;
+  alpha: number;
+  phase: number;
+  /** Draft projection is visually distinct and never retained as runtime state. */
+  preview: boolean;
+}
+
+export interface PolicyCandidateMark {
+  id: number;
+  kind: PolicyTargetKind;
+  x: number;
+  y: number;
+  radius: number;
+  selected: boolean;
+  tone: Tone;
+  alpha: number;
+}
+
+export type AssemblyDraftMarkKind =
+  | 'component'
+  | 'route'
+  | 'form'
+  | 'material'
+  | 'current'
+  | 'physical_compartment';
+
+/**
+ * One localized change in an accepted Design assembly preview.
+ *
+ * These marks are presentation-only. `fromX/fromY` point at the committed
+ * opening, `x/y` at the normalized candidate, and no value is fed back into
+ * simulation, inspection, or hit testing.
+ */
+export interface AssemblyDraftMark {
+  kind: AssemblyDraftMarkKind;
+  id: number;
+  x: number;
+  y: number;
+  radius: number;
+  fromX: number;
+  fromY: number;
+  fromRadius: number;
+  displaced: boolean;
+  fields: number;
+  beforeLevel: number;
+  afterLevel: number;
+  count: number;
+  active: boolean;
+  open: boolean;
+  phase: number;
+  tone: Tone;
+  originTone: Tone;
+  alpha: number;
+  depth: number;
+  /** True only for a receipt-bound reconstruction companion. */
+  companion: boolean;
+  /** Rust-authored field stance for a transition companion, never simulation input. */
+  compatibility: EngineeringAssemblyCompatibilityDisposition | null;
+}
+
+export type EngineeringTransitionCompanionStage =
+  | 'none'
+  | 'preview'
+  | 'deenergize'
+  | 'reconstruct'
+  | 'settle'
+  | 'locked';
+
+/** Shell-held display input for one Rust-authored reconstruction boundary. */
+export interface EngineeringTransitionCompanion {
+  preview: EngineeringRunTransitionPreview;
+  receipt: EngineeringRunTransitionReceipt | null;
+  status: 'preview' | 'committed';
+}
+
+/** Parent geometry retained only long enough to express the accepted transition. */
+export interface EngineeringTransitionOrigin {
+  components: Array<{
+    node: number;
+    layer: number;
+    x: number;
+    y: number;
+    charge: number;
+    open: boolean;
+  }>;
+  currents: Array<{ id: number; active: boolean; phase: number }>;
+  forms: Array<{ node: number; reserve: number }>;
+  materials: Array<{
+    material: number;
+    layer: number;
+    x: number;
+    y: number;
+    amount: number;
+  }>;
+  physicalCompartment: {
+    members: number[];
+    leakage: number;
+  };
+}
+
+export function captureEngineeringTransitionOrigin(
+  frame: FrameState | null,
+): EngineeringTransitionOrigin | null {
+  if (!frame) return null;
+  const ports = new Map(frame.ports.map((port) => [port.node, port] as const));
+  return {
+    components: frame.ports.map((port) => ({
+      node: port.node,
+      layer: port.layer,
+      x: port.x / 16,
+      y: port.y / 16,
+      charge: port.charge / 65_535,
+      open: port.open,
+    })),
+    currents: frame.currents.map((current) => ({
+      id: current.id,
+      active: current.active,
+      phase: current.phase / 65_535,
+    })),
+    forms: frame.forms.map((form) => ({
+      node: form.id,
+      reserve: (ports.get(form.id)?.reserve ?? 0) / 65_535,
+    })),
+    materials: frame.materials.map((material) => ({
+      material: material.material,
+      layer: material.layer,
+      x: material.x / 16,
+      y: material.y / 16,
+      amount: material.amount,
+    })),
+    physicalCompartment: {
+      members: frame.ports.filter((port) => port.member).map((port) => port.node).sort((a, b) => a - b),
+      leakage: frame.header.leakPerExposedContactPerStep,
+    },
+  };
 }
 
 export interface TrailMark {
@@ -240,6 +507,9 @@ export interface CurrentMark {
   layer: number;
   bright: boolean;
   active: boolean;
+  diverted: boolean;
+  delayed: boolean;
+  emitting: boolean;
   /** 0 to 1 of the locked strength cap. */
   strength: number;
   /** The current's own phase counter, as a fraction of a full turn. */
@@ -251,6 +521,50 @@ export interface CurrentMark {
   tone: Tone;
   alpha: number;
   depth: number;
+  stress: number;
+  stressTone: Tone;
+  stressCrisis: boolean;
+}
+
+/** A visible delivery path from a Supply Stream into one geometric recipient. */
+export interface SupplyLinkMark {
+  current: number;
+  recipient: number;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  phase: number;
+  width: number;
+  tone: Tone;
+  alpha: number;
+}
+
+/** Bit flags carried by one coupling target; an object may support several effects. */
+export const COUPLING_EFFECT = { gather: 1, open: 2, suppress: 4 } as const;
+
+/** One object the currently held coupling radius will actually affect. */
+export interface CouplingTargetMark {
+  x: number;
+  y: number;
+  radius: number;
+  effects: number;
+  phase: number;
+  tone: Tone;
+  alpha: number;
+}
+
+/** The true world-space coupling reach centered on the controlled Form. */
+export interface CouplingMark {
+  active: boolean;
+  connected: boolean;
+  x: number;
+  y: number;
+  radius: number;
+  charge: number;
+  phase: number;
+  tone: Tone;
+  alpha: number;
 }
 
 export interface BoundaryMark {
@@ -292,10 +606,14 @@ export interface BoundaryMark {
    * figure and without a colour.
    */
   tier: number;
+  /** Targeted pressure carried by this physical edge, never by a passive View. */
+  stress: number;
+  stressTone: Tone;
+  stressCrisis: boolean;
 }
 
 /** The three hull registers, kept explicit so geometry never collapses them. */
-export type BoundaryRole = 'compartment' | 'view' | 'candidate';
+export type BoundaryRole = 'compartment' | 'view' | 'candidate' | 'assembly-draft';
 
 /**
  * One candidate of the standing slate, as the renderer takes it: the position
@@ -349,6 +667,10 @@ export interface PlaybackMark {
 }
 
 export interface ParticleMark {
+  /** 0 atmosphere, 1 renewal material, 2 conserving Wake cache. */
+  subject: number;
+  /** Material identifier for subject 1, cache ordinal for subject 2, otherwise 0. */
+  id: number;
   x: number;
   y: number;
   radius: number;
@@ -448,6 +770,8 @@ export interface RimMark {
   beat: number;
   /** Whether a pressure stands at its crisis stage. */
   crisis: boolean;
+  /** Whether the dominant reading also has a local target on the Field. */
+  localized: boolean;
 }
 
 export interface Scene {
@@ -481,16 +805,41 @@ export interface Scene {
    */
   still: { presence: number; paused: boolean };
   reducedMotion: boolean;
+  /** Effect and mark budgets selected for this frame. */
+  quality: RenderQualityProfile;
+  /** Persistent marks plus this tier's moving-particle allowance. */
+  particleLimit: number;
   backdrop: Tone;
+  medium: MediumMark;
   hazes: Pool<HazeMark>;
   currents: Pool<CurrentMark>;
+  supplyLinks: Pool<SupplyLinkMark>;
   routes: Pool<RouteMark>;
   boundaries: Pool<BoundaryMark>;
   /** One outline per candidate of the standing slate, drawn under them. */
   candidates: Pool<BoundaryMark>;
+  /** Candidate physical-compartment hulls from accepted assembly previews. */
+  assemblyBoundaries: Pool<BoundaryMark>;
   ports: Pool<PortMark>;
   trails: Pool<TrailMark>;
   forms: Pool<FormMark>;
+  policies: Pool<PolicyMark>;
+  policyCandidates: Pool<PolicyCandidateMark>;
+  /** Localized accepted assembly changes in the noncausal draft register. */
+  assemblyDrafts: Pool<AssemblyDraftMark>;
+  /** One noncausal preview or receipt-bound reconstruction sequence. */
+  engineeringTransition: {
+    active: boolean;
+    operation: EngineeringTransitionKind | null;
+    stage: EngineeringTransitionCompanionStage;
+    phase: number;
+    tone: Tone;
+    originTone: Tone;
+    authorityTone: Tone;
+    commitAllowed: boolean;
+  };
+  coupling: CouplingMark;
+  couplingTargets: Pool<CouplingTargetMark>;
   particles: Pool<ParticleMark>;
   cues: Pool<CueMark>;
   handles: Pool<HandleMark>;
@@ -512,13 +861,19 @@ export function createScene(): Scene {
     stillness: 0,
     still: { presence: 0, paused: false },
     reducedMotion: false,
+    quality: renderQuality(),
+    particleLimit: 320,
     backdrop: BACKDROP,
+    medium: { active: false, dx: 1, dy: 0, speed: 0, drag: 0, collisionRadius: 0, collisionResponse: 0, alpha: 0, offset: 0, tone: CURRENT_GLASS },
     hazes: new Pool<HazeMark>(() => ({ depth: 0, alpha: 0, tone: HAZE })),
     currents: new Pool<CurrentMark>(() => ({
       id: 0,
       layer: 0,
       bright: false,
       active: false,
+      diverted: false,
+      delayed: false,
+      emitting: false,
       strength: 0,
       phase: 0,
       points: [],
@@ -526,6 +881,21 @@ export function createScene(): Scene {
       tone: CURRENT_PLAIN,
       alpha: 1,
       depth: 0,
+      stress: 0,
+      stressTone: PRESSURE_TONES[0],
+      stressCrisis: false,
+    })),
+    supplyLinks: new Pool<SupplyLinkMark>(() => ({
+      current: 0,
+      recipient: 0,
+      x1: 0,
+      y1: 0,
+      x2: 0,
+      y2: 0,
+      phase: 0,
+      width: 1,
+      tone: CURRENT_GLASS,
+      alpha: 0,
     })),
     routes: new Pool<RouteMark>(() => ({
       route: 0,
@@ -537,9 +907,22 @@ export function createScene(): Scene {
       width: 1,
       alpha: 1,
       flow: 0,
+      requested: 0,
+      accepted: 0,
+      transferOutcome: 'standing',
       status: 0,
+      clamped: false,
+      scrambled: false,
+      automationEnabled: true,
+      automationLimited: false,
+      tailOpen: false,
+      headOpen: false,
+      gated: true,
       preview: false,
       depth: 0,
+      stress: 0,
+      stressTone: PRESSURE_TONES[0],
+      stressCrisis: false,
     })),
     boundaries: new Pool<BoundaryMark>(() => ({
       points: [],
@@ -552,6 +935,9 @@ export function createScene(): Scene {
       candidate: 0,
       focused: false,
       tier: 0,
+      stress: 0,
+      stressTone: PRESSURE_TONES[0],
+      stressCrisis: false,
     })),
     candidates: new Pool<BoundaryMark>(() => ({
       points: [],
@@ -564,6 +950,24 @@ export function createScene(): Scene {
       candidate: 0,
       focused: false,
       tier: 0,
+      stress: 0,
+      stressTone: PRESSURE_TONES[0],
+      stressCrisis: false,
+    })),
+    assemblyBoundaries: new Pool<BoundaryMark>(() => ({
+      points: [],
+      nodes: [],
+      tone: ASSEMBLY_DRAFT,
+      alpha: 0,
+      width: 2,
+      role: 'assembly-draft',
+      proposed: true,
+      candidate: 0,
+      focused: false,
+      tier: 0,
+      stress: 0,
+      stressTone: PRESSURE_TONES[0],
+      stressCrisis: false,
     })),
     ports: new Pool<PortMark>(() => ({
       node: 0,
@@ -571,6 +975,7 @@ export function createScene(): Scene {
       y: 0,
       radius: 1,
       kind: 0,
+      open: false,
       tone: PORT_BASE,
       bloom: 0,
       charge: 0,
@@ -578,13 +983,21 @@ export function createScene(): Scene {
       member: false,
       shell: false,
       proposedMember: false,
+      decoyReceiver: false,
+      breached: false,
       delivered: 0,
       reserve: 0,
+      reserveDelta: 0,
       alpha: 1,
       depth: 0,
+      stress: 0,
+      stressTone: PRESSURE_TONES[0],
+      stressCrisis: false,
     })),
     trails: new Pool<TrailMark>(() => ({ points: [], tone: FORM_PLAIN, alpha: 1, width: 1 })),
     forms: new Pool<FormMark>(() => ({
+      form: 0,
+      formOrdinal: 0,
       x: 0,
       y: 0,
       radius: 1,
@@ -596,11 +1009,111 @@ export function createScene(): Scene {
       pulseCharging: false,
       charge: 0,
       sides: 6,
+      outline: [],
+      core: [],
+      facetTone: FORM_CONTROLLED,
+      facetShadow: HAZE,
       heading: 0,
       alpha: 1,
       depth: 0,
+      stress: 0,
+      stressTone: PRESSURE_TONES[0],
+      stressCrisis: false,
     })),
-    particles: new Pool<ParticleMark>(() => ({ x: 0, y: 0, radius: 1, tone: CURRENT_BRIGHT, alpha: 1 })),
+    policies: new Pool<PolicyMark>(() => ({
+      address: 0,
+      action: 'none',
+      outcome: 'idle',
+      targetKind: 'none',
+      rule: -1,
+      x: 0,
+      y: 0,
+      radius: 1,
+      reach: 0,
+      sensorReach: 0,
+      hasTarget: false,
+      targetX: 0,
+      targetY: 0,
+      targetRadius: 1,
+      tone: POLICY_IDLE,
+      targetTone: POLICY_TARGET,
+      alpha: 0,
+      phase: 0,
+      preview: false,
+    })),
+    policyCandidates: new Pool<PolicyCandidateMark>(() => ({
+      id: 0,
+      kind: 'none',
+      x: 0,
+      y: 0,
+      radius: 1,
+      selected: false,
+      tone: POLICY_PREVIEW,
+      alpha: 0,
+    })),
+    assemblyDrafts: new Pool<AssemblyDraftMark>(() => ({
+      kind: 'component',
+      id: 0,
+      x: 0,
+      y: 0,
+      radius: 1,
+      fromX: 0,
+      fromY: 0,
+      fromRadius: 1,
+      displaced: false,
+      fields: 0,
+      beforeLevel: 0,
+      afterLevel: 0,
+      count: 0,
+      active: false,
+      open: false,
+      phase: 0,
+      tone: ASSEMBLY_DRAFT,
+      originTone: ASSEMBLY_DRAFT_ORIGIN,
+      alpha: 0,
+      depth: 0,
+      companion: false,
+      compatibility: null,
+    })),
+    engineeringTransition: {
+      active: false,
+      operation: null,
+      stage: 'none',
+      phase: 0,
+      tone: ASSEMBLY_DRAFT,
+      originTone: ASSEMBLY_DRAFT_ORIGIN,
+      authorityTone: ASSEMBLY_DRAFT_MATERIAL,
+      commitAllowed: false,
+    },
+    coupling: {
+      active: false,
+      connected: false,
+      x: 0,
+      y: 0,
+      radius: 0,
+      charge: 0,
+      phase: 0,
+      tone: FORM_CONTROLLED_RING,
+      alpha: 0,
+    },
+    couplingTargets: new Pool<CouplingTargetMark>(() => ({
+      x: 0,
+      y: 0,
+      radius: 0,
+      effects: 0,
+      phase: 0,
+      tone: FORM_CONTROLLED_RING,
+      alpha: 0,
+    })),
+    particles: new Pool<ParticleMark>(() => ({
+      subject: 0,
+      id: 0,
+      x: 0,
+      y: 0,
+      radius: 1,
+      tone: CURRENT_BRIGHT,
+      alpha: 1,
+    })),
     cues: new Pool<CueMark>(() => ({
       x: 0,
       y: 0,
@@ -644,7 +1157,7 @@ export function createScene(): Scene {
       count: 0,
       tone: FORECAST,
     },
-    rim: { tone: PRESSURE_TONES[0], level: 0, beat: 0, crisis: false },
+    rim: { tone: PRESSURE_TONES[0], level: 0, beat: 0, crisis: false, localized: false },
   };
 }
 
@@ -674,6 +1187,65 @@ function depthTone(tone: Tone, depth: number): Tone {
   return mixTone(tone, HAZE_TINT, Math.min(0.62, 0.24 * Math.abs(depth)));
 }
 
+interface PressureStyledMark {
+  stress: number;
+  stressTone: Tone;
+  stressCrisis: boolean;
+}
+
+/** The visual force of one authored pressure stage, independent of its target. */
+function pressureLevel(pressure: FramePressure): number {
+  const stage =
+    pressure.stage === 'crisis'
+      ? 1
+      : pressure.stage === 'pressure'
+        ? 0.62
+        : pressure.stage === 'resolution'
+          ? 0.18
+          : 0.32;
+  return clamp01((pressure.level / 65535) * stage + (pressure.stage === 'crisis' ? 0.25 : 0));
+}
+
+/**
+ * Applies only the strongest pressure that actually reaches a rendered subject.
+ * A targetless pressure is intentionally global; addressed pressures stay on
+ * their Node, Route, or layer instead of recolouring the whole Field.
+ */
+function applyPressure(
+  next: FrameState,
+  mark: PressureStyledMark,
+  layer: number,
+  node: number | null = null,
+  route: number | null = null,
+  relatedNodes: readonly number[] = [],
+): void {
+  mark.stress = 0;
+  mark.stressTone = PRESSURE_TONES[0];
+  mark.stressCrisis = false;
+  for (const pressure of next.pressures) {
+    if (pressure.queued) continue;
+    const reaches =
+      pressure.targetKind === 'none' ||
+      (pressure.targetKind === 'layer' && pressure.target === layer) ||
+      (pressure.targetKind === 'node' &&
+        (pressure.target === node || relatedNodes.includes(pressure.target))) ||
+      (pressure.targetKind === 'route' &&
+        (pressure.target === route ||
+          (relatedNodes.length > 0 &&
+            next.routes.some(
+              (candidate) =>
+                candidate.route === pressure.target &&
+                (relatedNodes.includes(candidate.tail) || relatedNodes.includes(candidate.head)),
+            ))));
+    if (!reaches) continue;
+    const reading = pressureLevel(pressure);
+    if (reading <= mark.stress) continue;
+    mark.stress = reading;
+    mark.stressTone = PRESSURE_TONES[pressure.ordinal % PRESSURE_TONES.length];
+    mark.stressCrisis = pressure.stage === 'crisis';
+  }
+}
+
 /**
  * Fills the scene from one pair of snapshots.
  *
@@ -693,16 +1265,27 @@ export function projectScene(
   playback: PlaybackReading | null = null,
   playbackClock = 0,
   tool: StillSurfaceTool = 'compartment',
+  policyPreview: PolicyPreview | null = null,
+  assemblyPreview: EngineeringAssemblyPreview | null = null,
+  engineeringTransition: EngineeringTransitionCompanion | null = null,
+  engineeringTransitionOrigin: EngineeringTransitionOrigin | null = null,
+  engineeringTransitionClock = 0,
 ): Scene {
   for (const pool of [
     scene.hazes,
     scene.currents,
+    scene.supplyLinks,
     scene.routes,
     scene.boundaries,
     scene.candidates,
+    scene.assemblyBoundaries,
     scene.ports,
     scene.trails,
     scene.forms,
+    scene.policies,
+    scene.policyCandidates,
+    scene.assemblyDrafts,
+    scene.couplingTargets,
     scene.particles,
     scene.cues,
     scene.handles,
@@ -722,7 +1305,26 @@ export function projectScene(
   scene.still.paused = next.header.stillVisible;
   scene.still.presence = ephemera.easeStill(stillTarget(next), reduced);
   scene.reducedMotion = reduced;
+  scene.engineeringTransition.active = false;
+  scene.engineeringTransition.operation = null;
+  scene.engineeringTransition.stage = 'none';
+  scene.engineeringTransition.phase = 0;
+  scene.engineeringTransition.commitAllowed = false;
+  scene.quality = renderQuality();
+  scene.particleLimit = scene.quality.movingParticles;
   scene.backdrop = BACKDROP;
+  const medium = next.mediumMotion;
+  const mediumSpeed = medium ? Math.hypot(medium.vx, medium.vy) : 0;
+  scene.medium.active = medium !== null && medium.drag > 0 && mediumSpeed > 0;
+  scene.medium.dx = mediumSpeed > 0 && medium ? medium.vx / mediumSpeed : 1;
+  scene.medium.dy = mediumSpeed > 0 && medium ? medium.vy / mediumSpeed : 0;
+  scene.medium.speed = mediumSpeed;
+  scene.medium.drag = medium ? medium.drag / 65535 : 0;
+  scene.medium.collisionRadius = medium?.collisionRadius ?? 0;
+  scene.medium.collisionResponse = medium ? medium.collisionResponse / 65535 : 0;
+  scene.medium.alpha = scene.medium.active ? 0.055 + scene.medium.drag * 0.12 : 0;
+  scene.medium.offset = reduced ? 0 : (scene.clock * mediumSpeed * 0.85) % 96;
+  scene.medium.tone = CURRENT_GLASS;
 
   const cameraLayer = next.camera?.targetLayer ?? next.header.cameraLayer;
   const steered = next.forms.find((form) => form.controlled);
@@ -760,6 +1362,22 @@ export function projectScene(
   if (tool === 'view') fillCandidates(scene, next, place, zoom, cameraLayer, candidates);
   fillTrails(scene, ephemera, place, zoom, profile, reduced, cameraLayer);
   fillForms(scene, previous, next, place, zoom, held, cameraLayer);
+  fillPolicyRuntime(scene, next, place, zoom, cameraLayer);
+  fillPolicyPreview(scene, next, policyPreview, place, zoom, cameraLayer);
+  fillAssemblyPreview(scene, assemblyPreview, place, zoom, cameraLayer);
+  fillEngineeringTransition(
+    scene,
+    engineeringTransition,
+    engineeringTransitionOrigin,
+    engineeringTransitionClock,
+    place,
+    zoom,
+    cameraLayer,
+  );
+  fillSupplyLinks(scene, next);
+  fillCoupling(scene, next, zoom);
+  fillEmbodiedRenewal(scene, next, place, zoom, cameraLayer);
+  scene.particleLimit = Math.min(PARTICLE_CAP, scene.particles.count + scene.quality.movingParticles);
   fillParticles(scene, reduced);
   fillCues(scene, next, ephemera, place, zoom);
   fillHandles(scene, zoom, tool);
@@ -767,6 +1385,81 @@ export function projectScene(
   fillForecast(scene, next);
   fillRim(scene, next);
   return scene;
+}
+
+/**
+ * Renewal stock is physical Field state, so it is projected in the world and
+ * on its own layer rather than represented only by the laboratory inventory.
+ * Local evidence uses the existing cue grammar: a quiet ring whose remaining
+ * lifetime and radius expose how much usable signal is still present.
+ */
+function fillEmbodiedRenewal(
+  scene: Scene,
+  next: FrameState,
+  place: Place,
+  zoom: number,
+  cameraLayer: number,
+): void {
+  const materialTones = [MATERIAL_JUNCTION, MATERIAL_BOUNDARY, MATERIAL_CONDUCTOR] as const;
+  const materialLimit = scene.quality.persistentMarks;
+
+  for (const material of next.materials) {
+    if (material.claimed || scene.particles.count >= materialLimit) continue;
+    const depth = material.layer - cameraLayer;
+    const scale = zoom * depthScale(depth);
+    const screen = place(material.x / 16, material.y / 16, depth);
+    const mark = scene.particles.next();
+    mark.subject = 1;
+    mark.id = material.material;
+    mark.x = screen.x;
+    mark.y = screen.y;
+    mark.radius = Math.max(2.4, scale * (5.5 + Math.min(4, material.amount / 512)));
+    mark.tone = depthTone(materialTones[material.kind] ?? MATERIAL_CONDUCTOR, depth);
+    mark.alpha = (0.72 + 0.2 * Math.min(1, material.amount / 1024)) * depthAlpha(depth);
+  }
+
+  for (const cache of next.wakeCaches) {
+    if (scene.particles.count >= materialLimit) break;
+    const depth = cache.layer - cameraLayer;
+    const scale = zoom * depthScale(depth);
+    const screen = place(cache.x / 16, cache.y / 16, depth);
+    const retained = clamp01(cache.charge / (16 * 65_536));
+    const waiting = clamp01(cache.remaining / 60);
+    const mark = scene.particles.next();
+    mark.subject = 2;
+    mark.id = cache.ordinal;
+    mark.x = screen.x;
+    mark.y = screen.y;
+    mark.radius = Math.max(4, scale * (7 + retained * 6));
+    mark.tone = depthTone(CHARGE_SPARK, depth);
+    mark.alpha = (0.68 + retained * 0.28) * depthAlpha(depth);
+    const ring = scene.cues.next();
+    ring.x = screen.x;
+    ring.y = screen.y;
+    ring.radius = Math.max(mark.radius * 1.5, scale * (cache.radius / 65_536) * 0.12);
+    ring.tone = depthTone(CHARGE_CORE, depth);
+    ring.alpha = (0.18 + 0.42 * (1 - waiting)) * depthAlpha(depth);
+    ring.width = Math.max(1, scale * 1.8);
+    ring.hard = false;
+    ring.kind = 0;
+  }
+
+  for (const signal of next.localSignals) {
+    const depth = signal.layer - cameraLayer;
+    const scale = zoom * depthScale(depth);
+    const screen = place(signal.x / 16, signal.y / 16, depth);
+    const strength = signal.strength / 255;
+    const lifetime = clamp01(signal.remaining / 180);
+    const mark = scene.cues.next();
+    mark.x = screen.x;
+    mark.y = screen.y;
+    mark.radius = Math.max(6, scale * (18 + strength * 38));
+    mark.tone = depthTone(OBSERVATION_VIEW, depth);
+    mark.alpha = (0.22 + 0.5 * strength) * (0.3 + 0.7 * lifetime) * depthAlpha(depth);
+    mark.width = Math.max(1, scale * (1.5 + strength * 2.5));
+    mark.hard = false;
+    mark.kind = 0;
+  }
 }
 
 /**
@@ -926,16 +1619,33 @@ function fillCurrents(
     mark.layer = current.layer;
     mark.bright = current.bright;
     mark.active = current.active;
+    mark.diverted = current.diverted;
+    mark.delayed = current.delayed;
+    mark.emitting = current.emitting;
     mark.strength = current.strength / 65535;
     // The phase counter has no period in the frame, so it is read as a plain
     // turn: what it drives is a look, and nothing reads it back.
     mark.phase = (current.phase % 1024) / 1024;
     mark.depth = depth;
-    mark.alpha = current.active ? depthAlpha(depth) : depthAlpha(depth) * 0.3;
-    mark.tone = depthTone(current.bright ? CURRENT_BRIGHT : CURRENT_PLAIN, depth);
+    mark.alpha = current.active
+      ? depthAlpha(depth) * (current.emitting ? 1 : 0.28)
+      : depthAlpha(depth) * 0.18;
+    applyPressure(next, mark, current.layer);
+    const standingTone = current.delayed
+      ? INTERVENTION_DELAY
+      : current.diverted
+        ? INTERVENTION_DECOY
+        : current.bright
+          ? CURRENT_BRIGHT
+          : CURRENT_PLAIN;
+    const currentTone = depthTone(standingTone, depth);
+    mark.tone = mixTone(currentTone, depthTone(mark.stressTone, depth), mark.stress * 0.2);
     // The band a Node has to stand within to receive, drawn at the width the
     // rule uses, so what a viewer sees is what a Node has to reach.
-    mark.width = Math.max(2, zoom * depthScale(depth) * Math.max(8, current.width) * 2);
+    mark.width = Math.max(
+      4,
+      zoom * depthScale(depth) * Math.max(10, current.width) * (current.bright ? 2.35 : 1.9),
+    );
     mark.points.length = 0;
     for (const point of current.path) {
       const screen = place(point.x, point.y, depth);
@@ -971,6 +1681,7 @@ function fillRoutes(
 ): void {
   const now = placesByNode(next);
   const before = placesByNode(previous);
+  const gateByNode = new Map(next.ports.map((port) => [port.node, port.open]));
   const at = (node: number): { x: number; y: number; layer: number } | null => {
     const to = now.get(node);
     if (!to) return null;
@@ -999,10 +1710,21 @@ function fillRoutes(
     mark.x2 = to.x;
     mark.y2 = to.y;
     mark.flow = flow;
+    mark.requested = route.capacity > 0 ? clamp01(route.requested / route.capacity) : 0;
+    mark.accepted = route.capacity > 0 ? clamp01(route.accepted / route.capacity) : 0;
+    mark.transferOutcome = route.transferOutcome;
     mark.status = route.status;
+    mark.clamped = route.clamped;
+    mark.scrambled = route.scrambled;
+    mark.automationEnabled = route.automationEnabled;
+    mark.automationLimited = route.automationLimited;
+    mark.tailOpen = gateByNode.get(route.tail) ?? false;
+    mark.headOpen = gateByNode.get(route.head) ?? false;
+    mark.gated = !mark.tailOpen || !mark.headOpen;
     mark.preview = QUEUED_STATUS.includes(route.status);
     mark.depth = depth;
-    mark.width = Math.max(1, zoom * depthScale(depth) * (2.6 + 5.4 * flow));
+    applyPressure(next, mark, Math.min(tail.layer, head.layer), null, route.route, [route.tail, route.head]);
+    mark.width = Math.max(1.2, zoom * depthScale(depth) * (2.4 + 7.6 * flow));
     const fade = depthAlpha(depth);
     if (route.status === 2) {
       mark.tone = depthTone(OVERLOAD, depth);
@@ -1021,10 +1743,43 @@ function fillRoutes(
       // and the preview beside it is where it would go.
       mark.tone = depthTone(ROUTE_MOVE_QUEUED, depth);
       mark.alpha = 0.7 * fade;
+    } else if (!mark.automationEnabled) {
+      mark.tone = depthTone(ROUTE_AUTOMATION_DISABLED, depth);
+      mark.alpha = 0.5 * fade;
+      mark.width = Math.max(1, zoom * depthScale(depth) * 1.9);
+    } else if (mark.gated) {
+      mark.tone = depthTone(mixTone(ROUTE_BASE, HAZE, 0.68), depth);
+      mark.alpha = 0.3 * fade;
+      mark.width = Math.max(1, zoom * depthScale(depth) * 1.8);
+    } else if (mark.transferOutcome === 'source_starved') {
+      mark.tone = depthTone(mixTone(ROUTE_BASE, POLICY_BLOCKED, 0.72), depth);
+      mark.alpha = 0.72 * fade;
+    } else if (mark.transferOutcome === 'destination_headroom') {
+      mark.tone = depthTone(mixTone(ROUTE_BASE, CHARGE_HIGH, 0.68), depth);
+      mark.alpha = 0.78 * fade;
+    } else if (mark.transferOutcome === 'capacity_throttled') {
+      mark.tone = depthTone(mixTone(ROUTE_BASE, ROUTE_AUTOMATION, 0.7), depth);
+      mark.alpha = 0.76 * fade;
+    } else if (mark.transferOutcome === 'closed') {
+      mark.tone = depthTone(ROUTE_AUTOMATION_DISABLED, depth);
+      mark.alpha = 0.4 * fade;
+      mark.width = Math.max(1, zoom * depthScale(depth) * 1.8);
     } else {
       mark.tone = depthTone(mixTone(ROUTE_BASE, ROUTE_FLOW, clamp01(flow * 1.4)), depth);
-      mark.alpha = (0.34 + 0.42 * clamp01(flow * 1.6)) * fade;
+      mark.alpha = (0.4 + 0.48 * clamp01(flow * 1.6)) * fade;
     }
+    if (route.clamped) {
+      mark.tone = mixTone(mark.tone, depthTone(INTERVENTION_CLAMP, depth), 0.72);
+      mark.width = Math.max(1, mark.width * 0.72);
+    }
+    if (route.scrambled) {
+      mark.tone = mixTone(mark.tone, depthTone(INTERVENTION_SCRAMBLE, depth), 0.66);
+    }
+    if (mark.automationEnabled && mark.automationLimited) {
+      mark.tone = mixTone(mark.tone, depthTone(ROUTE_AUTOMATION, depth), 0.52);
+      mark.width = Math.max(1, mark.width * 0.82);
+    }
+    mark.tone = mixTone(mark.tone, depthTone(mark.stressTone, depth), mark.stress * 0.38);
   }
 }
 
@@ -1044,8 +1799,6 @@ function fillPorts(
   alpha: number,
   cameraLayer: number,
 ): void {
-  let widest = 0;
-  for (const port of next.ports) widest = Math.max(widest, port.charge);
   const before = new Map<number, FramePort>();
   for (const port of previous.ports) before.set(port.node, port);
 
@@ -1058,24 +1811,29 @@ function fillPorts(
     // a Form's own Node carries its Form's layer, so the two never come apart.
     const depth = port.layer - cameraLayer;
     const screen = place(x, y, depth);
-    const share = widest > 0 ? Math.sqrt(port.charge / widest) : 0;
-    const charge = clamp01(0.12 + 0.88 * share);
+    const charge = clamp01(port.charge / 65_535);
+    const visibleCharge = Math.sqrt(charge);
     const mark = scene.ports.next();
     mark.node = port.node;
     mark.x = screen.x;
     mark.y = screen.y;
     mark.kind = port.kind;
+    mark.open = port.open;
     mark.charge = charge;
     mark.overloaded = port.overloaded;
     mark.member = port.member;
     mark.shell = port.shell;
     mark.proposedMember = port.proposedMember;
+    mark.decoyReceiver = port.decoyReceiver;
+    mark.breached = port.breached;
     mark.reserve = port.reserve / 65535;
+    mark.reserveDelta = (port.reserve - (from?.reserve ?? port.reserve)) / 65535;
     mark.delivered = ephemera.deliveryStrength(port.node, scene.clock);
     mark.depth = depth;
+    applyPressure(next, mark, port.layer, port.node);
     const scaled = depthScale(depth) * (port.kind === FORM_NODE_KIND ? 0.62 : 1);
-    mark.radius = zoom * PORT_UNITS * (0.42 + 0.58 * charge) * scaled;
-    mark.bloom = mark.radius * (1.6 + 3.4 * charge);
+    mark.radius = zoom * PORT_UNITS * (0.46 + 0.66 * visibleCharge) * scaled;
+    mark.bloom = mark.radius * (2.1 + 4.6 * charge + 1.2 * mark.delivered);
     // Ports are made prominent while the Still Mode surface is up. A closed
     // Port is drawn faintly during play, because what it is doing is nothing;
     // in Still Mode it is a place a Route can end and a Pulse can open, so it
@@ -1083,10 +1841,16 @@ function fillPorts(
     const legible = port.open ? 1 : 0.42 + 0.48 * scene.still.presence;
     mark.alpha = legible * depthAlpha(depth);
     const warm = mixTone(CHARGE_LOW, CHARGE_HIGH, charge);
-    mark.tone = depthTone(
+    const portTone = depthTone(
       port.overloaded ? OVERLOAD : mixTone(PORT_BASE, warm, clamp01(0.2 + 0.8 * charge)),
       depth,
     );
+    const intervenedTone = port.breached
+      ? mixTone(portTone, depthTone(INTERVENTION_BREACH, depth), 0.62)
+      : port.decoyReceiver
+        ? mixTone(portTone, depthTone(INTERVENTION_DECOY, depth), 0.5)
+        : portTone;
+    mark.tone = mixTone(intervenedTone, depthTone(mark.stressTone, depth), mark.stress * 0.42);
   }
 }
 
@@ -1259,7 +2023,14 @@ function hullsInto(
       mark.points.push(screen.x, screen.y);
       mark.nodes.push(point.node);
     }
-    mark.tone = style.tone;
+    if (style.role === 'compartment' && !style.proposed) {
+      applyPressure(next, mark, layer, null, null, mark.nodes);
+    } else {
+      mark.stress = 0;
+      mark.stressTone = PRESSURE_TONES[0];
+      mark.stressCrisis = false;
+    }
+    mark.tone = mixTone(style.tone, mark.stressTone, mark.stress * 0.34);
     mark.alpha = style.weight * depthAlpha(depth);
     const units =
       style.role === 'compartment'
@@ -1267,7 +2038,9 @@ function hullsInto(
         : style.role === 'view'
           ? VIEW_EDGE_UNITS
           : CANDIDATE_EDGE_UNITS;
-    mark.width = Math.max(style.role === 'compartment' ? 3 : 1.5, zoom * depthScale(depth) * units);
+    mark.width =
+      Math.max(style.role === 'compartment' ? 3 : 1.5, zoom * depthScale(depth) * units) *
+      (1 + mark.stress * 0.18);
     mark.role = style.role;
     mark.proposed = style.proposed;
     mark.candidate = style.candidate;
@@ -1340,6 +2113,34 @@ function fillTrails(
   }
 }
 
+/** Builds one pooled chassis silhouette and inset core for both render engines. */
+function fillFormChassis(mark: FormMark): void {
+  const profile = FORM_PROFILES[mark.formOrdinal % FORM_PROFILES.length];
+  const stableTurn = ((mark.form % 12) / 12) * Math.PI * 2;
+  const turn = profile.turn + (mark.controlled ? mark.heading : stableTurn);
+  const points = profile.sides * 2;
+  mark.outline.length = 0;
+  mark.core.length = 0;
+
+  for (let point = 0; point < points; point += 1) {
+    const angle = turn + (point / points) * Math.PI * 2;
+    const tooth = point % 2 === 0 ? 1 : profile.inset;
+    const identity = 1 + Math.sin((mark.form + 1) * (point + 1) * 1.73) * 0.028;
+    mark.outline.push(
+      mark.x + Math.cos(angle) * mark.radius * tooth * profile.stretchX * identity,
+      mark.y + Math.sin(angle) * mark.radius * tooth * profile.stretchY * identity,
+    );
+  }
+
+  for (let corner = 0; corner < profile.sides; corner += 1) {
+    const angle = turn + (corner / profile.sides) * Math.PI * 2;
+    mark.core.push(
+      mark.x + Math.cos(angle) * mark.radius * profile.core * profile.stretchX,
+      mark.y + Math.sin(angle) * mark.radius * profile.core * profile.stretchY,
+    );
+  }
+}
+
 function fillForms(
   scene: Scene,
   previous: FrameState,
@@ -1355,27 +2156,34 @@ function fillForms(
     const screen = place(at.x, at.y, depth);
     const charge = form.charge / 65535;
     const mark = scene.forms.next();
+    mark.form = form.id;
+    mark.formOrdinal = form.formOrdinal % FORM_PROFILES.length;
     mark.x = screen.x;
     mark.y = screen.y;
     mark.controlled = form.controlled;
     mark.focus = form.focus;
     mark.pulseCharging = form.pulseCharging;
     mark.charge = charge;
-    mark.sides = FORM_SIDES[form.formOrdinal % FORM_SIDES.length];
-    mark.heading = Math.atan2(form.vy, form.vx);
+    mark.sides = FORM_PROFILES[mark.formOrdinal].sides;
+    mark.heading = Math.hypot(form.vx, form.vy) > 0.001 ? Math.atan2(form.vy, form.vx) : 0;
     mark.depth = depth;
     mark.alpha = depthAlpha(depth);
+    applyPressure(next, mark, form.layer);
     // The controlled Form is the largest and the brightest mark on the surface,
     // by a margin no other mark closes: which one the player steers has to be
     // answerable at a glance and without a label.
-    const extent = FORM_UNITS * (form.controlled ? 1.95 : 0.95) * (0.82 + 0.35 * charge);
+    const extent = FORM_UNITS * (form.controlled ? 3.45 : 1.02) * (0.86 + 0.42 * charge);
     mark.radius = zoom * extent * depthScale(depth);
     mark.tone = depthTone(form.controlled ? FORM_CONTROLLED : FORM_PLAIN, depth);
-    mark.ringTone = depthTone(
-      form.controlled ? FORM_CONTROLLED_RING : mixTone(FORM_PLAIN, CHARGE_CORE, 0.3 * charge),
+    const ringTone = depthTone(
+      form.controlled ? FORM_CONTROLLED_RING : mixTone(FORM_PLAIN, CHARGE_CORE, 0.38 * charge),
       depth,
     );
-    mark.bodyTone = mixTone(0x0d1014, HAZE_TINT, Math.min(0.55, 0.2 * Math.abs(depth)));
+    mark.ringTone = mixTone(ringTone, depthTone(mark.stressTone, depth), mark.stress * 0.32);
+    const bodyTone = mixTone(0x0d1014, HAZE_TINT, Math.min(0.55, 0.2 * Math.abs(depth)));
+    mark.bodyTone = mixTone(bodyTone, mark.stressTone, mark.stress * 0.16);
+    mark.facetTone = depthTone(form.controlled ? FORM_FACET : FORM_PLAIN, depth);
+    mark.facetShadow = depthTone(FORM_FACET_SHADOW, depth);
   }
 
   // Which Form the player steers has to be answerable at a glance, and the
@@ -1400,6 +2208,1193 @@ function fillForms(
     steered.radius = Math.max(steered.radius, widest * CONTROLLED_MARGIN);
     steered.alpha = Math.max(steered.alpha, Math.min(1, brightest * CONTROLLED_MARGIN));
   }
+  for (let place = 0; place < scene.forms.count; place += 1) {
+    fillFormChassis(scene.forms.items[place]);
+  }
+}
+
+function policyOutcomeTone(outcome: FramePolicyRuntime['outcome']): Tone {
+  switch (outcome) {
+    case 'applied':
+      return POLICY_ACTIVE;
+    case 'cooldown':
+    case 'capacity_reached':
+    case 'no_effect':
+      return POLICY_WAIT;
+    case 'no_target':
+    case 'target_unavailable':
+    case 'wrong_layer':
+    case 'out_of_range':
+    case 'unavailable':
+      return POLICY_BLOCKED;
+    case 'idle':
+    case 'held':
+    default:
+      return POLICY_IDLE;
+  }
+}
+
+function currentPolicyTarget(mark: CurrentMark): { x: number; y: number; radius: number } | null {
+  const pairs = mark.points.length / 2;
+  if (pairs === 0) return null;
+  const point = Math.min(pairs - 1, Math.floor(pairs / 2));
+  return {
+    x: mark.points[point * 2],
+    y: mark.points[point * 2 + 1],
+    radius: Math.max(5, mark.width * 0.36),
+  };
+}
+
+/**
+ * Projects the core-retained policy decision without repeating policy logic.
+ * Target lookup resolves an already-selected identity only; missing geometry
+ * remains a visible no-target/outcome stance rather than triggering retargeting.
+ */
+function fillPolicyRuntime(
+  scene: Scene,
+  next: FrameState,
+  place: Place,
+  zoom: number,
+  cameraLayer: number,
+): void {
+  const ports = new Map<number, PortMark>();
+  const routes = new Map<number, RouteMark>();
+  const currents = new Map<number, CurrentMark>();
+  for (let index = 0; index < scene.ports.count; index += 1) {
+    const mark = scene.ports.items[index];
+    ports.set(mark.node, mark);
+  }
+  for (let index = 0; index < scene.routes.count; index += 1) {
+    const mark = scene.routes.items[index];
+    if (!mark.preview) routes.set(mark.route, mark);
+  }
+  for (let index = 0; index < scene.currents.count; index += 1) {
+    const mark = scene.currents.items[index];
+    currents.set(mark.id, mark);
+  }
+
+  for (const runtime of next.policies) {
+    const source = ports.get(runtime.address);
+    if (!source) continue;
+    const mark = scene.policies.next();
+    mark.address = runtime.address;
+    mark.action = runtime.action;
+    mark.outcome = runtime.outcome;
+    mark.targetKind = runtime.targetKind;
+    mark.rule = runtime.rule;
+    mark.x = source.x;
+    mark.y = source.y;
+    mark.radius = Math.max(source.radius * 2.05, scene.dpr * 8);
+    const selectedRadius = runtime.radius > 0
+      ? Math.max(mark.radius, (runtime.radius / 65_536) * zoom * depthScale(source.depth))
+      : 0;
+    const sensing = runtime.action === 'seek_supply'
+      || runtime.action === 'seek_port'
+      || runtime.action === 'seek_signal';
+    mark.sensorReach = sensing ? selectedRadius : 0;
+    mark.reach = sensing ? 0 : selectedRadius;
+    mark.hasTarget = false;
+    mark.targetX = source.x;
+    mark.targetY = source.y;
+    mark.targetRadius = Math.max(source.radius, scene.dpr * 5);
+    mark.tone = depthTone(policyOutcomeTone(runtime.outcome), source.depth);
+    mark.targetTone = depthTone(POLICY_TARGET, source.depth);
+    mark.alpha = source.alpha * (runtime.action === 'none' ? 0.34 : 0.8);
+    mark.phase = scene.reducedMotion ? 0.25 : (scene.clock * 0.035 + runtime.address * 0.071) % 1;
+    mark.preview = false;
+
+    let target: { x: number; y: number; radius: number; tone: Tone } | null = null;
+    if (runtime.targetKind === 'node') {
+      const held = ports.get(runtime.target);
+      if (held) target = { x: held.x, y: held.y, radius: held.radius * 1.65, tone: held.tone };
+    } else if (runtime.targetKind === 'route') {
+      const held = routes.get(runtime.target);
+      if (held) {
+        target = {
+          x: (held.x1 + held.x2) / 2,
+          y: (held.y1 + held.y2) / 2,
+          radius: Math.max(scene.dpr * 6, held.width * 2.2),
+          tone: held.tone,
+        };
+      }
+    } else if (runtime.targetKind === 'current') {
+      const held = currents.get(runtime.target);
+      const at = held ? currentPolicyTarget(held) : null;
+      if (held && at) target = { ...at, tone: held.tone };
+    } else if (runtime.targetKind === 'signal') {
+      const held = next.localSignals.find((signal) => signal.signal === runtime.target);
+      if (held) {
+        const depth = held.layer - cameraLayer;
+        const at = place(held.x / 16, held.y / 16, depth);
+        target = {
+          x: at.x,
+          y: at.y,
+          radius: Math.max(scene.dpr * 6, zoom * depthScale(depth) * 9),
+          tone: MATERIAL_CONDUCTOR,
+        };
+      }
+    }
+    if (target) {
+      mark.hasTarget = true;
+      mark.targetX = target.x;
+      mark.targetY = target.y;
+      mark.targetRadius = target.radius;
+      mark.targetTone = mixTone(depthTone(target.tone, source.depth), POLICY_TARGET, 0.68);
+    }
+  }
+}
+
+function previewGeometry(
+  scene: Scene,
+  next: FrameState,
+  kind: PolicyTargetKind,
+  id: number,
+  place: Place,
+  zoom: number,
+  cameraLayer: number,
+): { x: number; y: number; radius: number; tone: Tone; depth: number } | null {
+  if (kind === 'node') {
+    for (let index = 0; index < scene.ports.count; index += 1) {
+      const mark = scene.ports.items[index];
+      if (mark.node === id) {
+        return {
+          x: mark.x,
+          y: mark.y,
+          radius: mark.radius * 1.65,
+          tone: mark.tone,
+          depth: mark.depth,
+        };
+      }
+    }
+  }
+  if (kind === 'route') {
+    for (let index = 0; index < scene.routes.count; index += 1) {
+      const mark = scene.routes.items[index];
+      if (mark.route === id && !mark.preview) {
+        return {
+          x: (mark.x1 + mark.x2) / 2,
+          y: (mark.y1 + mark.y2) / 2,
+          radius: Math.max(scene.dpr * 6, mark.width * 2.2),
+          tone: mark.tone,
+          depth: mark.depth,
+        };
+      }
+    }
+  }
+  if (kind === 'current') {
+    for (let index = 0; index < scene.currents.count; index += 1) {
+      const mark = scene.currents.items[index];
+      if (mark.id === id) {
+        const at = currentPolicyTarget(mark);
+        if (at) return { ...at, tone: mark.tone, depth: mark.depth };
+      }
+    }
+  }
+  if (kind === 'signal') {
+    const signal = next.localSignals.find((held) => held.signal === id);
+    if (signal) {
+      const depth = signal.layer - cameraLayer;
+      const at = place(signal.x / 16, signal.y / 16, depth);
+      return {
+        x: at.x,
+        y: at.y,
+        radius: Math.max(scene.dpr * 6, zoom * depthScale(depth) * 9),
+        tone: MATERIAL_CONDUCTOR,
+        depth,
+      };
+    }
+  }
+  return null;
+}
+
+/** Projects the pure Rust draft result; no targeting or admission is repeated here. */
+function fillPolicyPreview(
+  scene: Scene,
+  next: FrameState,
+  preview: PolicyPreview | null,
+  place: Place,
+  zoom: number,
+  cameraLayer: number,
+): void {
+  if (!preview) return;
+  let source: PortMark | null = null;
+  for (let index = 0; index < scene.ports.count; index += 1) {
+    const held = scene.ports.items[index];
+    if (held.node === preview.address) {
+      source = held;
+      break;
+    }
+  }
+  if (!source) return;
+
+  for (const candidate of preview.candidates) {
+    if (candidate.id === null || candidate.kind === 'none') continue;
+    const geometry = previewGeometry(
+      scene,
+      next,
+      candidate.kind,
+      candidate.id,
+      place,
+      zoom,
+      cameraLayer,
+    );
+    if (!geometry) continue;
+    const mark = scene.policyCandidates.next();
+    mark.id = candidate.id;
+    mark.kind = candidate.kind;
+    mark.x = geometry.x;
+    mark.y = geometry.y;
+    mark.radius = Math.max(geometry.radius, scene.dpr * 5);
+    mark.selected = candidate.kind === preview.target_kind && candidate.id === preview.target;
+    mark.tone = depthTone(mark.selected ? POLICY_TARGET : POLICY_PREVIEW, geometry.depth);
+    mark.alpha = source.alpha * (mark.selected ? 0.9 : 0.44);
+  }
+
+  const mark = scene.policies.next();
+  mark.address = preview.address;
+  mark.action = preview.action.kind;
+  const needsTarget = preview.action.kind === 'seek_supply'
+    || preview.action.kind === 'seek_port'
+    || preview.action.kind === 'seek_signal'
+    || preview.action.kind === 'couple';
+  mark.outcome = needsTarget && preview.target_kind === 'none'
+    ? 'no_target'
+    : 'idle';
+  mark.targetKind = preview.target_kind;
+  mark.rule = preview.rule;
+  mark.x = source.x;
+  mark.y = source.y;
+  mark.radius = Math.max(source.radius * 2.35, scene.dpr * 9);
+  mark.reach = preview.action_radius > 0
+    ? Math.max(mark.radius, (preview.action_radius / 65_536) * zoom * depthScale(source.depth))
+    : 0;
+  mark.sensorReach = preview.sensor_radius > 0
+    ? Math.max(mark.radius, (preview.sensor_radius / 65_536) * zoom * depthScale(source.depth))
+    : 0;
+  mark.hasTarget = false;
+  mark.targetX = source.x;
+  mark.targetY = source.y;
+  mark.targetRadius = Math.max(source.radius, scene.dpr * 5);
+  mark.tone = depthTone(POLICY_PREVIEW, source.depth);
+  mark.targetTone = depthTone(POLICY_TARGET, source.depth);
+  mark.alpha = source.alpha * 0.88;
+  mark.phase = scene.reducedMotion ? 0.2 : (scene.clock * 0.025 + preview.address * 0.047) % 1;
+  mark.preview = true;
+  if (preview.target !== null && preview.target_kind !== 'none') {
+    const target = previewGeometry(
+      scene,
+      next,
+      preview.target_kind,
+      preview.target,
+      place,
+      zoom,
+      cameraLayer,
+    );
+    if (target) {
+      mark.hasTarget = true;
+      mark.targetX = target.x;
+      mark.targetY = target.y;
+      mark.targetRadius = target.radius;
+      mark.targetTone = mixTone(depthTone(target.tone, source.depth), POLICY_TARGET, 0.72);
+    }
+  }
+}
+
+type AssemblyPayload = Record<string, unknown>;
+
+function assemblyPayload(
+  change: EngineeringAssemblyDiffChange,
+  side: 'before' | 'after',
+): AssemblyPayload {
+  const value = change[side];
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as AssemblyPayload
+    : {};
+}
+
+function assemblyNumber(value: AssemblyPayload, key: string): number {
+  const found = value[key];
+  return typeof found === 'number' && Number.isFinite(found) ? found : 0;
+}
+
+function assemblyFlag(value: AssemblyPayload, key: string): boolean {
+  return value[key] === true;
+}
+
+function assemblyPosition(value: AssemblyPayload): { x: number; y: number } {
+  const found = value.pos;
+  if (!found || typeof found !== 'object' || Array.isArray(found)) return { x: 0, y: 0 };
+  const position = found as AssemblyPayload;
+  return { x: assemblyNumber(position, 'x'), y: assemblyNumber(position, 'y') };
+}
+
+function assemblyMembers(value: AssemblyPayload): number[] {
+  const found = value.members;
+  if (!Array.isArray(found)) return [];
+  return found.filter((member): member is number => Number.isInteger(member));
+}
+
+function sameMembers(left: readonly number[], right: readonly number[]): boolean {
+  return left.length === right.length && left.every((member, index) => member === right[index]);
+}
+
+function scenePortRadius(scene: Scene, node: number, fallback: number): number {
+  for (let index = 0; index < scene.ports.count; index += 1) {
+    const port = scene.ports.items[index];
+    if (port.node === node) return Math.max(fallback, port.radius * 1.55);
+  }
+  return fallback;
+}
+
+function sceneFormRadius(scene: Scene, node: number, fallback: number): number {
+  for (let index = 0; index < scene.forms.count; index += 1) {
+    const form = scene.forms.items[index];
+    if (form.form === node) return Math.max(fallback, form.radius * 1.48);
+  }
+  return scenePortRadius(scene, node, fallback);
+}
+
+function pointAlong(points: readonly number[], fraction: number): { x: number; y: number } | null {
+  if (points.length < 2) return null;
+  if (points.length === 2) return { x: points[0], y: points[1] };
+  const lengths: number[] = [];
+  let total = 0;
+  for (let index = 2; index < points.length; index += 2) {
+    const length = Math.hypot(points[index] - points[index - 2], points[index + 1] - points[index - 1]);
+    lengths.push(length);
+    total += length;
+  }
+  if (total <= 0) return { x: points[0], y: points[1] };
+  let wanted = clamp01(fraction) * total;
+  for (let index = 0; index < lengths.length; index += 1) {
+    const length = lengths[index];
+    if (wanted <= length || index === lengths.length - 1) {
+      const along = length <= 0 ? 0 : wanted / length;
+      const point = index * 2;
+      return {
+        x: points[point] + (points[point + 2] - points[point]) * along,
+        y: points[point + 1] + (points[point + 3] - points[point + 1]) * along,
+      };
+    }
+    wanted -= length;
+  }
+  return { x: points[points.length - 2], y: points[points.length - 1] };
+}
+
+function fillAssemblyBoundary(
+  scene: Scene,
+  draft: EngineeringAssemblyDraft,
+  before: AssemblyPayload,
+  after: AssemblyPayload,
+  place: Place,
+  zoom: number,
+  cameraLayer: number,
+  companion = false,
+  alpha = 0.82,
+  forceFields = false,
+  compatibility: EngineeringAssemblyCompatibilityDisposition | null = null,
+): void {
+  const afterMembers = assemblyMembers(after);
+  const beforeMembers = assemblyMembers(before);
+  const candidateComponents = new Map(
+    draft.components.map((component) => [component.node, component] as const),
+  );
+  const planes = new Map<number, { x: number; y: number; node: number }[]>();
+  const anchors: Array<{ x: number; y: number }> = [];
+  for (const node of afterMembers) {
+    const component = candidateComponents.get(node);
+    if (!component) continue;
+    const point = {
+      x: component.pos.x / 65_536,
+      y: component.pos.y / 65_536,
+      node,
+    };
+    const held = planes.get(component.layer);
+    if (held) held.push(point);
+    else planes.set(component.layer, [point]);
+    anchors.push(place(point.x, point.y, component.layer - cameraLayer));
+  }
+
+  for (const [layer, members] of [...planes].sort((left, right) => right[0] - left[0])) {
+    const depth = layer - cameraLayer;
+    const hull = members.length <= 2 ? members : convexHull(members);
+    const boundary = scene.assemblyBoundaries.next();
+    boundary.points.length = 0;
+    boundary.nodes.length = 0;
+    for (const member of hull) {
+      const at = place(member.x, member.y, depth);
+      boundary.points.push(at.x, at.y);
+      boundary.nodes.push(member.node);
+    }
+    boundary.tone = depthTone(
+      compatibility === 'hard_refusal'
+        ? OVERLOAD
+        : compatibility === 'adaptation_required'
+          ? ASSEMBLY_DRAFT_MATERIAL
+          : ASSEMBLY_DRAFT,
+      depth,
+    );
+    boundary.alpha = alpha * depthAlpha(depth);
+    boundary.width = Math.max(2, zoom * depthScale(depth) * 4.2);
+    boundary.role = 'assembly-draft';
+    boundary.proposed = true;
+    boundary.candidate = 0;
+    boundary.focused = true;
+    boundary.tier = 0;
+    boundary.stress = 0;
+    boundary.stressTone = PRESSURE_TONES[0];
+    boundary.stressCrisis = false;
+  }
+
+  if (anchors.length === 0) {
+    for (const node of beforeMembers) {
+      const port = nextPort(scene, node);
+      if (port) anchors.push({ x: port.x, y: port.y });
+    }
+  }
+  const x = anchors.length > 0
+    ? anchors.reduce((sum, anchor) => sum + anchor.x, 0) / anchors.length
+    : scene.width / 2;
+  const y = anchors.length > 0
+    ? anchors.reduce((sum, anchor) => sum + anchor.y, 0) / anchors.length
+    : scene.height / 2;
+  const mark = scene.assemblyDrafts.next();
+  mark.kind = 'physical_compartment';
+  mark.id = 0;
+  mark.x = x;
+  mark.y = y;
+  mark.radius = Math.max(scene.dpr * 11, zoom * 16);
+  mark.fromX = x;
+  mark.fromY = y;
+  mark.fromRadius = mark.radius;
+  mark.displaced = false;
+  mark.fields = forceFields
+    ? ASSEMBLY_DRAFT_FIELD.members | ASSEMBLY_DRAFT_FIELD.leakage
+    : (sameMembers(beforeMembers, afterMembers) ? 0 : ASSEMBLY_DRAFT_FIELD.members)
+      | (assemblyNumber(before, 'leak_per_exposed_contact_per_step')
+        === assemblyNumber(after, 'leak_per_exposed_contact_per_step')
+        ? 0
+        : ASSEMBLY_DRAFT_FIELD.leakage);
+  mark.beforeLevel = clamp01(assemblyNumber(before, 'leak_per_exposed_contact_per_step') / 65_536);
+  mark.afterLevel = clamp01(assemblyNumber(after, 'leak_per_exposed_contact_per_step') / 65_536);
+  mark.count = afterMembers.length;
+  mark.active = true;
+  mark.open = false;
+  mark.phase = 0;
+  mark.tone = ASSEMBLY_DRAFT;
+  mark.originTone = ASSEMBLY_DRAFT_ORIGIN;
+  mark.alpha = alpha;
+  mark.depth = 0;
+  mark.companion = companion;
+  mark.compatibility = compatibility;
+}
+
+function nextPort(scene: Scene, node: number): PortMark | null {
+  for (let index = 0; index < scene.ports.count; index += 1) {
+    const port = scene.ports.items[index];
+    if (port.node === node) return port;
+  }
+  return null;
+}
+
+/** Projects only Rust-accepted normalized assembly changes into the draft register. */
+function fillAssemblyPreview(
+  scene: Scene,
+  preview: EngineeringAssemblyPreview | null,
+  place: Place,
+  zoom: number,
+  cameraLayer: number,
+): void {
+  if (!preview || preview.status !== 'accepted') return;
+  const componentDrafts = new Map(
+    preview.candidate_draft.components.map((component) => [component.node, component] as const),
+  );
+  const compartmentMembers = new Set(preview.candidate_draft.physical_compartment.members);
+  const compartmentGeometryChanged = preview.diff.definition.changes.some((change) => {
+    if (change.kind !== 'component') return false;
+    const before = assemblyPayload(change, 'before');
+    const after = assemblyPayload(change, 'after');
+    if (!compartmentMembers.has(assemblyNumber(after, 'node'))) return false;
+    const beforePosition = assemblyPosition(before);
+    const afterPosition = assemblyPosition(after);
+    return beforePosition.x !== afterPosition.x
+      || beforePosition.y !== afterPosition.y
+      || assemblyNumber(before, 'layer') !== assemblyNumber(after, 'layer');
+  });
+  let compartmentProjected = false;
+
+  for (const change of preview.diff.definition.changes) {
+    const before = assemblyPayload(change, 'before');
+    const after = assemblyPayload(change, 'after');
+    if (change.kind === 'physical_compartment') {
+      fillAssemblyBoundary(
+        scene,
+        preview.candidate_draft,
+        before,
+        after,
+        place,
+        zoom,
+        cameraLayer,
+      );
+      compartmentProjected = true;
+      continue;
+    }
+
+    const mark = scene.assemblyDrafts.next();
+    mark.kind = change.kind;
+    mark.id = change.kind === 'current'
+      ? assemblyNumber(after, 'current')
+      : change.kind === 'material'
+        ? assemblyNumber(after, 'material')
+        : assemblyNumber(after, 'node');
+    mark.fields = 0;
+    mark.beforeLevel = 0;
+    mark.afterLevel = 0;
+    mark.count = 0;
+    mark.active = true;
+    mark.open = false;
+    mark.phase = (mark.id * 0.037) % 1;
+    mark.tone = ASSEMBLY_DRAFT;
+    mark.originTone = ASSEMBLY_DRAFT_ORIGIN;
+    mark.alpha = 0.9;
+    mark.depth = 0;
+    mark.companion = false;
+    mark.compatibility = null;
+
+    if (change.kind === 'component') {
+      const beforePosition = assemblyPosition(before);
+      const afterPosition = assemblyPosition(after);
+      const beforeLayer = assemblyNumber(before, 'layer');
+      const afterLayer = assemblyNumber(after, 'layer');
+      const depth = afterLayer - cameraLayer;
+      const originDepth = beforeLayer - cameraLayer;
+      const at = place(afterPosition.x / 65_536, afterPosition.y / 65_536, depth);
+      const from = place(beforePosition.x / 65_536, beforePosition.y / 65_536, originDepth);
+      mark.x = at.x;
+      mark.y = at.y;
+      mark.fromX = from.x;
+      mark.fromY = from.y;
+      mark.radius = scenePortRadius(scene, mark.id, Math.max(scene.dpr * 9, zoom * depthScale(depth) * 18));
+      mark.fromRadius = Math.max(scene.dpr * 6, mark.radius * 0.64);
+      mark.displaced = beforePosition.x !== afterPosition.x
+        || beforePosition.y !== afterPosition.y
+        || beforeLayer !== afterLayer;
+      if (beforePosition.x !== afterPosition.x || beforePosition.y !== afterPosition.y) {
+        mark.fields |= ASSEMBLY_DRAFT_FIELD.position;
+      }
+      if (beforeLayer !== afterLayer) mark.fields |= ASSEMBLY_DRAFT_FIELD.layer;
+      if (assemblyNumber(before, 'q') !== assemblyNumber(after, 'q')) {
+        mark.fields |= ASSEMBLY_DRAFT_FIELD.charge;
+      }
+      if (assemblyFlag(before, 'open') !== assemblyFlag(after, 'open')) {
+        mark.fields |= ASSEMBLY_DRAFT_FIELD.interface;
+      }
+      mark.beforeLevel = clamp01(assemblyNumber(before, 'q') / (4096 * 65_536));
+      mark.afterLevel = clamp01(assemblyNumber(after, 'q') / (4096 * 65_536));
+      mark.open = assemblyFlag(after, 'open');
+      mark.tone = depthTone(ASSEMBLY_DRAFT, depth);
+      mark.originTone = depthTone(ASSEMBLY_DRAFT_ORIGIN, originDepth);
+      mark.alpha *= depthAlpha(depth);
+      mark.depth = depth;
+      continue;
+    }
+
+    if (change.kind === 'form') {
+      const component = componentDrafts.get(mark.id);
+      const port = nextPort(scene, mark.id);
+      const depth = component ? component.layer - cameraLayer : port?.depth ?? 0;
+      const at = component
+        ? place(component.pos.x / 65_536, component.pos.y / 65_536, depth)
+        : port
+          ? { x: port.x, y: port.y }
+          : { x: scene.width / 2, y: scene.height / 2 };
+      mark.x = at.x;
+      mark.y = at.y;
+      mark.fromX = at.x;
+      mark.fromY = at.y;
+      mark.radius = sceneFormRadius(scene, mark.id, Math.max(scene.dpr * 13, zoom * depthScale(depth) * 24));
+      mark.fromRadius = mark.radius;
+      mark.displaced = false;
+      if (assemblyNumber(before, 'reserve') !== assemblyNumber(after, 'reserve')) {
+        mark.fields |= ASSEMBLY_DRAFT_FIELD.reserve;
+      }
+      if (before.junction_blanks !== after.junction_blanks) {
+        mark.fields |= ASSEMBLY_DRAFT_FIELD.blanks;
+      }
+      mark.beforeLevel = clamp01(assemblyNumber(before, 'reserve') / (4096 * 65_536));
+      mark.afterLevel = clamp01(assemblyNumber(after, 'reserve') / (4096 * 65_536));
+      mark.count = after.junction_blanks === null ? 0 : assemblyNumber(after, 'junction_blanks');
+      mark.tone = depthTone(ASSEMBLY_DRAFT, depth);
+      mark.originTone = depthTone(ASSEMBLY_DRAFT_ORIGIN, depth);
+      mark.alpha *= depthAlpha(depth);
+      mark.depth = depth;
+      continue;
+    }
+
+    if (change.kind === 'material') {
+      const beforePosition = assemblyPosition(before);
+      const afterPosition = assemblyPosition(after);
+      const beforeLayer = assemblyNumber(before, 'layer');
+      const afterLayer = assemblyNumber(after, 'layer');
+      const depth = afterLayer - cameraLayer;
+      const originDepth = beforeLayer - cameraLayer;
+      const at = place(afterPosition.x / 65_536, afterPosition.y / 65_536, depth);
+      const from = place(beforePosition.x / 65_536, beforePosition.y / 65_536, originDepth);
+      mark.x = at.x;
+      mark.y = at.y;
+      mark.fromX = from.x;
+      mark.fromY = from.y;
+      mark.radius = Math.max(scene.dpr * 10, zoom * depthScale(depth) * (12 + Math.min(8, assemblyNumber(after, 'amount') / 256)));
+      mark.fromRadius = Math.max(scene.dpr * 5, mark.radius * 0.55);
+      mark.displaced = beforePosition.x !== afterPosition.x
+        || beforePosition.y !== afterPosition.y
+        || beforeLayer !== afterLayer;
+      if (beforePosition.x !== afterPosition.x || beforePosition.y !== afterPosition.y) {
+        mark.fields |= ASSEMBLY_DRAFT_FIELD.position;
+      }
+      if (beforeLayer !== afterLayer) mark.fields |= ASSEMBLY_DRAFT_FIELD.layer;
+      if (assemblyNumber(before, 'amount') !== assemblyNumber(after, 'amount')) {
+        mark.fields |= ASSEMBLY_DRAFT_FIELD.amount;
+      }
+      mark.beforeLevel = clamp01(assemblyNumber(before, 'amount') / 1024);
+      mark.afterLevel = clamp01(assemblyNumber(after, 'amount') / 1024);
+      mark.count = Math.min(6, Math.ceil(Math.log2(assemblyNumber(after, 'amount') + 1)));
+      mark.tone = depthTone(ASSEMBLY_DRAFT_MATERIAL, depth);
+      mark.originTone = depthTone(ASSEMBLY_DRAFT_ORIGIN, originDepth);
+      mark.alpha *= depthAlpha(depth);
+      mark.depth = depth;
+      continue;
+    }
+
+    const current = [...scene.currents.items.slice(0, scene.currents.count)]
+      .find((candidate) => candidate.id === mark.id);
+    const beforePhaseRaw = assemblyNumber(before, 'phase');
+    const afterPhaseRaw = assemblyNumber(after, 'phase');
+    const beforePhase = (beforePhaseRaw % 1024) / 1024;
+    const afterPhase = (afterPhaseRaw % 1024) / 1024;
+    const at = current ? pointAlong(current.points, afterPhase) : null;
+    const from = current ? pointAlong(current.points, beforePhase) : null;
+    mark.x = at?.x ?? scene.width / 2;
+    mark.y = at?.y ?? scene.height / 2;
+    mark.fromX = from?.x ?? mark.x;
+    mark.fromY = from?.y ?? mark.y;
+    mark.radius = Math.max(scene.dpr * 12, (current?.width ?? scene.dpr * 5) * 0.72);
+    mark.fromRadius = Math.max(scene.dpr * 5, mark.radius * 0.5);
+    mark.displaced = beforePhaseRaw !== afterPhaseRaw;
+    if (beforePhaseRaw !== afterPhaseRaw) mark.fields |= ASSEMBLY_DRAFT_FIELD.phase;
+    if (assemblyFlag(before, 'active') !== assemblyFlag(after, 'active')) {
+      mark.fields |= ASSEMBLY_DRAFT_FIELD.active;
+    }
+    mark.beforeLevel = clamp01(beforePhase);
+    mark.afterLevel = clamp01(afterPhase);
+    mark.active = assemblyFlag(after, 'active');
+    mark.phase = afterPhase;
+    mark.tone = depthTone(ASSEMBLY_DRAFT_CURRENT, current?.depth ?? 0);
+    mark.originTone = depthTone(ASSEMBLY_DRAFT_ORIGIN, current?.depth ?? 0);
+    mark.alpha *= depthAlpha(current?.depth ?? 0);
+    mark.depth = current?.depth ?? 0;
+  }
+
+  if (compartmentGeometryChanged && !compartmentProjected) {
+    const compartment = preview.candidate_draft.physical_compartment as unknown as AssemblyPayload;
+    fillAssemblyBoundary(
+      scene,
+      preview.candidate_draft,
+      compartment,
+      compartment,
+      place,
+      zoom,
+      cameraLayer,
+    );
+  }
+}
+
+function transitionSequence(
+  status: EngineeringTransitionCompanion['status'],
+  clock: number,
+  reducedMotion: boolean,
+): { stage: EngineeringTransitionCompanionStage; phase: number; movement: number; alpha: number } {
+  if (status === 'preview') return { stage: 'preview', phase: 1, movement: 1, alpha: 0.72 };
+  if (reducedMotion || clock >= 1) return { stage: 'locked', phase: 1, movement: 1, alpha: 0.82 };
+  const progress = clamp01(clock);
+  if (progress < 0.24) {
+    const phase = progress / 0.24;
+    return { stage: 'deenergize', phase, movement: 0, alpha: 0.88 - phase * 0.3 };
+  }
+  if (progress < 0.72) {
+    const phase = (progress - 0.24) / 0.48;
+    return {
+      stage: 'reconstruct',
+      phase,
+      movement: phase * phase * (3 - 2 * phase),
+      alpha: 0.58 + phase * 0.38,
+    };
+  }
+  const phase = (progress - 0.72) / 0.28;
+  return { stage: 'settle', phase, movement: 1, alpha: 0.96 - phase * 0.14 };
+}
+
+function transitionTones(operation: EngineeringTransitionKind): {
+  tone: Tone;
+  origin: Tone;
+  authority: Tone;
+} {
+  if (operation === 'revert_generator') {
+    return { tone: ASSEMBLY_DRAFT_MATERIAL, origin: ASSEMBLY_DRAFT_ORIGIN, authority: CURRENT_GLASS };
+  }
+  if (operation === 'full_contract_reset') {
+    return { tone: CURRENT_GLASS, origin: ASSEMBLY_DRAFT_ORIGIN, authority: CHARGE_SPARK };
+  }
+  return { tone: ASSEMBLY_DRAFT, origin: ASSEMBLY_DRAFT_ORIGIN, authority: ASSEMBLY_DRAFT_MATERIAL };
+}
+
+function transitionCompatibility(
+  definition: EngineeringRunTransitionPreview['definition'],
+  address: string,
+): EngineeringAssemblyCompatibilityDisposition | null {
+  const issueAddresses = new Set([address]);
+  if (address.startsWith('component:')) issueAddresses.add(`policy:${address}`);
+  const issues = definition.compatibility_issues.filter((issue) => (
+    issue.address !== null
+    && (issueAddresses.has(issue.address)
+      || address === 'physical_compartment:opening'
+        && (issue.address.startsWith('assembly:') || issue.address.startsWith('generator:')))
+  ));
+  if (issues.some((issue) => issue.disposition !== 'assembly_adaptation')) {
+    return 'hard_refusal';
+  }
+  if (issues.some((issue) => issue.disposition === 'assembly_adaptation')) {
+    return 'adaptation_required';
+  }
+  const fields = definition.compatibility_fields.filter((field) => field.address === address);
+  if (fields.some((field) => field.disposition === 'hard_refusal')) return 'hard_refusal';
+  if (fields.some((field) => field.disposition === 'adaptation_required')) {
+    return 'adaptation_required';
+  }
+  if (fields.some((field) => field.disposition === 'retained_by_address')) {
+    return 'retained_by_address';
+  }
+  if (fields.some((field) => field.disposition === 'retained_unchanged')) {
+    return 'retained_unchanged';
+  }
+  return null;
+}
+
+function coherentTransitionReceipt(
+  preview: EngineeringRunTransitionPreview,
+  receipt: EngineeringRunTransitionReceipt | null,
+): receipt is EngineeringRunTransitionReceipt {
+  if (
+    !receipt
+    || receipt.version !== 5
+    || receipt.preview_id !== preview.preview_id
+    || receipt.operation !== preview.definition.operation
+    || receipt.after_generator_hash !== preview.definition.target_generator_hash
+    || receipt.after_assembly_hash !== preview.definition.target_assembly_hash
+    || receipt.reconstruction_digest !== preview.definition.reconstruction_digest
+    || receipt.before_regime_id !== preview.definition.current_regime_id
+    || receipt.before_scenario_hash !== preview.definition.guard.scenario_hash
+    || receipt.after_regime_id !== preview.definition.target_regime_id
+    || receipt.after_scenario_hash !== preview.definition.target_scenario_hash
+    || !receipt.compatibility_fields
+  ) return false;
+  return JSON.stringify(receipt.compatibility_fields)
+      === JSON.stringify(preview.definition.compatibility_fields)
+    && JSON.stringify(receipt.compatibility_issues)
+      === JSON.stringify(preview.definition.compatibility_issues)
+    && JSON.stringify(receipt.identities) === JSON.stringify(preview.definition.identities)
+    && JSON.stringify(receipt.registers) === JSON.stringify(preview.definition.registers)
+    && JSON.stringify(receipt.source) === JSON.stringify(preview.definition.source);
+}
+
+function fillEngineeringTransition(
+  scene: Scene,
+  companion: EngineeringTransitionCompanion | null,
+  origin: EngineeringTransitionOrigin | null,
+  clock: number,
+  place: Place,
+  zoom: number,
+  cameraLayer: number,
+): void {
+  if (!companion || !origin) return;
+  if (
+    companion.status === 'committed'
+    && !coherentTransitionReceipt(companion.preview, companion.receipt)
+  ) return;
+  const definition = companion.preview.definition;
+  const draft = definition.target_assembly_draft;
+  const sequence = transitionSequence(companion.status, clock, scene.reducedMotion);
+  const tones = transitionTones(definition.operation);
+  scene.engineeringTransition.active = true;
+  scene.engineeringTransition.operation = definition.operation;
+  scene.engineeringTransition.stage = sequence.stage;
+  scene.engineeringTransition.phase = sequence.phase;
+  scene.engineeringTransition.tone = tones.tone;
+  scene.engineeringTransition.originTone = tones.origin;
+  scene.engineeringTransition.authorityTone = tones.authority;
+  scene.engineeringTransition.commitAllowed = definition.commit_allowed;
+
+  const origins = new Map(origin.components.map((component) => [component.node, component] as const));
+  const targets = new Map(draft.components.map((component) => [component.node, component] as const));
+  for (const component of draft.components) {
+    const before = origins.get(component.node);
+    const fromDepth = (before?.layer ?? component.layer) - cameraLayer;
+    const depth = component.layer - cameraLayer;
+    const from = place(before?.x ?? component.pos.x / 65_536, before?.y ?? component.pos.y / 65_536, fromDepth);
+    const target = place(component.pos.x / 65_536, component.pos.y / 65_536, depth);
+    const mark = scene.assemblyDrafts.next();
+    mark.kind = 'component';
+    mark.id = component.node;
+    mark.x = lerp(from.x, target.x, sequence.movement);
+    mark.y = lerp(from.y, target.y, sequence.movement);
+    mark.fromX = from.x;
+    mark.fromY = from.y;
+    mark.radius = scenePortRadius(scene, component.node, Math.max(scene.dpr * 9, zoom * depthScale(depth) * 18));
+    mark.fromRadius = scenePortRadius(scene, component.node, Math.max(scene.dpr * 6, mark.radius * 0.64));
+    mark.displaced = Math.abs(from.x - target.x) > scene.dpr
+      || Math.abs(from.y - target.y) > scene.dpr
+      || fromDepth !== depth;
+    mark.fields = ASSEMBLY_DRAFT_FIELD.position
+      | ASSEMBLY_DRAFT_FIELD.layer
+      | ASSEMBLY_DRAFT_FIELD.charge
+      | ASSEMBLY_DRAFT_FIELD.interface;
+    mark.beforeLevel = before?.charge ?? 0;
+    mark.afterLevel = clamp01(component.q / (4096 * 65_536));
+    mark.count = 0;
+    mark.active = true;
+    mark.open = component.open;
+    mark.phase = sequence.phase;
+    mark.tone = depthTone(sequence.stage === 'deenergize' ? tones.origin : tones.tone, depth);
+    mark.originTone = depthTone(tones.origin, fromDepth);
+    mark.alpha = sequence.alpha * depthAlpha(depth);
+    mark.depth = depth;
+    mark.companion = true;
+    mark.compatibility = transitionCompatibility(definition, `component:${component.node}`);
+  }
+
+  const projectedRoutes = new Set<number>();
+  for (const issue of definition.compatibility_issues) {
+    if (!issue.address?.startsWith('route:')) continue;
+    const routeId = Number(issue.address.slice('route:'.length));
+    if (!Number.isInteger(routeId) || projectedRoutes.has(routeId)) continue;
+    const route = scene.routes.items.slice(0, scene.routes.count)
+      .find((candidate) => candidate.id === routeId);
+    if (!route) continue;
+    projectedRoutes.add(routeId);
+    const at = pointAlong(route.points, 0.5);
+    const mark = scene.assemblyDrafts.next();
+    mark.kind = 'route';
+    mark.id = routeId;
+    mark.x = at.x;
+    mark.y = at.y;
+    mark.fromX = at.x;
+    mark.fromY = at.y;
+    mark.radius = Math.max(scene.dpr * 11, route.width * 1.8);
+    mark.fromRadius = mark.radius;
+    mark.displaced = false;
+    mark.fields = 0;
+    mark.beforeLevel = 0;
+    mark.afterLevel = 0;
+    mark.count = 0;
+    mark.active = true;
+    mark.open = true;
+    mark.phase = sequence.phase;
+    mark.tone = tones.tone;
+    mark.originTone = tones.origin;
+    mark.alpha = sequence.alpha * depthAlpha(route.depth);
+    mark.depth = route.depth;
+    mark.companion = true;
+    mark.compatibility = transitionCompatibility(definition, issue.address);
+  }
+
+  const formOrigins = new Map(origin.forms.map((form) => [form.node, form] as const));
+  for (const form of draft.forms) {
+    const component = targets.get(form.node);
+    const beforeComponent = origins.get(form.node);
+    const depth = (component?.layer ?? 0) - cameraLayer;
+    const fromDepth = (beforeComponent?.layer ?? component?.layer ?? 0) - cameraLayer;
+    const target = component
+      ? place(component.pos.x / 65_536, component.pos.y / 65_536, depth)
+      : { x: scene.width / 2, y: scene.height / 2 };
+    const from = beforeComponent
+      ? place(beforeComponent.x, beforeComponent.y, fromDepth)
+      : target;
+    const mark = scene.assemblyDrafts.next();
+    mark.kind = 'form';
+    mark.id = form.node;
+    mark.x = lerp(from.x, target.x, sequence.movement);
+    mark.y = lerp(from.y, target.y, sequence.movement);
+    mark.fromX = from.x;
+    mark.fromY = from.y;
+    mark.radius = sceneFormRadius(scene, form.node, Math.max(scene.dpr * 13, zoom * depthScale(depth) * 24));
+    mark.fromRadius = mark.radius;
+    mark.displaced = Math.abs(from.x - target.x) > scene.dpr || Math.abs(from.y - target.y) > scene.dpr;
+    mark.fields = ASSEMBLY_DRAFT_FIELD.reserve | ASSEMBLY_DRAFT_FIELD.blanks;
+    mark.beforeLevel = formOrigins.get(form.node)?.reserve ?? 0;
+    mark.afterLevel = clamp01(form.reserve / (4096 * 65_536));
+    mark.count = form.junction_blanks ?? 0;
+    mark.active = true;
+    mark.open = true;
+    mark.phase = sequence.phase;
+    mark.tone = depthTone(sequence.stage === 'deenergize' ? tones.origin : tones.authority, depth);
+    mark.originTone = depthTone(tones.origin, fromDepth);
+    mark.alpha = sequence.alpha * depthAlpha(depth);
+    mark.depth = depth;
+    mark.companion = true;
+    mark.compatibility = transitionCompatibility(definition, `form:${form.node}`);
+  }
+
+  const materialOrigins = new Map(origin.materials.map((material) => [material.material, material] as const));
+  for (const material of draft.materials) {
+    const before = materialOrigins.get(material.material);
+    const depth = material.layer - cameraLayer;
+    const fromDepth = (before?.layer ?? material.layer) - cameraLayer;
+    const from = place(before?.x ?? material.pos.x / 65_536, before?.y ?? material.pos.y / 65_536, fromDepth);
+    const target = place(material.pos.x / 65_536, material.pos.y / 65_536, depth);
+    const mark = scene.assemblyDrafts.next();
+    mark.kind = 'material';
+    mark.id = material.material;
+    mark.x = lerp(from.x, target.x, sequence.movement);
+    mark.y = lerp(from.y, target.y, sequence.movement);
+    mark.fromX = from.x;
+    mark.fromY = from.y;
+    mark.radius = Math.max(scene.dpr * 10, zoom * depthScale(depth) * (12 + Math.min(8, material.amount / 256)));
+    mark.fromRadius = Math.max(scene.dpr * 5, mark.radius * 0.55);
+    mark.displaced = Math.abs(from.x - target.x) > scene.dpr
+      || Math.abs(from.y - target.y) > scene.dpr
+      || fromDepth !== depth;
+    mark.fields = ASSEMBLY_DRAFT_FIELD.position | ASSEMBLY_DRAFT_FIELD.layer | ASSEMBLY_DRAFT_FIELD.amount;
+    mark.beforeLevel = clamp01((before?.amount ?? 0) / 1024);
+    mark.afterLevel = clamp01(material.amount / 1024);
+    mark.count = Math.min(6, Math.ceil(Math.log2(material.amount + 1)));
+    mark.active = true;
+    mark.open = true;
+    mark.phase = sequence.phase;
+    mark.tone = depthTone(sequence.stage === 'deenergize' ? tones.origin : ASSEMBLY_DRAFT_MATERIAL, depth);
+    mark.originTone = depthTone(tones.origin, fromDepth);
+    mark.alpha = sequence.alpha * depthAlpha(depth);
+    mark.depth = depth;
+    mark.companion = true;
+    mark.compatibility = transitionCompatibility(definition, `material:${material.material}`);
+  }
+
+  const currentOrigins = new Map(origin.currents.map((current) => [current.id, current] as const));
+  for (const target of draft.currents) {
+    const before = currentOrigins.get(target.current);
+    const current = scene.currents.items.slice(0, scene.currents.count)
+      .find((candidate) => candidate.id === target.current);
+    const beforePhase = before?.phase ?? 0;
+    const afterPhase = (target.phase % 1024) / 1024;
+    const from = current ? pointAlong(current.points, beforePhase) : null;
+    const at = current ? pointAlong(current.points, afterPhase) : null;
+    const mark = scene.assemblyDrafts.next();
+    mark.kind = 'current';
+    mark.id = target.current;
+    mark.fromX = from?.x ?? at?.x ?? scene.width / 2;
+    mark.fromY = from?.y ?? at?.y ?? scene.height / 2;
+    mark.x = lerp(mark.fromX, at?.x ?? mark.fromX, sequence.movement);
+    mark.y = lerp(mark.fromY, at?.y ?? mark.fromY, sequence.movement);
+    mark.radius = Math.max(scene.dpr * 12, (current?.width ?? scene.dpr * 5) * 0.72);
+    mark.fromRadius = Math.max(scene.dpr * 5, mark.radius * 0.5);
+    mark.displaced = beforePhase !== afterPhase;
+    mark.fields = ASSEMBLY_DRAFT_FIELD.phase | ASSEMBLY_DRAFT_FIELD.active;
+    mark.beforeLevel = beforePhase;
+    mark.afterLevel = afterPhase;
+    mark.count = 0;
+    mark.active = target.active;
+    mark.open = true;
+    mark.phase = afterPhase;
+    mark.tone = sequence.stage === 'deenergize' ? tones.origin : ASSEMBLY_DRAFT_CURRENT;
+    mark.originTone = tones.origin;
+    mark.alpha = sequence.alpha * depthAlpha(current?.depth ?? 0);
+    mark.depth = current?.depth ?? 0;
+    mark.companion = true;
+    mark.compatibility = transitionCompatibility(definition, `current:${target.current}`);
+  }
+
+  const beforeCompartment = {
+    members: origin.physicalCompartment.members,
+    leak_per_exposed_contact_per_step: origin.physicalCompartment.leakage,
+  } as unknown as AssemblyPayload;
+  const afterCompartment = draft.physical_compartment as unknown as AssemblyPayload;
+  fillAssemblyBoundary(
+    scene,
+    draft,
+    beforeCompartment,
+    afterCompartment,
+    place,
+    zoom,
+    cameraLayer,
+    true,
+    sequence.alpha,
+    true,
+    transitionCompatibility(definition, 'physical_compartment:opening'),
+  );
+}
+
+/** Closest point on one rendered polyline, used only for visual relationships. */
+function closestOnPath(points: readonly number[], x: number, y: number): { x: number; y: number; distance: number } | null {
+  if (points.length < 2) return null;
+  if (points.length === 2) {
+    return { x: points[0], y: points[1], distance: Math.hypot(x - points[0], y - points[1]) };
+  }
+  let closest = { x: points[0], y: points[1], distance: Infinity };
+  for (let point = 2; point < points.length; point += 2) {
+    const x1 = points[point - 2];
+    const y1 = points[point - 1];
+    const x2 = points[point];
+    const y2 = points[point + 1];
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const span = dx * dx + dy * dy;
+    const along = span === 0 ? 0 : clamp01(((x - x1) * dx + (y - y1) * dy) / span);
+    const at = { x: x1 + dx * along, y: y1 + dy * along };
+    const distance = Math.hypot(x - at.x, y - at.y);
+    if (distance < closest.distance) closest = { ...at, distance };
+  }
+  return closest;
+}
+
+/**
+ * Supply is legible as a directed transfer, not merely as a glowing band.
+ * These links are derived from current and recipient geometry and never feed
+ * back into delivery.
+ */
+function fillSupplyLinks(scene: Scene, next: FrameState): void {
+  const rawByNode = new Map(next.ports.map((port) => [port.node, port]));
+  for (let currentPlace = 0; currentPlace < scene.currents.count; currentPlace += 1) {
+    const current = scene.currents.items[currentPlace];
+    if (!current.active || !current.emitting || current.points.length < 2) continue;
+    const capture = current.width / (current.bright ? 2.35 : 1.9);
+    for (let portPlace = 0; portPlace < scene.ports.count; portPlace += 1) {
+      const port = scene.ports.items[portPlace];
+      const raw = rawByNode.get(port.node);
+      if (!raw || raw.layer !== current.layer || raw.charge >= 65_535 || port.delivered <= 0) continue;
+      const source = closestOnPath(current.points, port.x, port.y);
+      if (!source || source.distance > capture) continue;
+      const link = scene.supplyLinks.next();
+      link.current = current.id;
+      link.recipient = port.node;
+      link.x1 = source.x;
+      link.y1 = source.y;
+      link.x2 = port.x;
+      link.y2 = port.y;
+      link.phase = scene.reducedMotion ? 0.65 : (scene.clock * 0.16 + port.node * 0.11) % 1;
+      link.width = Math.max(0.8, scene.dpr * (current.bright ? 1.35 : 0.95));
+      link.tone = current.bright ? CURRENT_GLASS : current.tone;
+      link.alpha = current.alpha * (0.3 + 0.5 * port.delivered);
+    }
+  }
+}
+
+/** The distance between a Form and a projected mark. */
+const markDistance = (form: FormMark, x: number, y: number): number => Math.hypot(x - form.x, y - form.y);
+
+/**
+ * Projects the authoritative aggregate Pulse preview back onto the concrete
+ * objects its radius reaches. Exact totals remain the core's; target identity
+ * is a render-only consequence of the same layer, distance, gate, and stock
+ * readings already present in the frame.
+ */
+function fillCoupling(scene: Scene, next: FrameState, zoom: number): void {
+  const preview = next.pulsePreview;
+  const form = scene.forms.items.slice(0, scene.forms.count).find((held) => held.controlled);
+  scene.coupling.active = Boolean(preview && form);
+  if (!preview || !form) {
+    scene.coupling.alpha = 0;
+    return;
+  }
+
+  const spread = zoom * depthScale(form.depth);
+  const radius = Math.max(1, (preview.radius / 65_536) * spread);
+  const effectTotal = preview.gathered
+    + preview.reserveReleased
+    + preview.openedPorts
+    + preview.displacedPressures;
+  scene.coupling.connected = effectTotal > 0;
+  scene.coupling.x = form.x;
+  scene.coupling.y = form.y;
+  scene.coupling.radius = radius;
+  scene.coupling.charge = clamp01(((preview.radius / 65_536) - 8) / 184);
+  scene.coupling.phase = scene.reducedMotion ? 0.25 : (scene.clock * 0.06) % 1;
+  scene.coupling.tone = scene.coupling.connected ? ROUTE_PROPOSED : FORM_CONTROLLED_RING;
+  scene.coupling.alpha = form.alpha * (scene.coupling.connected ? 0.92 : 0.62);
+
+  const markByNode = new Map<number, PortMark>();
+  for (let place = 0; place < scene.ports.count; place += 1) {
+    markByNode.set(scene.ports.items[place].node, scene.ports.items[place]);
+  }
+  const rawForm = next.ports
+    .filter((port) => port.kind === FORM_NODE_KIND && port.layer - scene.camera.layer === form.depth)
+    .map((port) => ({ port, mark: markByNode.get(port.node) }))
+    .filter((entry): entry is { port: FramePort; mark: PortMark } => Boolean(entry.mark))
+    .sort((a, b) => markDistance(form, a.mark.x, a.mark.y) - markDistance(form, b.mark.x, b.mark.y))[0]?.port;
+  let headroom = Math.max(0, 65_535 - (rawForm?.charge ?? 0));
+  const exactOpenPorts = new Set(next.pulseOpenPorts);
+  const targets = new Map<string, CouplingTargetMark>();
+
+  const addTarget = (
+    key: string,
+    x: number,
+    y: number,
+    targetRadius: number,
+    effect: number,
+    tone: Tone,
+  ): void => {
+    let target = targets.get(key);
+    if (!target) {
+      target = scene.couplingTargets.next();
+      target.x = x;
+      target.y = y;
+      target.radius = Math.max(5 * scene.dpr, targetRadius);
+      target.effects = 0;
+      target.phase = scene.coupling.phase;
+      target.tone = tone;
+      target.alpha = 0.9 * form.alpha;
+      targets.set(key, target);
+    }
+    target.effects |= effect;
+    target.tone = target.effects === effect ? tone : mixTone(target.tone, tone, 0.5);
+  };
+
+  for (const raw of next.ports) {
+    const port = markByNode.get(raw.node);
+    if (!port || port.depth !== form.depth || markDistance(form, port.x, port.y) > radius) continue;
+    if (raw.kind !== FORM_NODE_KIND && raw.charge > 0 && headroom > 0) {
+      const take = Math.min(Math.ceil(raw.charge / 4), headroom);
+      if (take > 0) {
+        addTarget(`node:${raw.node}`, port.x, port.y, port.radius * 2.2, COUPLING_EFFECT.gather, CHARGE_HIGH);
+        headroom -= take;
+      }
+    }
+    if (raw.kind === 0 && !raw.open && exactOpenPorts.has(raw.node)) {
+      addTarget(`node:${raw.node}`, port.x, port.y, port.radius * 2.5, COUPLING_EFFECT.open, CURRENT_GLASS);
+    }
+  }
+
+  for (const pressure of next.pressures) {
+    if (pressure.queued || pressure.ordinal !== 4) continue;
+    if (pressure.targetKind === 'node') {
+      const port = markByNode.get(pressure.target);
+      if (port && port.depth === form.depth && markDistance(form, port.x, port.y) <= radius) {
+        addTarget(`node:${pressure.target}`, port.x, port.y, port.radius * 2.8, COUPLING_EFFECT.suppress, PRESSURE_TONES[4]);
+      }
+    } else if (pressure.targetKind === 'route') {
+      const route = scene.routes.items.slice(0, scene.routes.count).find((held) => held.route === pressure.target);
+      if (!route) continue;
+      const reachesTail = markDistance(form, route.x1, route.y1) <= radius;
+      const reachesHead = markDistance(form, route.x2, route.y2) <= radius;
+      if (!reachesTail && !reachesHead) continue;
+      addTarget(
+        `route:${pressure.target}`,
+        (route.x1 + route.x2) / 2,
+        (route.y1 + route.y2) / 2,
+        Math.max(8 * scene.dpr, route.width * 3),
+        COUPLING_EFFECT.suppress,
+        PRESSURE_TONES[4],
+      );
+    }
+  }
 }
 
 /**
@@ -1408,22 +3403,24 @@ function fillForms(
  * hold nothing between frames and stop dead when the time scale does.
  */
 function fillParticles(scene: Scene, reduced: boolean): void {
-  const perSegment = reduced ? 2 : PARTICLES_PER_SEGMENT;
+  const perSegment = reduced ? Math.min(2, scene.quality.particlesPerSegment) : scene.quality.particlesPerSegment;
   const drift = reduced ? 0 : scene.clock * 0.07;
 
   for (let place = 0; place < scene.currents.count; place += 1) {
     const current = scene.currents.items[place];
-    if (!current.active) continue;
+    if (!current.active || !current.emitting) continue;
     const pairs = current.points.length / 2;
     for (let leg = 1; leg < pairs; leg += 1) {
       for (let index = 0; index < perSegment; index += 1) {
-        if (scene.particles.count >= PARTICLE_CAP) return;
+        if (scene.particles.count >= scene.particleLimit) return;
         const along = (index / perSegment + drift) % 1;
         const mark = scene.particles.next();
+        mark.subject = 0;
+        mark.id = 0;
         mark.x = lerp(current.points[(leg - 1) * 2], current.points[leg * 2], along);
         mark.y = lerp(current.points[(leg - 1) * 2 + 1], current.points[leg * 2 + 1], along);
-        mark.radius = Math.max(1, current.width * 0.09);
-        mark.tone = current.tone;
+        mark.radius = Math.max(1.2, current.width * (current.bright ? 0.12 : 0.09));
+        mark.tone = current.bright ? CURRENT_GLASS : current.tone;
         mark.alpha = current.alpha * (current.bright ? 0.85 : 0.5) * Math.sin(Math.PI * along) ** 0.5;
       }
     }
@@ -1434,14 +3431,16 @@ function fillParticles(scene: Scene, reduced: boolean): void {
     if (route.flow <= 0) continue;
     const count = Math.max(1, Math.round(perSegment * route.flow));
     for (let index = 0; index < count; index += 1) {
-      if (scene.particles.count >= PARTICLE_CAP) return;
+      if (scene.particles.count >= scene.particleLimit) return;
       const along = (index / count + drift * (0.4 + route.flow)) % 1;
       const mark = scene.particles.next();
+      mark.subject = 0;
+      mark.id = 0;
       mark.x = lerp(route.x1, route.x2, along);
       mark.y = lerp(route.y1, route.y2, along);
-      mark.radius = Math.max(1, route.width * 0.62);
-      mark.tone = route.status === 2 ? OVERLOAD : CHARGE_HIGH;
-      mark.alpha = 0.5 + 0.45 * route.flow;
+      mark.radius = Math.max(1.1, route.width * 0.72);
+      mark.tone = route.status === 2 ? OVERLOAD : CHARGE_SPARK;
+      mark.alpha = 0.58 + 0.42 * route.flow;
     }
   }
 }
@@ -1584,9 +3583,11 @@ function fillCues(
     // drops them and the ring alone carries the reading.
     if (scene.reducedMotion || shape.particles === 0) continue;
     for (let index = 0; index < shape.particles; index += 1) {
-      if (scene.particles.count >= PARTICLE_CAP) break;
+      if (scene.particles.count >= scene.particleLimit) break;
       const turn = ((index + 0.5) / shape.particles) * Math.PI * 2 + cue.b;
       const speck = scene.particles.next();
+      speck.subject = 0;
+      speck.id = 0;
       speck.x = mark.x + Math.cos(turn) * mark.radius;
       speck.y = mark.y + Math.sin(turn) * mark.radius;
       speck.radius = Math.max(1, spread * 3.4 * (1 - 0.5 * age));
@@ -1764,18 +3765,20 @@ function fillRim(scene: Scene, next: FrameState): void {
   let level = 0;
   let tone = PRESSURE_TONES[0];
   let crisis = false;
+  let localized = false;
   for (const pressure of next.pressures) {
     if (pressure.queued) continue;
-    const stage = pressure.stage === 'crisis' ? 1 : pressure.stage === 'pressure' ? 0.6 : 0.3;
-    const reading = clamp01((pressure.level / 65535) * stage + (pressure.stage === 'crisis' ? 0.25 : 0));
+    const reading = pressureLevel(pressure);
     if (reading <= level) continue;
     level = reading;
     tone = PRESSURE_TONES[pressure.ordinal % PRESSURE_TONES.length];
     crisis = pressure.stage === 'crisis';
+    localized = pressure.targetKind !== 'none';
   }
   scene.rim.level = level;
   scene.rim.tone = tone;
   scene.rim.crisis = crisis;
+  scene.rim.localized = localized;
   scene.rim.beat = crisis && !scene.reducedMotion ? 0.5 + 0.5 * Math.sin(scene.clock * 0.55) : 0;
 }
 

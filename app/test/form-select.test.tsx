@@ -224,7 +224,7 @@ test('no session is opened until a Form is taken, and it opens on that Form', as
   // `init_run`, so a session opened before the choice would be a run opened on
   // a Form nobody named.
   expect(opened).toEqual([]);
-  expect(container.querySelector('canvas')).toBeNull();
+  expect(container.querySelector('canvas.field')).toBeNull();
 
   const { name } = named('vault');
   await act(async () => {
@@ -250,7 +250,13 @@ test('the choice opens one session, and a redrawn surface does not open another'
 
   render(<App sound={null} />);
   await act(async () => {
+    screen.getByRole('button', { name: catalog.entries['atlas.open'].text }).click();
+  });
+  await act(async () => {
     screen.getByRole('radio', { name: new RegExp(named('thread').name) }).click();
+  });
+  await act(async () => {
+    screen.getByRole('button', { name: catalog.entries['form.begin'].text }).click();
   });
 
   expect(RecordingWorker.opened).toHaveLength(1);

@@ -1,5 +1,10 @@
 # What Is Life 2 — Atlas and Mechanics Contract
 
+> Automation supersession: D-019 through D-022 and
+> `AUTOMATION_AND_CONTRACTS.md` replace the steerable campaign as the primary
+> loop. Quantity, regime, causal, observation, and assay rules in this document
+> remain authoritative.
+
 Status: design authority for the next implementation pass  
 Date: 2026-08-02  
 <!-- lexicon-check: allow-term — exact title of the supplied scientific reference -->
@@ -182,13 +187,24 @@ V = (I, C, w, S)
 
 ### Phase and response lag
 
-The current core advances a Current phase counter, but phase does not modulate delivery. It is presently a display cycle, not a physical observable.
+Current phase now controls an explicit integer duty-cycle window. `strength`
+is the cycle-average ceiling. For a period `P` and duty `d`, the on-window is
+`ceil(Pd)` steps and its multiplier is `P / ceil(Pd)`; the remaining steps emit
+zero. Recipient headroom can still reject delivery, so accepted Supply remains
+an empirical ledger quantity rather than a promise.
 
-Do not expose scientific `Phase` until the cycle changes a supply, conductance, or oscillator. Once implemented:
+Each emitting Current then draws one symmetric multiplier from its addressed
+trajectory stream within the RegimeSpec `supply_jitter` bound. Route Noise is
+keyed by `(route_noise, layer, step)` and Supply by
+`(supply_jitter, current, step)`. The interval is
+descriptive modeled variability and preserves the authored mean; it is not a
+measurement-error or molecular-fluctuation claim.
 
 - phase: `0–1 cycle`, degrees, or radians;
 - period: steps and seconds;
-- response lag: time or angular lag between named input and output traces.
+- response lag: the shortest retained lag maximizing positive centered
+  cross-covariance between the named periodic Supply ceiling and selected
+  stored Charge, reported with a bounded descriptive correlation.
 
 ### Initial-state retention
 
@@ -204,7 +220,7 @@ effects, and crossing Routes.
 | Current label | Player-facing replacement | Output |
 |---|---|---|
 | Flux | Boundary flow | Inflow, outflow, and net flow in Charge/s over a stated window |
-| Phase | Response lag | Lag between a named periodic input and output; hidden until physical periodicity exists |
+| Phase | Response lag | Lag between a named periodic input and selected stored Charge; unavailable without a periodic Current |
 | Source | Initial-state retention | Fraction of final selected Charge attributable to opening stock |
 | Resolution | Measurement grain | Number of Components grouped into one observable block |
 | Temporal shutter | Analysis window | The last `T` steps and seconds included in the calculation |
@@ -340,7 +356,7 @@ Recommended destination language:
 
 Atmospheric names may remain as quiet subtitles, but never replace the technical identifier.
 
-### First implemented destination
+### Reference destination
 
 `Regime 01 — Steady Transport`
 
@@ -352,9 +368,12 @@ Atmospheric names may remain as quiet subtitles, but never replace the technical
 - Default observation window: `45 steps / 1.50 s`.
 - Later disturbance: Route redirection and supply-path displacement.
 
-Only this destination may currently start a run. Other visible destinations must state `Model Pending` until the core can establish them honestly.
+The Atlas may start every destination whose catalog status is `implemented`.
+Each such destination is backed by a named immutable Rust `RegimeSpec`; a
+catalog entry remains `Model Pending` whenever no corresponding causal lawset
+exists.
 
-## Keyboard and mouse contract
+## Keyboard and pointer contract
 
 ### Atlas
 
@@ -364,14 +383,18 @@ Only this destination may currently start a run. Other visible destinations must
 
 ### Active play
 
-- Mouse offset or WASD: requested heading and speed.
-- Hold primary mouse or Shift: charge the coupling radius.
-- Release: apply the coupling pulse.
+- WASD or Arrow keys: requested heading and speed. Pointer motion never steers.
+- Hold E: extend the coupling radius.
+- Release E: apply the coupling Pulse.
 - Wheel or bracket keys: change depth.
 - Space: enter or leave Still Mode.
 - Handoff control: select which linked Form receives direct steering.
 
-The Pulse preview must state its predicted direct effects before release:
+Pointer input is reserved for Field inspection, the Why control, Still Mode
+handles, and laboratory controls. It never begins a Pulse.
+
+The Pulse preview must identify affected objects in world space and summarize
+its predicted direct effects before release:
 
 ```text
 Radius: 96 units
@@ -530,10 +553,14 @@ Example demand:
 
 ## Scientific correction ledger
 
-The following are blockers for proof-grade claims:
+The following ledger records both implemented corrections and the limitations
+that still block proof-grade claims:
 
-1. Physical compartment and View membership are coupled in the current leakage rule.
-2. Candidate View selection currently consumes the physical intervention resource.
+1. Physical-compartment membership is now independent from passive View
+   membership. It remains a graph-contact leakage abstraction rather than a
+   geometric boundary microphysics model.
+2. Candidate View selection is now free and passive. A View protocol remains a
+   modeled observation operation rather than the paper's coarse-graining itself.
 3. Full turnover is external substitution with automatic topology transfer.
 4. Player steering, Pulses, and rescue add addressed external information.
 5. Charge is a resource and cannot stand in for information.
@@ -541,11 +568,22 @@ The following are blockers for proof-grade claims:
 7. Capacity compatibility does not establish causal sufficiency.
 8. Shannon and Hartley quantities must remain separate.
 9. Eight-run ranges are not confidence intervals.
-10. Runtime randomness is too weak in several current scenarios for a meaningful Ensemble.
-11. Sequential Route execution makes identifier order affect multi-hop transport.
-12. Supply membership is tested against sampled polyline points rather than the full segments.
-13. Maintenance allocation is currently collapsed into one category.
-14. Current phase is decorative; Vault reserve use and several Form promises are incomplete.
+10. Runtime randomness now includes bounded per-emission Supply variability in
+    every implemented Regime, in addition to Route conductance Noise. Ensemble
+    ranges remain descriptive for the declared model and finite addressed seeds.
+11. Route execution now uses a simultaneous proportional one-hop allocator;
+    intentional multi-hop transport therefore requires later simulation steps.
+    A one-hop occupancy overshoot with an active outgoing Route is transport in
+    flight. Pattern failure is reserved for overload with no active relief.
+12. Supply membership now uses exact integer point-to-polyline-segment distance
+    over the authored path rather than sampled vertices.
+13. Maintenance allocation now preserves the exact paid sink across five
+    structural purposes. The version-1 attribution is role-based rather than a
+    molecular maintenance model, so it supports gameplay accounting but not a
+    biochemical maintenance claim.
+14. Response-lag evidence requires enough retained periodic cycles; an absent
+    periodic Current or fewer than two complete retained cycles returns distinct
+    unavailable provenance and establishes no lag.
 15. The scientific reference is a preprint and has not undergone peer review.
 16. A View protocol is not identical to the paper's coarse-graining `C`.
 17. Small gameplay Ensembles do not estimate Shannon entropy or Hartley support.
@@ -553,7 +591,10 @@ The following are blockers for proof-grade claims:
     side information, not free organization.
 19. PRNG seeds index modeled realizations and do not measure random-bit use.
 20. A global repair controller may not supply target identity, position,
-    material source, or desired topology to local renewal rules.
+    material source, or desired topology to local renewal rules. Live local
+    reconstitution now acts only through emitted deficit signals, nearby donor
+    stock, nearby typed material, and standing attached Routes. The cloned
+    full-turnover assay remains the stronger identity-replacement test.
 
 ## Implementation sequence
 
@@ -565,7 +606,11 @@ The following are blockers for proof-grade claims:
    explicit model-pending destinations.
 5. Replace vague Form promises with complete parameter tables and implementation-status disclosures.
 6. Rename existing measurements and separate observation sensitivity from interventions.
-7. Implement exact local ledgers and hover inspection.
+7. Implement exact local ledgers and hover inspection. The current Field
+   resolves Component, Directed Route, Supply Stream, physical-compartment,
+   passive-View, and typed-material targets through the on-demand
+   `inspect_field` Rust command. The pressure register expands to its exact
+   stage, level, target, onset, and authored rule explanation.
 8. Define and version a simultaneous transport allocator, Supply sharing,
    rejection, update order, and Route latency; correct segment-based capture.
 9. Build paired Divergence Replay with keyed common randomness.

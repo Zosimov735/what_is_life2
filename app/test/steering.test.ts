@@ -1,15 +1,9 @@
 /**
  * Steering, from a device to the frame the worker reads.
  *
- * The contracts under test are the ones `docs/field-framework/ARCHITECTURE.md`
- * locks — the pointer read relative to the surface's middle, the normalization
- * `min(1, r / 320)`, the keyboard's unit axes with their ±23170 diagonal, the
- * clamp that never sends −32768, and the magnitude the vector is held to — and
- * the one this goal is done by: mouse, trackpad, and keyboard produce identical
- * normalized `InputFrame` messages for equivalent logical steering.
- *
- * That last one is read here as byte-identical JSON, on the frame as a whole
- * rather than on the pair inside it, because the frame is what crosses.
+ * The normalization remains independently testable, while the live source is
+ * intentionally keyboard-only. Pointer motion is reserved for inspection and
+ * chrome, so it must leave every emitted steering frame neutral.
  */
 
 import { afterEach, expect, test, vi } from 'vitest';
@@ -130,33 +124,34 @@ test('the heading the offset names is the heading the pair carries', () => {
 // One control, whatever named it
 // ---------------------------------------------------------------------------
 
-test('the cursor and the keys produce byte-identical frames for the same steering', () => {
+test('pointer motion stays neutral while either keyboard binding steers', () => {
   const cursor = steering();
   const keyboard = steering();
 
-  // Whole deflection along one axis: the cursor at the saturation radius, and
-  // a key held until its ramp is full.
+  // Pointer coordinates no longer supply the live steering source.
   moveTo(cursor.target, SATURATION_RADIUS_PX, 0);
+  expect(framed(cursor.source)).toEqual(neutralFrame(1, 16_667));
+
+  // A key held until its ramp is full reaches whole deflection.
   press(keyboard.target, 'KeyD');
   sampled(keyboard.source, KEY_RISE_FRAMES - 1);
-  expect(JSON.stringify(framed(keyboard.source))).toBe(JSON.stringify(framed(cursor.source)));
+  expect(framed(keyboard.source).steer_x).toBe(STEER_UNIT);
 
-  // Half of it: the cursor at half the radius, and the key released long
-  // enough for the ramp to walk halfway back.
+  // Releasing the key walks the same ramp halfway back.
   moveTo(cursor.target, SATURATION_RADIUS_PX / 2, 0);
   press(keyboard.target, 'KeyD', false);
   sampled(keyboard.source, KEY_FALL_FRAMES / 2 - 1);
-  expect(JSON.stringify(framed(keyboard.source, 2))).toBe(JSON.stringify(framed(cursor.source, 2)));
+  expect(framed(keyboard.source, 2).steer_x).toBe(Math.round(STEER_UNIT / 2));
+  expect(framed(cursor.source, 2)).toEqual(neutralFrame(2, 16_667));
 
-  // And the arrow keys are the same keys: the fallback names the same offset.
+  // Arrow keys are the equivalent keyboard binding.
   const arrows = steering();
   press(arrows.target, 'ArrowRight');
   sampled(arrows.source, KEY_RISE_FRAMES - 1);
-  moveTo(cursor.target, SATURATION_RADIUS_PX, 0);
-  expect(JSON.stringify(framed(arrows.source, 3))).toBe(JSON.stringify(framed(cursor.source, 3)));
+  expect(framed(arrows.source, 3).steer_x).toBe(STEER_UNIT);
 });
 
-test('a diagonal is the locked pair, on either device, held to the magnitude', () => {
+test('a keyboard diagonal is the locked pair and pointer motion remains neutral', () => {
   const cursor = steering();
   const keyboard = steering();
   press(keyboard.target, 'KeyD');
@@ -165,7 +160,7 @@ test('a diagonal is the locked pair, on either device, held to the magnitude', (
   moveTo(cursor.target, SATURATION_RADIUS_PX, SATURATION_RADIUS_PX);
 
   const held = keyboard.source.sample();
-  expect(JSON.stringify(held)).toBe(JSON.stringify(cursor.source.sample()));
+  expect(cursor.source.sample()).toEqual({ steer_x: 0, steer_y: 0 });
 
   // The document writes the diagonal as ±23169: the largest per-axis pair the
   // magnitude rule admits, because 2 × 23169² fits under 32767² and 2 × 23170²
@@ -207,7 +202,7 @@ test('the rest radius is a hard edge, and the step across it is stated', () => {
   expect(across.steer_x / STEER_UNIT).toBeLessThan(1 / 39);
 });
 
-test('opposed keys cancel and the cursor is what is left', () => {
+test('opposed keys cancel and pointer motion cannot replace them', () => {
   const { source, target } = steering();
   press(target, 'KeyA');
   press(target, 'KeyD');
@@ -215,7 +210,7 @@ test('opposed keys cancel and the cursor is what is left', () => {
   expect(source.held()).toBe(2);
 
   moveTo(target, 0, SATURATION_RADIUS_PX);
-  expect(source.sample()).toEqual({ steer_x: 0, steer_y: STEER_UNIT });
+  expect(source.sample()).toEqual({ steer_x: 0, steer_y: 0 });
 });
 
 // ---------------------------------------------------------------------------
@@ -266,7 +261,7 @@ test('a ramp advances once per frame and not once per event', () => {
 // Letting go
 // ---------------------------------------------------------------------------
 
-test('clearing lets go of the cursor, the keys, and the ramp between them', () => {
+test('clearing lets go of the keys and their ramp', () => {
   const { source, target } = steering();
   moveTo(target, SATURATION_RADIUS_PX, SATURATION_RADIUS_PX);
   press(target, 'KeyW');
@@ -284,18 +279,16 @@ test('clearing lets go of the cursor, the keys, and the ramp between them', () =
   expect(source.sample().steer_x).toBeGreaterThan(0);
 });
 
-test('a cursor that leaves the window stops steering and the keys carry on', () => {
+test('pointer movement and pointer exit leave keyboard steering untouched', () => {
   const { source, target } = steering();
   moveTo(target, SATURATION_RADIUS_PX, 0);
   press(target, 'KeyW');
   sampled(source, KEY_RISE_FRAMES);
-  expect(source.sample().steer_x).toBeGreaterThan(0);
+  expect(source.sample()).toEqual({ steer_x: 0, steer_y: -STEER_UNIT });
 
   document.dispatchEvent(new Event('pointerleave'));
 
-  // The offset the cursor left behind would have steered for as long as it
-  // stayed away. The keys are untouched: the window still has focus and still
-  // receives their release, so none of them can be left held.
+  // Pointer lifecycle events do not alter the held keyboard direction.
   const after = source.sample();
   expect(after.steer_x).toBe(0);
   expect(after.steer_y).toBe(-STEER_UNIT);

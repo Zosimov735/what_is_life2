@@ -2,10 +2,10 @@
  * The Pulse, from a device to the frame the worker reads.
  *
  * What is under test is the locked half of the interaction: `pulse_held` as a
- * level and `pulse_release` as an edge consumed exactly once, the primary
- * button and Shift reaching them through one source, and the focus-loss rule's
- * safe release — a window that blurs mid-charge drops the charge rather than
- * emitting a Pulse the player never let go of.
+ * level and `pulse_release` as an edge consumed exactly once, E reaching them
+ * through one source, pointer input remaining inspection-only, and the
+ * focus-loss rule's safe release — a window that blurs mid-charge drops the
+ * charge rather than emitting a Pulse the player never let go of.
  *
  * What the Field does with those frames is not under test here, because no
  * document locks it yet. The report for this goal enumerates what is missing.
@@ -39,14 +39,9 @@ function pulse(): { source: Pulse; target: EventTarget } {
   return { source, target };
 }
 
-/** Presses the primary button down. */
+/** Sends a primary-pointer event. Coupling must ignore it. */
 function press(target: EventTarget, which = 0): void {
   target.dispatchEvent(Object.assign(new Event('pointerdown'), { button: which }));
-}
-
-/** Lets the primary button up. */
-function lift(target: EventTarget, which = 0): void {
-  target.dispatchEvent(Object.assign(new Event('pointerup'), { button: which }));
 }
 
 /** Presses or releases a key by its code. */
@@ -62,44 +57,23 @@ function framed(source: Pulse, seq = 1): InputFrame {
 }
 
 // ---------------------------------------------------------------------------
-// One control, whatever named it
+// One explicit world-action key
 // ---------------------------------------------------------------------------
 
-test('the button and Shift produce byte-identical frames for the same Pulse', () => {
-  for (const code of PULSE_BINDINGS) {
-    const pointer = pulse();
-    const keyboard = pulse();
-
-    press(pointer.target);
-    key(keyboard.target, code);
-    // Three frames of holding, then the release, then a frame with nothing
-    // held: the whole of one Pulse, read as the frames that cross.
-    for (let seq = 1; seq <= 3; seq += 1) {
-      expect(JSON.stringify(framed(keyboard.source, seq))).toBe(
-        JSON.stringify(framed(pointer.source, seq)),
-      );
-    }
-    lift(pointer.target);
-    key(keyboard.target, code, false);
-    expect(JSON.stringify(framed(keyboard.source, 4))).toBe(
-      JSON.stringify(framed(pointer.source, 4)),
-    );
-    expect(JSON.stringify(framed(keyboard.source, 5))).toBe(
-      JSON.stringify(framed(pointer.source, 5)),
-    );
-  }
+test('E is the one Coupling binding', () => {
+  expect(PULSE_BINDINGS).toEqual(['KeyE']);
 });
 
 test('a hold is a level and a release is an edge taken exactly once', () => {
   const { source, target } = pulse();
   expect(source.sample()).toEqual({ pulse_held: false, pulse_release: false });
 
-  press(target);
+  key(target, 'KeyE');
   expect(source.sample()).toEqual({ pulse_held: true, pulse_release: false });
   expect(source.sample()).toEqual({ pulse_held: true, pulse_release: false });
   expect(source.held()).toBe(1);
 
-  lift(target);
+  key(target, 'KeyE', false);
   expect(source.sample()).toEqual({ pulse_held: false, pulse_release: true });
   // The edge is consumed by the one frame that carried it: a second frame does
   // not emit a second Pulse.
@@ -109,58 +83,42 @@ test('a hold is a level and a release is an edge taken exactly once', () => {
 
 test('a press and a release between two frames still carries its edge', () => {
   const { source, target } = pulse();
-  press(target);
-  lift(target);
+  key(target, 'KeyE');
+  key(target, 'KeyE', false);
   // Nothing was held at either sampled instant, and a Pulse was let go of all
   // the same: the frame says exactly that.
   expect(source.sample()).toEqual({ pulse_held: false, pulse_release: true });
   expect(source.sample()).toEqual({ pulse_held: false, pulse_release: false });
 });
 
-test('two devices on the Pulse are one hold, and the last one to let go emits', () => {
+test('duplicate keydown events remain one hold and one release', () => {
   const { source, target } = pulse();
-  press(target);
-  key(target, 'ShiftLeft');
-  expect(source.held()).toBe(2);
+  key(target, 'KeyE');
+  key(target, 'KeyE');
+  expect(source.held()).toBe(1);
   expect(source.sample()).toEqual({ pulse_held: true, pulse_release: false });
 
-  lift(target);
-  // One device let go and the other is still holding: still charging, and no
-  // Pulse yet.
-  expect(source.sample()).toEqual({ pulse_held: true, pulse_release: false });
-  key(target, 'ShiftLeft', false);
+  key(target, 'KeyE', false);
   expect(source.sample()).toEqual({ pulse_held: false, pulse_release: true });
 });
 
-test('nothing but the primary button and the bound keys holds the Pulse', () => {
+test('pointer input, Shift, and modified E never hold Coupling', () => {
   const { source, target } = pulse();
 
-  // The secondary button: right-click is not used at all.
+  // Both primary and secondary pointer input remain available to inspection.
+  press(target);
   press(target, 2);
   expect(source.sample()).toEqual({ pulse_held: false, pulse_release: false });
   expect(source.held()).toBe(0);
 
-  // A key that is not bound, a repeat the platform sends while a key is down,
-  // and a key arriving under another modifier — a platform shortcut rather
-  // than a Pulse.
+  // Movement and the old Shift binding do nothing. A repeated or modified E is
+  // also ignored because it is not a fresh world action.
   key(target, 'KeyW');
-  key(target, 'ShiftLeft', true, { repeat: true });
-  key(target, 'ShiftLeft', true, { metaKey: true });
+  key(target, 'ShiftLeft');
+  key(target, 'KeyE', true, { repeat: true });
+  key(target, 'KeyE', true, { metaKey: true });
   expect(source.held()).toBe(0);
   expect(source.sample()).toEqual({ pulse_held: false, pulse_release: false });
-
-  // And a secondary button coming up while the primary is held releases
-  // nothing: the button named on a release is the one that changed.
-  press(target);
-  lift(target, 2);
-  expect(source.sample()).toEqual({ pulse_held: true, pulse_release: false });
-});
-
-test('a cancelled pointer lets the Pulse go', () => {
-  const { source, target } = pulse();
-  press(target);
-  target.dispatchEvent(new Event('pointercancel'));
-  expect(source.sample()).toEqual({ pulse_held: false, pulse_release: true });
 });
 
 // ---------------------------------------------------------------------------
@@ -169,8 +127,7 @@ test('a cancelled pointer lets the Pulse go', () => {
 
 test('clearing lets a held Pulse go without emitting one', () => {
   const { source, target } = pulse();
-  press(target);
-  key(target, 'ShiftLeft');
+  key(target, 'KeyE');
   expect(source.sample().pulse_held).toBe(true);
 
   source.clear();
@@ -183,20 +140,20 @@ test('clearing lets a held Pulse go without emitting one', () => {
 
   // A release that arrives for a hold already dropped emits nothing either:
   // the key going up after the window came back is not a Pulse.
-  key(target, 'ShiftLeft', false);
+  key(target, 'KeyE', false);
   expect(source.sample()).toEqual({ pulse_held: false, pulse_release: false });
 
   // And the source still works afterwards.
-  press(target);
+  key(target, 'KeyE');
   expect(source.sample().pulse_held).toBe(true);
 });
 
 test('a pending release stands until the frame that carries it', () => {
   const { source, target } = pulse();
-  press(target);
-  lift(target);
-  press(target);
-  lift(target);
+  key(target, 'KeyE');
+  key(target, 'KeyE', false);
+  key(target, 'KeyE');
+  key(target, 'KeyE', false);
   // Two Pulses inside one frame are one edge: the frame carries what the shell
   // holds when it is sent, and no input is buffered beyond the latest frame.
   expect(source.sample()).toEqual({ pulse_held: false, pulse_release: true });
@@ -208,7 +165,7 @@ test('a pending release stands until the frame that carries it', () => {
 // ---------------------------------------------------------------------------
 
 test('a recorded trace of device events replays to the same frames', () => {
-  const trace: ({ down: boolean } | { key: string; down: boolean } | { frame: true })[] = [];
+  const trace: ({ key: string; down: boolean } | { pointer: boolean } | { frame: true })[] = [];
   let seed = 11;
   const next = (): number => {
     seed = (seed * 1103515245 + 12345) % 2147483648;
@@ -216,10 +173,9 @@ test('a recorded trace of device events replays to the same frames', () => {
   };
   for (let index = 0; index < 400; index += 1) {
     const roll = next();
-    if (roll < 0.2) trace.push({ down: true });
-    else if (roll < 0.4) trace.push({ down: false });
-    else if (roll < 0.5) trace.push({ key: 'ShiftLeft', down: true });
-    else if (roll < 0.6) trace.push({ key: 'ShiftLeft', down: false });
+    if (roll < 0.2) trace.push({ pointer: true });
+    else if (roll < 0.4) trace.push({ key: 'KeyE', down: true });
+    else if (roll < 0.6) trace.push({ key: 'KeyE', down: false });
     else trace.push({ frame: true });
   }
 
@@ -229,7 +185,7 @@ test('a recorded trace of device events replays to the same frames', () => {
     let seq = 1;
     for (const event of trace) {
       if ('key' in event) key(target, event.key, event.down);
-      else if ('down' in event) (event.down ? press : lift)(target);
+      else if ('pointer' in event) press(target);
       else frames.push(framed(source, seq++));
     }
     return JSON.stringify(frames);
@@ -323,10 +279,10 @@ test('the pump carries one Pulse sample per frame', async () => {
   const { client, tick } = await pumped(source);
 
   tick(16.667);
-  press(target);
+  key(target, 'KeyE');
   tick(33.334);
   tick(50);
-  lift(target);
+  key(target, 'KeyE', false);
   tick(66.7);
   tick(83.4);
 
@@ -345,7 +301,7 @@ test('a blurred window drops a held Pulse rather than emitting one', async () =>
   const { source, target } = pulse();
   const { client, tick } = await pumped(source);
 
-  press(target);
+  key(target, 'KeyE');
   tick(16.667);
   expect(framesSent()[0].pulse_held).toBe(true);
 
@@ -363,7 +319,7 @@ test('a blurred window drops a held Pulse rather than emitting one', async () =>
 
   // And the release that arrives once focus is back emits nothing either.
   window.dispatchEvent(new Event('focus'));
-  lift(target);
+  key(target, 'KeyE', false);
   tick(100);
   const after = framesSent();
   expect(after).toHaveLength(3);

@@ -35,8 +35,8 @@
   },
 
   "copyKinds": {
-    "objective": { "maxWords": 6 },
-    "instruction": { "maxWords": 6 },
+    "objective": { "maxWords": 18 },
+    "instruction": { "maxWords": 24 },
     "label": {},
     "chapter": { "canonicalSet": "chapters" },
     "form": { "canonicalSet": "forms" },
@@ -44,7 +44,11 @@
     "promise": {},
     "explanation": {},
     "notice": {},
-    "ending": {}
+    "ending": {},
+    "status": {},
+    "command": {},
+    "description": {},
+    "disclosure": {}
   },
 
   "prohibited": {

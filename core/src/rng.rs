@@ -137,6 +137,20 @@ impl RngState {
         }
     }
 
+    /// Draws from an event-addressed child stream without moving the parent.
+    /// Paired worlds sharing this parent therefore share every unaffected
+    /// `(event, object, step)` draw even when an intervention changes iteration
+    /// membership elsewhere.
+    pub fn addressed(&self, event: &str, object: u32, step: u32, m: u64) -> u64 {
+        let mut child = self.split(&[
+            Part::Name("event"),
+            Part::Name(event),
+            Part::Number(i64::from(object)),
+            Part::Number(i64::from(step)),
+        ]);
+        child.draw(m)
+    }
+
     /// Reads a stream position out of a payload: the key and counter as
     /// fixed-width lowercase hex, the half as the integer 0 or 1.
     pub fn read(value: &crate::json::Json, key: &str) -> Result<Self, crate::fault::Fault> {

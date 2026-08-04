@@ -214,10 +214,10 @@ fn upkeep_readings_over_a_synthetic_schedule_check_the_two_formulas_by_hand() {
     let state = field_game_core::state::RunState {
         run_id: support::measure::KEY.to_string(),
         rng: field_game_core::rng::trajectory_stream(support::measure::KEY, 0),
-        spec: field_game_core::state::GeneratorSpec::new(
+        scenario: field_game_core::state::ScenarioSpec::legacy(
             support::measure::NO_CONTENT.to_string(),
-            Default::default(),
         ),
+        criterion: None,
         branch_nonce: 0,
         progress: field_game_core::state::Progress::opening(),
         now,

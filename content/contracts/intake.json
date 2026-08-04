@@ -1,0 +1,73 @@
+{
+  "id": "intake",
+  "order": 1,
+  "title_key": "contract.intake.title",
+  "brief_key": "contract.intake.brief",
+  "success_key": "contract.intake.success",
+  "failure_key": "contract.intake.failure",
+  "guidance_keys": ["contract.intake.guide.sense", "contract.intake.guide.acquire", "contract.intake.guide.deliver"],
+  "opening": {
+    "kind": "legacy_chapter",
+    "chapter": "the_pull",
+    "component_ids": [2, 6],
+    "current_duties": [],
+    "current_ids": [1],
+    "form": "thread",
+    "regime": "open_field",
+    "route_ids": [1]
+  },
+  "prerequisites": [],
+  "capabilities": {
+    "actions": ["hold", "seek_supply", "couple"],
+    "conditions": ["always", "charge_below", "supply", "target_in_range", "timer_elapsed"],
+    "hardware": ["mobile_component", "local_sensor", "coupler"]
+  },
+  "unlocks": {
+    "actions": ["set_interface", "set_route"],
+    "conditions": ["route_flow_below", "route_flow_above"],
+    "hardware": ["interface_actuator", "route_actuator"],
+    "next_contract": "transfer"
+  },
+  "limits": { "max_components": 7, "max_routes": 6, "max_rules_per_component": 4 },
+  "commissioning": { "expected_minutes": 10, "maximum_wall_wait_seconds": 12 },
+  "qualification": {
+    "trial_count": 3,
+    "duration_steps": 360,
+    "failure_grace_steps": 30,
+    "criteria": [
+      {
+        "id": "receiver_charge_floor",
+        "source": { "kind": "component", "id": 2 },
+        "metric": "stored_charge",
+        "comparison": "at_least",
+        "threshold": 8388608,
+        "aggregation": "minimum",
+        "window_steps": 90
+      },
+      {
+        "id": "leakage_ceiling",
+        "source": { "kind": "field", "id": null },
+        "metric": "leakage_ratio",
+        "comparison": "at_most",
+        "threshold": 8192,
+        "aggregation": "maximum",
+        "window_steps": 90
+      },
+      {
+        "id": "hands_off_service",
+        "source": { "kind": "field", "id": null },
+        "metric": "hands_off_steps",
+        "comparison": "at_least",
+        "threshold": 180,
+        "aggregation": "final",
+        "window_steps": 180
+      }
+    ]
+  },
+  "grade_bands": {
+    "throughput": [32768, 49152, 58982, 65536],
+    "resilience": [16384, 32768, 49152, 65536],
+    "economy": [24576, 40960, 55705, 65536],
+    "complexity": [65536, 49152, 32768, 16384]
+  }
+}

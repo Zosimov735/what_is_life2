@@ -10,14 +10,20 @@
 //! nondeterministic input is the run key the shell hands it.
 
 pub mod content;
+pub mod criterion;
+pub mod analysis;
 pub mod coord;
+pub mod engineering;
 pub mod fault;
 pub mod field;
+pub mod field_inspect;
 pub mod frame;
 pub mod fx;
+pub mod instrument;
 pub mod json;
 pub mod perturb;
 pub mod plan;
+pub mod policy;
 pub mod pressure;
 pub mod protocol;
 pub mod rank;

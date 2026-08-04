@@ -468,6 +468,7 @@ fn two_layers(controlled: u8) -> FieldState {
         route_capacity: 8 * ONE_UNIT,
         link: None,
         trail: None,
+        junction: None,
     };
     let mut field = FieldState::opening();
     field.ports = vec![node(1, 0, 1900), node(2, 1, 2100)];
@@ -516,6 +517,7 @@ fn the_frames_camera_layer_follows_the_form_control_moved_to() {
             queue: &field_game_core::plan::PlanQueue::new(),
             view_inside: &[],
             forecast: &[],
+            medium: field_game_core::field::MediumMotion::default(),
         });
         encoded[15]
     };
@@ -826,7 +828,7 @@ fn a_handoff_under_content_whose_hash_has_moved_reads_the_authored_default() {
     let answer = carried.command("import_run", &import_body(&file));
     assert!(answer.contains("\"ok\":true"), "{answer}");
     assert_ne!(
-        carried.run().expect("a run").state().spec.content_hash(),
+        carried.run().expect("a run").state().scenario.content_hash(),
         digest,
         "the run stands under content whose hash has moved",
     );

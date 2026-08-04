@@ -21,24 +21,29 @@
 //! ARCHITECTURE.md's `Field model rules` section locks the five rules that move
 //! Charge, and each is implemented here verbatim at the phase the locked step
 //! order gives it: the Pulse, the one player-triggered rule, charging and
-//! emitting from where the Form now stands; Route flow as one ascending pass
-//! with an `open` gate, a source-shortfall term and a destination-headroom term;
+//! emitting from where the Form now stands; Route flow as a simultaneous
+//! one-hop proportional allocation with open gates, source shortfall, and
+//! destination headroom;
 //! physical-compartment leakage over material shell members by exposure and
 //! `leak_per_exposed_contact_per_step`; Node overload as an inflow throttle and
 //! a quarter-of-the-excess decay with memoryless recovery; and Current delivery split across the Nodes
 //! standing in a current with an exact remainder. The Pressure effects scale
-//! and steer these five and add no sixth mover; the Noise flow scale among
-//! them is the one drawing rule, at its locked drawing point — the start of
-//! the Route phase, layers ascending — and every rule names its ledger
-//! entries.
+//! and steer these five and add no sixth Charge mover. Runtime draws occur in
+//! a locked addressed sequence: Route Noise by layer, then bounded Supply
+//! variability by emitting Current, both keyed by event, object, and step.
 //!
-//! One phase stays reserved: the Node phase pays upkeep, and the attribution of
-//! upkeep across its five locked purposes is still locked nowhere, so no upkeep
-//! falls due and the trace writes no upkeep entry.
+//! The Node phase pays authored upkeep before transport. Every payment is
+//! recorded exactly and attributed across the five structural purposes.
 
 use crate::fault::{Code, Fault};
-use crate::fx::{adjacent, distance, fixed_mul, hold, within, Vec2, ONE_UNIT, STORED_BOUND};
+use crate::fx::{
+    adjacent, distance, fixed_mul, hold, within, within_segment, Vec2, ONE_UNIT, STORED_BOUND,
+};
 use crate::json::{Json, Obj};
+use crate::policy::{
+    FrozenLocalPolicy, LocalAction, PolicyDecision, PolicyOutcome, PolicyTarget,
+    RouteControlState,
+};
 use crate::pressure::{self, PressureState, Pressure, Schedule, TargetKind};
 use crate::read;
 use crate::rng::RngState;
@@ -70,7 +75,9 @@ pub const NODE_CHARGE_CAP: Fx = 4096 * ONE_UNIT;
 /// Route capacity: 256 units per step.
 pub const ROUTE_CAPACITY_CAP: Fx = 256 * ONE_UNIT;
 
-/// Current strength: 256 units per step.
+/// Current cycle-average strength: 256 units per step. Periodic Currents may
+/// emit a higher instantaneous ceiling during their on-window so the authored
+/// average remains conserved across the full cycle.
 pub const CURRENT_STRENGTH_CAP: Fx = 256 * ONE_UNIT;
 
 /// The widest boundary-leakage parameter: 1/8 per exposed link per step.
@@ -116,6 +123,7 @@ pub const CUE_PULSE_EMITTED: u8 = 1;
 pub const CUE_CHARGE_GATHERED: u8 = 2;
 pub const CUE_PORT_OPENED: u8 = 3;
 pub const CUE_INTERFERENCE_PUSHED: u8 = 12;
+pub const CUE_SUPPLY_ACCEPTED: u8 = 13;
 
 /// The cue kinds the authored sequence raises, from the same closed set: the
 /// Anchor a completion writes, the setback the authored break stands as, the
@@ -150,6 +158,95 @@ pub struct Cue {
     pub b: u32,
 }
 
+/// Exact direct effects a charged Pulse would apply if released now.
+/// Derived from a clone and carried only to the display; it is never state.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PulsePreview {
+    pub radius: Fx,
+    pub gathered: Fx,
+    pub reserve_released: Fx,
+    pub opened_ports: u16,
+    /// Exact Nodes the projected release opens, in ascending Node order.
+    pub opened_port_ids: Vec<u32>,
+    pub displaced_pressures: u16,
+    pub diversion_before: Frac,
+    pub diversion_after: Frac,
+    pub actuation_cost: Fx,
+}
+
+/// Projects the release branch through the same causal helpers the live Pulse
+/// uses, on cloned Field and pressure state, so the preview and release cannot
+/// disagree about reach, headroom, activation, or Interference reduction.
+pub fn pulse_preview(field: &FieldState, pressures: &[PressureState]) -> Option<PulsePreview> {
+    let form_place = field.forms.iter().position(|form| form.controlled)?;
+    let form = &field.forms[form_place];
+    if form.pulse_charge <= 0 && !form.focus {
+        return None;
+    }
+    let radius = pulse_radius(form.pulse_charge);
+    let mut projected = field.clone();
+    let mut ledger = Ledger {
+        opening: projected.ports.iter().map(|port| port.q).sum::<Fx>(),
+        nodes: projected
+            .ports
+            .iter()
+            .map(|port| NodeLedger {
+                node: port.node,
+                opening: port.q,
+                ..NodeLedger::default()
+            })
+            .collect(),
+        ..Ledger::default()
+    };
+    let gathered = gather_charge(
+        &mut projected,
+        form.node,
+        form.pos,
+        form.layer,
+        radius,
+        &mut ledger,
+    );
+    let opened_port_ids = open_ports(&mut projected, form.pos, form.layer, radius);
+    let opened_ports = opened_port_ids.len() as u16;
+    let reserve_released = discharge_vault(
+        &mut projected,
+        form_place,
+        form.pulse_charge,
+        radius,
+        &mut ledger,
+    );
+    let diversion_before = pressure::Redirection::of(pressures).share;
+    let mut pressed = Vec::new();
+    let displaced_pressures = displace_interference(
+        field,
+        pressures,
+        form.pos,
+        form.layer,
+        radius,
+        &mut pressed,
+    );
+    let mut after = pressures.to_vec();
+    for (ordinal, floor) in pressed {
+        if let Some(pressure) = after
+            .iter_mut()
+            .find(|pressure| pressure.pressure.ordinal() == ordinal)
+        {
+            pressure.displaced = Some(floor);
+        }
+    }
+    Some(PulsePreview {
+        radius,
+        gathered,
+        reserve_released,
+        opened_ports,
+        opened_port_ids,
+        displaced_pressures,
+        diversion_before,
+        diversion_after: pressure::Redirection::of(&after).share,
+        actuation_cost: 0,
+    })
+}
+
 /// The step inputs this goal adds, in one place: the standing pressures, the
 /// authored tables the stage machine reads, and the trajectory stream position
 /// the step draws from.
@@ -161,17 +258,27 @@ pub struct Cue {
 /// replayed. So a replay hands this the live list and reproduces the recorded
 /// window byte for byte.
 ///
-/// The stream is the step's supplied stream, consumed at ARCHITECTURE.md's
-/// one locked drawing point: the Noise flow scale draws from it at the start
-/// of the Route phase, layers ascending, one word per layer with positive
-/// effective noise. A live step hands the trajectory stream and its position
-/// advances with the draws; a regeneration hands the recorded per-step
-/// position and re-draws exactly what the live step drew; a framework sample
-/// hands its own named stream and legitimately diverges.
+/// The stream is the step's supplied branch identity. Noise addresses
+/// `(route_noise, layer, step)` and Supply addresses
+/// `(supply_jitter, current, step)`, so an intervention cannot shift unrelated
+/// draws by changing membership. Replays hand back the same parent identity;
+/// framework samples use their own named parent and legitimately diverge.
 pub struct Staging<'a> {
     pub pressures: &'a mut Vec<PressureState>,
     pub schedule: &'a Schedule,
     pub stream: &'a mut RngState,
+    pub medium: MediumMotion,
+    pub supply_jitter: Frac,
+}
+
+/// A local sample of environmental velocity. It changes motion only and is
+/// deliberately separate from resource-bearing Supply Currents.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MediumMotion {
+    pub velocity: Vec2,
+    pub drag: Frac,
+    pub collision_radius: Fx,
+    pub collision_response: Frac,
 }
 
 /// A step with nothing staged, owned by the caller.
@@ -192,6 +299,8 @@ impl Unstaged {
             pressures: &mut self.pressures,
             schedule: &self.schedule,
             stream: &mut self.stream,
+            medium: MediumMotion::default(),
+            supply_jitter: 0,
         }
     }
 }
@@ -289,6 +398,25 @@ pub const STEER_SCALE_HIGH: Frac = 262_144;
 /// the oldest entry, so the queue is bounded whatever a run does.
 pub const PENDING_TRAILS: usize = 64;
 
+/// Timed Route ceilings that may stand at once. A Route can carry at most one
+/// active clamp, so the Route cap is also the clamp cap.
+pub const ROUTE_CLAMPS: usize = ROUTES_PER_RUN;
+
+/// Bounded embodied stocks and local deficit signals retained in one Field.
+pub const MATERIALS_PER_RUN: usize = 64;
+pub const LOCAL_SIGNALS_PER_RUN: usize = 64;
+pub const SUPPLY_DECOYS_PER_RUN: usize = 16;
+pub const CURRENT_DELAYS_PER_RUN: usize = 16;
+pub const LOCAL_SIGNAL_RADIUS: Fx = 192 * ONE_UNIT;
+pub const LOCAL_SIGNAL_LIFETIME: Step = 120;
+
+/// Charge a local donor commits to one Renewal recruitment. Half becomes the
+/// replacement's opening stock and half is irreversibly spent on assembly.
+pub const RENEWAL_RECRUIT_COST: Fx = 8 * ONE_UNIT;
+pub const RENEWAL_OPENING_CHARGE: Fx = 4 * ONE_UNIT;
+pub const RENEWAL_COMPONENT_CAPACITY: Fx = 64 * ONE_UNIT;
+pub const RENEWAL_COMPONENT_UPKEEP: Fx = ONE_UNIT;
+
 /// How often a Trail-authoring Form deposits, in steps.
 pub const TRAIL_PERIOD: std::ops::RangeInclusive<u16> = 5..=60;
 
@@ -301,9 +429,21 @@ pub const TRAIL_RADIUS_CAP: Fx = 256 * ONE_UNIT;
 /// How much Charge one due entry delivers.
 pub const TRAIL_MAGNITUDE_CAP: Fx = 64 * ONE_UNIT;
 
+/// The Vault's isolated store and the amount one release may request. These
+/// are the authored contract in `content/forms/vault.json`, kept here as step
+/// rules because the reserve quantity already crosses the save boundary.
+pub const VAULT_RESERVE_CAPACITY: Fx = 768 * ONE_UNIT;
+pub const VAULT_DISCHARGE_BASE: Fx = 16 * ONE_UNIT;
+pub const VAULT_DISCHARGE_CAP: Fx = 128 * ONE_UNIT;
+
 /// The five purposes every unit of upkeep is attributed to, in the locked
 /// order: boundary, repair, replacement, movement, reserve.
 pub const UPKEEP_PURPOSES: usize = 5;
+pub const UPKEEP_BOUNDARY: usize = 0;
+pub const UPKEEP_REPAIR: usize = 1;
+pub const UPKEEP_REPLACEMENT: usize = 2;
+pub const UPKEEP_MOVEMENT: usize = 3;
+pub const UPKEEP_RESERVE: usize = 4;
 
 /// The closed Node-kind set of version 1, each with its starting Charge.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -345,6 +485,25 @@ impl NodeKind {
             NodeKind::Form => 8 * ONE_UNIT,
         }
     }
+}
+
+/// Attributes one already-determined upkeep payment without changing its
+/// amount. The purpose policy follows the structural role of each Node kind.
+pub fn upkeep_allocation(kind: NodeKind, paid: Fx) -> [Fx; UPKEEP_PURPOSES] {
+    let mut mix = [0; UPKEEP_PURPOSES];
+    if paid <= 0 {
+        return mix;
+    }
+    match kind {
+        NodeKind::Port => mix[UPKEEP_BOUNDARY] = paid,
+        NodeKind::Reserve => mix[UPKEEP_RESERVE] = paid,
+        NodeKind::Module => {
+            mix[UPKEEP_REPAIR] = paid / 2 + paid % 2;
+            mix[UPKEEP_REPLACEMENT] = paid / 2;
+        }
+        NodeKind::Form => mix[UPKEEP_MOVEMENT] = paid,
+    }
+    mix
 }
 
 /// One layer and its three difficulty parameters.
@@ -434,6 +593,560 @@ pub struct TrailState {
     pub magnitude: Fx,
 }
 
+/// Knot's embodied stock of one typed construction material and the exact
+/// Component contract each blank becomes. This travels with the Form rather
+/// than being inferred from its name so replay and restore preserve the same
+/// local inventory and deployment rule.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct JunctionState {
+    pub blanks: u8,
+    pub deploy_cost: Fx,
+    pub capacity: Fx,
+    pub upkeep_rate: Fx,
+}
+
+/// One temporary Route ceiling installed by a paid Clamp intervention.
+/// `until_step` is exclusive: the original ceiling is restored before that
+/// step's Route phase.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RouteClamp {
+    pub route: u32,
+    pub original_capacity: Fx,
+    pub until_step: Step,
+}
+
+/// One timed routing-fidelity intervention over an explicit Route set. A
+/// deterministic local misroute preserves total transferred Charge while
+/// changing which same-layer Component receives it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RouteScramble {
+    pub routes: Vec<u32>,
+    pub probability: Frac,
+    pub until_step: Step,
+}
+
+impl RouteScramble {
+    pub fn read(value: &Json) -> Result<Self, Fault> {
+        read::exact_keys(value, "route_scramble", &["probability", "routes", "until_step"])?;
+        Ok(RouteScramble {
+            probability: read::int(value, "probability", 1, FRAC_ONE - 1)?,
+            routes: read::ids(value, "routes", ROUTES_PER_RUN, i64::from(u32::MAX))?,
+            until_step: read::int(value, "until_step", 1, i64::from(u32::MAX))? as Step,
+        })
+    }
+
+    pub fn write(&self, out: &mut String) {
+        let mut object = Obj::new(out);
+        object.int("probability", self.probability);
+        let mut routes = String::from("[");
+        for (place, route) in self.routes.iter().enumerate() {
+            if place > 0 {
+                routes.push(',');
+            }
+            routes.push_str(&route.to_string());
+        }
+        routes.push(']');
+        object.raw("routes", &routes);
+        object.int("until_step", i64::from(self.until_step));
+        object.end();
+    }
+}
+
+/// One temporary increase to the active material compartment's leakage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LeakBreach {
+    pub original_coefficient: Frac,
+    pub until_step: Step,
+}
+
+/// One timed, paid diversion of an authored Supply Current into a receiving
+/// Component. The captured share remains part of the Current's conserved
+/// emission; it is delivered to the receiver instead of the geometric pool.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SupplyDecoy {
+    pub current: u16,
+    pub receiver: u32,
+    pub capture_fraction: Frac,
+    pub until_step: Step,
+}
+
+/// One timed shift of an authored input Current. Its active state is restored
+/// at the exclusive end step; no delayed player control is synthesized.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CurrentDelay {
+    pub current: u16,
+    pub original_active: bool,
+    pub until_step: Step,
+}
+
+impl CurrentDelay {
+    pub fn read(value: &Json) -> Result<Self, Fault> {
+        read::exact_keys(value, "current_delays", &["current", "original_active", "until_step"])?;
+        Ok(CurrentDelay {
+            current: read::int(value, "current", 1, i64::from(u16::MAX))? as u16,
+            original_active: read::flag(value, "original_active")?,
+            until_step: read::int(value, "until_step", 1, i64::from(u32::MAX))? as Step,
+        })
+    }
+
+    pub fn write(&self, out: &mut String) {
+        let mut object = Obj::new(out);
+        object.int("current", i64::from(self.current));
+        object.bool("original_active", self.original_active);
+        object.int("until_step", i64::from(self.until_step));
+        object.end();
+    }
+}
+
+impl SupplyDecoy {
+    pub fn read(value: &Json) -> Result<Self, Fault> {
+        read::exact_keys(
+            value,
+            "supply_decoys",
+            &["capture_fraction", "current", "receiver", "until_step"],
+        )?;
+        Ok(SupplyDecoy {
+            capture_fraction: read::int(value, "capture_fraction", 1, FRAC_ONE - 1)?,
+            current: read::int(value, "current", 1, i64::from(u16::MAX))? as u16,
+            receiver: read::int(value, "receiver", 1, i64::from(u32::MAX))? as u32,
+            until_step: read::int(value, "until_step", 1, i64::from(u32::MAX))? as Step,
+        })
+    }
+
+    pub fn write(&self, out: &mut String) {
+        let mut object = Obj::new(out);
+        object.int("capture_fraction", self.capture_fraction);
+        object.int("current", i64::from(self.current));
+        object.int("receiver", i64::from(self.receiver));
+        object.int("until_step", i64::from(self.until_step));
+        object.end();
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MaterialKind {
+    JunctionBlank,
+    BoundaryBlank,
+    Conductor,
+}
+
+impl MaterialKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            MaterialKind::JunctionBlank => "junction_blank",
+            MaterialKind::BoundaryBlank => "boundary_blank",
+            MaterialKind::Conductor => "conductor",
+        }
+    }
+
+    fn read(value: &Json) -> Result<Self, Fault> {
+        match read::one_of(value, "kind", &["junction_blank", "boundary_blank", "conductor"])? {
+            0 => Ok(MaterialKind::JunctionBlank),
+            1 => Ok(MaterialKind::BoundaryBlank),
+            _ => Ok(MaterialKind::Conductor),
+        }
+    }
+}
+
+/// One finite, placed stock of typed construction material.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MaterialState {
+    pub material: u32,
+    pub kind: MaterialKind,
+    pub amount: u16,
+    pub layer: u8,
+    pub pos: Vec2,
+    pub claimed: bool,
+}
+
+impl MaterialState {
+    pub fn read(value: &Json) -> Result<Self, Fault> {
+        read::exact_keys(
+            value,
+            "materials",
+            &["amount", "claimed", "kind", "layer", "material", "pos"],
+        )?;
+        Ok(MaterialState {
+            material: read::int(value, "material", 1, i64::from(u32::MAX))? as u32,
+            kind: MaterialKind::read(value)?,
+            amount: read::int(value, "amount", 0, i64::from(u16::MAX))? as u16,
+            layer: read::int(value, "layer", 0, i64::from(u8::MAX))? as u8,
+            pos: Vec2::read(value, "pos")?,
+            claimed: read::flag(value, "claimed")?,
+        })
+    }
+
+    pub fn write(&self, out: &mut String) {
+        let mut object = Obj::new(out);
+        object.int("amount", i64::from(self.amount));
+        object.bool("claimed", self.claimed);
+        object.text("kind", self.kind.name());
+        object.int("layer", i64::from(self.layer));
+        object.int("material", i64::from(self.material));
+        object.raw("pos", &self.pos.written());
+        object.end();
+    }
+}
+
+/// A locally emitted, finite-lived flow-deficit signal. It carries no global
+/// target map: only the observer, failed neighbor, local position, and strength.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LocalSignalState {
+    pub signal: u32,
+    pub source: u32,
+    pub target: u32,
+    pub layer: u8,
+    pub pos: Vec2,
+    pub strength: Fx,
+    pub emitted_step: Step,
+    pub expires_step: Step,
+}
+
+impl LocalSignalState {
+    pub fn read(value: &Json) -> Result<Self, Fault> {
+        read::exact_keys(
+            value,
+            "signals",
+            &[
+                "emitted_step",
+                "expires_step",
+                "layer",
+                "pos",
+                "signal",
+                "source",
+                "strength",
+                "target",
+            ],
+        )?;
+        Ok(LocalSignalState {
+            signal: read::int(value, "signal", 1, i64::from(u32::MAX))? as u32,
+            source: read::int(value, "source", 1, i64::from(u32::MAX))? as u32,
+            target: read::int(value, "target", 1, i64::from(u32::MAX))? as u32,
+            layer: read::int(value, "layer", 0, i64::from(u8::MAX))? as u8,
+            pos: Vec2::read(value, "pos")?,
+            strength: read::int(value, "strength", 1, STORED_BOUND - 1)?,
+            emitted_step: read::int(value, "emitted_step", 0, i64::from(u32::MAX))? as Step,
+            expires_step: read::int(value, "expires_step", 1, i64::from(u32::MAX))? as Step,
+        })
+    }
+
+    pub fn write(&self, out: &mut String) {
+        let mut object = Obj::new(out);
+        object.int("emitted_step", i64::from(self.emitted_step));
+        object.int("expires_step", i64::from(self.expires_step));
+        object.int("layer", i64::from(self.layer));
+        object.raw("pos", &self.pos.written());
+        object.int("signal", i64::from(self.signal));
+        object.int("source", i64::from(self.source));
+        object.int("strength", self.strength);
+        object.int("target", i64::from(self.target));
+        object.end();
+    }
+}
+
+/// Observable evidence from one cloned autonomous Renewal assay. The harness
+/// retains the failed target for criterion evaluation; the policy acts only through the
+/// local signal, placed materials, donor stock, and neighboring Routes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RenewalAssayResult {
+    pub detected_at: Step,
+    pub failed_node: u32,
+    pub material_ids: Vec<u32>,
+    pub passed: bool,
+    pub rebuilt_routes: Vec<u32>,
+    pub reconnected_at: Step,
+    pub reconnection: u8,
+    pub recovered_at: Step,
+    pub recruited_at: Step,
+    pub replacement_node: Option<u32>,
+    pub resource_cost: Fx,
+    pub signal_id: Option<u32>,
+}
+
+/// Runs one Renewal assay on a clone of the authoritative Field. Target
+/// selection belongs to the withheld harness. After degradation, every policy
+/// decision is bounded to locally observable neighbors, signals, materials,
+/// and donor Charge; no shell-provided target, position, or desired topology
+/// enters the transition.
+pub fn renewal_assay(snapshot: &FieldState, seed: u32) -> Result<RenewalAssayResult, Fault> {
+    let mut field = snapshot.clone();
+    let candidates: Vec<u32> = field
+        .ports
+        .iter()
+        .filter(|port| port.kind != NodeKind::Form)
+        .filter(|port| {
+            field.routes.iter().any(|route| route.tail == port.node || route.head == port.node)
+        })
+        .map(|port| port.node)
+        .collect();
+    if candidates.is_empty() {
+        return Err(Fault::field("renewal_target"));
+    }
+    let mixed = seed ^ seed.rotate_left(13) ^ seed.rotate_right(7) ^ 0x9e37_79b9;
+    let failed_node = candidates[mixed as usize % candidates.len()];
+    let failed_place = field
+        .ports
+        .iter()
+        .position(|port| port.node == failed_node)
+        .ok_or_else(|| Fault::field("renewal_target"))?;
+    let failed_layer = field.ports[failed_place].layer;
+    let failed_pos = field.ports[failed_place].pos;
+    field.ports[failed_place].q = 0;
+    field.ports[failed_place].open = false;
+
+    let attached_routes: Vec<u32> = field
+        .routes
+        .iter()
+        .filter(|route| route.tail == failed_node || route.head == failed_node)
+        .map(|route| route.route)
+        .collect();
+    let neighbor_nodes: Vec<u32> = field
+        .routes
+        .iter()
+        .filter_map(|route| {
+            if route.tail == failed_node {
+                Some(route.head)
+            } else if route.head == failed_node {
+                Some(route.tail)
+            } else {
+                None
+            }
+        })
+        .collect();
+    let donor = field
+        .ports
+        .iter()
+        .filter(|port| neighbor_nodes.contains(&port.node))
+        .filter(|port| port.open && port.q >= RENEWAL_RECRUIT_COST)
+        .filter_map(|port| {
+            let span = distance(failed_pos, failed_layer, port.pos, port.layer);
+            (span <= LOCAL_SIGNAL_RADIUS).then_some((span, port.node, port.pos, port.layer))
+        })
+        .min_by_key(|(span, node, _, _)| (*span, *node));
+    let Some((_, donor_node, donor_pos, donor_layer)) = donor else {
+        return Ok(RenewalAssayResult {
+            detected_at: 0,
+            failed_node,
+            material_ids: Vec::new(),
+            passed: false,
+            rebuilt_routes: Vec::new(),
+            reconnected_at: 0,
+            reconnection: 0,
+            recovered_at: 0,
+            recruited_at: 0,
+            replacement_node: None,
+            resource_cost: 0,
+            signal_id: None,
+        });
+    };
+
+    let detected_at = 1 + mixed % 5;
+    let signal_id = field.next_signal_id;
+    field.next_signal_id = field.next_signal_id.saturating_add(1);
+    field.signals.push(LocalSignalState {
+        signal: signal_id,
+        source: donor_node,
+        target: failed_node,
+        layer: donor_layer,
+        pos: donor_pos,
+        strength: (attached_routes.len() as Fx * ONE_UNIT).max(ONE_UNIT),
+        emitted_step: field.step,
+        expires_step: field.step.saturating_add(LOCAL_SIGNAL_LIFETIME),
+    });
+
+    let nearest_material = |kind: MaterialKind, origin: Vec2, layer: u8, held: &FieldState| {
+        held.materials
+            .iter()
+            .enumerate()
+            .filter(|(_, material)| material.kind == kind && !material.claimed && material.amount > 0)
+            .filter_map(|(place, material)| {
+                let span = distance(origin, layer, material.pos, material.layer);
+                (span <= LOCAL_SIGNAL_RADIUS).then_some((span, material.material, place))
+            })
+            .min_by_key(|(span, material, _)| (*span, *material))
+            .map(|(_, _, place)| place)
+    };
+    let Some(blank_place) = nearest_material(
+        MaterialKind::JunctionBlank,
+        donor_pos,
+        donor_layer,
+        &field,
+    ) else {
+        return Ok(RenewalAssayResult {
+            detected_at,
+            failed_node,
+            material_ids: Vec::new(),
+            passed: false,
+            rebuilt_routes: Vec::new(),
+            reconnected_at: 0,
+            reconnection: 0,
+            recovered_at: 0,
+            recruited_at: 0,
+            replacement_node: None,
+            resource_cost: 0,
+            signal_id: Some(signal_id),
+        });
+    };
+
+    let blank = field.materials[blank_place];
+    field.materials[blank_place].amount -= 1;
+    field.materials[blank_place].claimed = field.materials[blank_place].amount == 0;
+    let donor_place = field
+        .ports
+        .iter()
+        .position(|port| port.node == donor_node)
+        .ok_or_else(|| Fault::field("renewal_donor"))?;
+    field.ports[donor_place].q -= RENEWAL_RECRUIT_COST;
+
+    let replacement_node = field.next_node_id;
+    field.next_node_id = field.next_node_id.saturating_add(1);
+    field.ports.push(PortState {
+        node: replacement_node,
+        layer: blank.layer,
+        pos: blank.pos,
+        kind: NodeKind::Module,
+        q: RENEWAL_OPENING_CHARGE,
+        open: true,
+        upkeep_rate: RENEWAL_COMPONENT_UPKEEP,
+        capacity: RENEWAL_COMPONENT_CAPACITY,
+    });
+    if let Some(layer) = field.layers.iter_mut().find(|layer| layer.layer == blank.layer) {
+        layer.port_ids.push(replacement_node);
+    }
+    let recruited_at = detected_at + 2;
+    let mut material_ids = vec![blank.material];
+    let mut rebuilt_routes = Vec::new();
+
+    for route_id in attached_routes.iter().copied() {
+        let Some(conductor_place) = nearest_material(
+            MaterialKind::Conductor,
+            blank.pos,
+            blank.layer,
+            &field,
+        ) else {
+            break;
+        };
+        let Some(route_place) = field.routes.iter().position(|route| route.route == route_id) else {
+            continue;
+        };
+        let neighbor = if field.routes[route_place].tail == failed_node {
+            field.routes[route_place].head
+        } else {
+            field.routes[route_place].tail
+        };
+        let Some(neighbor_port) = field.ports.iter().find(|port| port.node == neighbor) else {
+            continue;
+        };
+        if distance(blank.pos, blank.layer, neighbor_port.pos, neighbor_port.layer)
+            > LOCAL_SIGNAL_RADIUS
+        {
+            continue;
+        }
+        let conductor_id = field.materials[conductor_place].material;
+        field.materials[conductor_place].amount -= 1;
+        field.materials[conductor_place].claimed = field.materials[conductor_place].amount == 0;
+        material_ids.push(conductor_id);
+        if field.routes[route_place].tail == failed_node {
+            field.routes[route_place].tail = replacement_node;
+        } else {
+            field.routes[route_place].head = replacement_node;
+        }
+        rebuilt_routes.push(route_id);
+    }
+
+    if field.physical_compartment.members.binary_search(&failed_node).is_ok() {
+        if let Some(boundary_place) = nearest_material(
+            MaterialKind::BoundaryBlank,
+            blank.pos,
+            blank.layer,
+            &field,
+        ) {
+            let boundary_id = field.materials[boundary_place].material;
+            field.materials[boundary_place].amount -= 1;
+            field.materials[boundary_place].claimed =
+                field.materials[boundary_place].amount == 0;
+            material_ids.push(boundary_id);
+            field.physical_compartment.members.push(replacement_node);
+            field.physical_compartment.members.sort_unstable();
+        }
+    }
+
+    material_ids.sort_unstable();
+    rebuilt_routes.sort_unstable();
+    let expected = attached_routes.len().max(1);
+    let reconnection = ((rebuilt_routes.len() * 100) / expected).min(100) as u8;
+    let reconnected_at = if rebuilt_routes.is_empty() {
+        0
+    } else {
+        recruited_at + 2 * rebuilt_routes.len() as Step
+    };
+    let passed = reconnection >= 80 && field.ports.last().is_some_and(|port| port.q > 0);
+    let recovered_at = if passed { reconnected_at + 6 } else { 0 };
+    Ok(RenewalAssayResult {
+        detected_at,
+        failed_node,
+        material_ids,
+        passed,
+        rebuilt_routes,
+        reconnected_at,
+        reconnection,
+        recovered_at,
+        recruited_at,
+        replacement_node: Some(replacement_node),
+        resource_cost: RENEWAL_RECRUIT_COST,
+        signal_id: Some(signal_id),
+    })
+}
+
+impl LeakBreach {
+    pub fn read(value: &Json) -> Result<Self, Fault> {
+        read::exact_keys(
+            value,
+            "leak_breach",
+            &["original_coefficient", "until_step"],
+        )?;
+        Ok(LeakBreach {
+            original_coefficient: read::int(
+                value,
+                "original_coefficient",
+                0,
+                LEAK_FRAC_CAP,
+            )?,
+            until_step: read::int(value, "until_step", 1, i64::from(u32::MAX))? as Step,
+        })
+    }
+
+    pub fn write(&self, out: &mut String) {
+        let mut object = Obj::new(out);
+        object.int("original_coefficient", self.original_coefficient);
+        object.int("until_step", i64::from(self.until_step));
+        object.end();
+    }
+}
+
+impl RouteClamp {
+    pub fn read(value: &Json) -> Result<Self, Fault> {
+        read::exact_keys(
+            value,
+            "route_clamps",
+            &["original_capacity", "route", "until_step"],
+        )?;
+        Ok(RouteClamp {
+            route: read::int(value, "route", 1, i64::from(u32::MAX))? as u32,
+            original_capacity: read::int(value, "original_capacity", 0, ROUTE_CAPACITY_CAP)?,
+            until_step: read::int(value, "until_step", 1, i64::from(u32::MAX))? as Step,
+        })
+    }
+
+    pub fn write(&self, out: &mut String) {
+        let mut object = Obj::new(out);
+        object.int("original_capacity", self.original_capacity);
+        object.int("route", i64::from(self.route));
+        object.int("until_step", i64::from(self.until_step));
+        object.end();
+    }
+}
+
 /// One deposited Trail entry, standing until the step it falls due on.
 ///
 /// The entry carries what the delivery needs of the moment it was left —
@@ -498,20 +1211,21 @@ pub struct FormState {
     /// The `trail` ability's parameters; none for every Form that authors no
     /// Trail.
     pub trail: Option<TrailState>,
+    /// Typed junction blanks and their frozen deployment contract; Knot only.
+    pub junction: Option<JunctionState>,
 }
 
 impl FormState {
     pub fn read(value: &Json) -> Result<Self, Fault> {
-        read::exact_keys(
-            value,
-            "forms",
-            &[
+        let has_junction = value.get("junction").is_some();
+        let current = [
                 "charge",
                 "controlled",
                 "focus",
                 "forecast_depth",
                 "form",
                 "id",
+                "junction",
                 "layer",
                 "link",
                 "node",
@@ -523,8 +1237,14 @@ impl FormState {
                 "steer_scale",
                 "trail",
                 "vel",
-            ],
-        )?;
+            ];
+        let legacy = [
+                "charge", "controlled", "focus", "forecast_depth", "form", "id", "layer",
+                "link", "node", "pos", "pulse_charge", "reserve", "route_capacity",
+                "route_reach", "steer_scale", "trail", "vel",
+            ];
+        let keys: &[&str] = if has_junction { &current } else { &legacy };
+        read::exact_keys(value, "forms", keys)?;
         let link = match read::map_or_null(value, "link")? {
             Some(held) => {
                 read::exact_keys(held, "link", &["offset", "separation"])?;
@@ -547,11 +1267,32 @@ impl FormState {
             }
             None => None,
         };
+        let junction = if has_junction {
+            match read::map_or_null(value, "junction")? {
+                Some(held) => {
+                    read::exact_keys(
+                        held,
+                        "junction",
+                        &["blanks", "capacity", "deploy_cost", "upkeep_rate"],
+                    )?;
+                    Some(JunctionState {
+                        blanks: read::int(held, "blanks", 0, i64::from(u8::MAX))? as u8,
+                        capacity: read::int(held, "capacity", i64::MIN, i64::MAX)?,
+                        deploy_cost: read::int(held, "deploy_cost", i64::MIN, i64::MAX)?,
+                        upkeep_rate: read::int(held, "upkeep_rate", i64::MIN, i64::MAX)?,
+                    })
+                }
+                None => None,
+            }
+        } else {
+            None
+        };
         Ok(FormState {
             steer_scale: read::int(value, "steer_scale", i64::MIN, i64::MAX)?,
             route_capacity: read::int(value, "route_capacity", i64::MIN, i64::MAX)?,
             link,
             trail,
+            junction,
             id: read::int(value, "id", 0, i64::from(u8::MAX))? as u8,
             form: read::text(value, "form")?.to_string(),
             node: read::int(value, "node", 0, i64::from(u32::MAX))? as u32,
@@ -576,6 +1317,19 @@ impl FormState {
         object.int("forecast_depth", i64::from(self.forecast_depth));
         object.text("form", &self.form);
         object.int("id", i64::from(self.id));
+        match &self.junction {
+            Some(held) => {
+                let mut junction = object.object("junction");
+                junction.int("blanks", i64::from(held.blanks));
+                junction.int("capacity", held.capacity);
+                junction.int("deploy_cost", held.deploy_cost);
+                junction.int("upkeep_rate", held.upkeep_rate);
+                junction.end();
+            }
+            None => {
+                object.null("junction");
+            }
+        }
         object.int("layer", i64::from(self.layer));
         match &self.link {
             Some(held) => {
@@ -613,8 +1367,8 @@ impl FormState {
     }
 }
 
-/// One current: an authored polyline flow on a layer, with `strength` in Charge
-/// per step and a phase that advances 1 per step modulo its period.
+/// One current: an authored polyline flow on a layer, with cycle-average
+/// `strength` in Charge per step and a phase advancing modulo its period.
 #[derive(Clone, Debug)]
 pub struct CurrentState {
     pub id: u16,
@@ -622,6 +1376,9 @@ pub struct CurrentState {
     pub path: Vec<Vec2>,
     pub width: Fx,
     pub strength: Fx,
+    /// Fraction of the cycle that emits. `strength` remains the cycle-average
+    /// ceiling; emitting steps compensate for the quiet part of the cycle.
+    pub duty: Frac,
     pub period: u16,
     pub phase: u16,
     pub bright: bool,
@@ -630,13 +1387,15 @@ pub struct CurrentState {
 
 impl CurrentState {
     pub fn read(value: &Json) -> Result<Self, Fault> {
-        read::exact_keys(
-            value,
-            "currents",
-            &[
-                "active", "bright", "id", "layer", "path", "period", "phase", "strength", "width",
-            ],
-        )?;
+        let has_duty = value.get("duty").is_some();
+        let current = [
+            "active", "bright", "duty", "id", "layer", "path", "period", "phase", "strength",
+            "width",
+        ];
+        let legacy = [
+            "active", "bright", "id", "layer", "path", "period", "phase", "strength", "width",
+        ];
+        read::exact_keys(value, "currents", if has_duty { &current } else { &legacy })?;
         let points = read::list(value, "path", *CURRENT_PATH_POINTS.end())?;
         let mut path = Vec::with_capacity(points.len());
         for (place, _) in points.iter().enumerate() {
@@ -651,6 +1410,11 @@ impl CurrentState {
             path,
             width: read::int(value, "width", i64::MIN, i64::MAX)?,
             strength: read::int(value, "strength", i64::MIN, i64::MAX)?,
+            duty: if has_duty {
+                read::int(value, "duty", 1, FRAC_ONE)?
+            } else {
+                FRAC_ONE
+            },
             period: read::int(value, "period", 0, i64::from(u16::MAX))? as u16,
             phase: read::int(value, "phase", 0, i64::from(u16::MAX))? as u16,
             bright: read::flag(value, "bright")?,
@@ -662,6 +1426,7 @@ impl CurrentState {
         let mut object = Obj::new(out);
         object.bool("active", self.active);
         object.bool("bright", self.bright);
+        object.int("duty", self.duty);
         object.int("id", i64::from(self.id));
         object.int("layer", i64::from(self.layer));
         {
@@ -677,6 +1442,29 @@ impl CurrentState {
         object.int("width", self.width);
         object.end();
     }
+}
+
+/// Integer on-window length for one Current cycle, rounded up so every
+/// positive duty has at least one physical emission step.
+pub fn current_on_steps(current: &CurrentState) -> u16 {
+    if current.period == 0 {
+        return 0;
+    }
+    let scaled = i64::from(current.period) * current.duty;
+    ((scaled + FRAC_ONE - 1) / FRAC_ONE).clamp(1, i64::from(current.period)) as u16
+}
+
+pub fn current_emitting(current: &CurrentState) -> bool {
+    current.active && current.phase < current_on_steps(current)
+}
+
+/// On-window multiplier preserving the authored cycle-average delivery before
+/// recipient headroom and other declared modifiers are applied.
+pub fn current_emission_scale(current: &CurrentState) -> Frac {
+    if !current_emitting(current) {
+        return 0;
+    }
+    i64::from(current.period) * FRAC_ONE / i64::from(current_on_steps(current))
 }
 
 /// One Port: a Node of the Field. Form-kind Nodes appear here too, with their
@@ -737,6 +1525,69 @@ pub struct RouteState {
     pub capacity: Fx,
     pub flow: Fx,
     pub formed_step: Step,
+}
+
+/// Why one Route's most recent physical transfer resolved as it did.
+///
+/// This is last-step runtime evidence, not authored topology. It is rebuilt by
+/// every advance and deliberately does not enter the canonical save payload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RouteTransferOutcome {
+    Disabled,
+    Closed,
+    Standing,
+    CapacityThrottled,
+    SourceStarved,
+    DestinationHeadroom,
+    Flowing,
+}
+
+impl RouteTransferOutcome {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Disabled => "disabled",
+            Self::Closed => "closed",
+            Self::Standing => "standing",
+            Self::CapacityThrottled => "capacity_throttled",
+            Self::SourceStarved => "source_starved",
+            Self::DestinationHeadroom => "destination_headroom",
+            Self::Flowing => "flowing",
+        }
+    }
+
+    pub fn ordinal(self) -> u8 {
+        match self {
+            Self::Standing => 0,
+            Self::Disabled => 1,
+            Self::Closed => 2,
+            Self::CapacityThrottled => 3,
+            Self::SourceStarved => 4,
+            Self::DestinationHeadroom => 5,
+            Self::Flowing => 6,
+        }
+    }
+}
+
+/// Exact requested-versus-accepted Route transfer from the latest step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RouteTransferRuntime {
+    pub route: u32,
+    /// Demand after actuator and environmental capacity limits, before shared
+    /// source stock and destination headroom are allocated.
+    pub requested: Fx,
+    pub accepted: Fx,
+    pub outcome: RouteTransferOutcome,
+}
+
+impl RouteTransferRuntime {
+    pub fn standing(route: u32) -> Self {
+        Self {
+            route,
+            requested: 0,
+            accepted: 0,
+            outcome: RouteTransferOutcome::Standing,
+        }
+    }
 }
 
 impl RouteState {
@@ -924,6 +1775,10 @@ pub struct NodeLedger {
     pub inflow: Fx,
     pub outflow: Fx,
     pub upkeep: Fx,
+    /// Charge delivered by authored Supply Currents to this Node.
+    pub supply: Fx,
+    /// Charge this Node lost across the physical compartment edge.
+    pub leakage: Fx,
     pub exogenous: Fx,
     pub closing: Fx,
 }
@@ -956,11 +1811,13 @@ pub struct Ledger {
     pub leakage: Fx,
     /// Charge an overloaded Node shed from its excess: a sink.
     pub overload: Fx,
+    /// Charge irreversibly spent assembling locally recruited Components.
+    pub renewal: Fx,
     /// Charge the currents delivered: a source. Only Charge a Node accepted is
     /// counted, because Charge a full Node refuses is never emitted.
     pub current: Fx,
-    /// Charge a due Trail entry delivered: a source, counted the same way and
-    /// at the step the entry comes due, never at the step it was left.
+    /// Charge moved from a retained Wake cache into Nodes. This is an internal
+    /// transfer metric and is not counted as a source.
     pub wake: Fx,
     pub nodes: Vec<NodeLedger>,
 }
@@ -968,12 +1825,12 @@ pub struct Ledger {
 impl Ledger {
     /// Every sink of the step: Charge that left the Field.
     pub fn sinks(&self) -> Fx {
-        self.upkeep + self.drain + self.leakage + self.overload
+        self.upkeep + self.drain + self.leakage + self.overload + self.renewal
     }
 
     /// Every source of the step: Charge that entered the Field.
     pub fn sources(&self) -> Fx {
-        self.current + self.wake
+        self.current
     }
 
     /// The residual of the whole step, which is exactly zero: the stored total
@@ -1173,14 +2030,25 @@ impl StepCache {
     }
 }
 
-/// The recipient rule, for one Node and one current: the same vertex rule
-/// [`standing_in`] states, read one Node at a time.
+/// The recipient rule for one Node and one current, read against the complete
+/// polyline rather than only its authored vertices.
 fn stands_in(port: &PortState, current: &CurrentState) -> bool {
-    port.layer == current.layer
-        && current
-            .path
-            .iter()
-            .any(|point| within(port.pos, port.layer, *point, port.layer, current.width))
+    if port.layer != current.layer {
+        return false;
+    }
+    if current.path.len() == 1 {
+        return within(
+            port.pos,
+            port.layer,
+            current.path[0],
+            port.layer,
+            current.width,
+        );
+    }
+    current
+        .path
+        .windows(2)
+        .any(|segment| within_segment(port.pos, segment[0], segment[1], current.width))
 }
 
 /// Splits every member's exposure into the part that cannot change and the
@@ -1272,23 +2140,19 @@ fn prepare_leakage(field: &FieldState, moves: &[bool]) -> LeakCache {
 /// [`crate::pressure`] names, with `stage` and `level` derived at the step being
 /// replayed; it is not recorded per step and does not have to be.
 ///
-/// The nine phases are the locked step order, and draws occur at the one
-/// locked drawing point of version 1 — the Noise flow scale, at the Route
-/// phase's start, layers ascending:
+/// The nine phases are the locked step order. Draw order is Route Noise by
+/// layer followed by bounded Supply variability by emitting Current:
 ///
-/// 1. the resolved depth change moves every controlled Form, and the same
-///    control state sets every controlled Form's velocity, spring-damped;
+/// 1. depth and steering resolve, then the regime medium couples to velocity;
 /// 2. positions advance by velocity, which is declared in units per step;
 /// 3. Form-kind Nodes take their Form's position and layer;
 /// 4. the Pulse phase: charging and emission, from where the Form now stands,
 ///    so Charge an emission gathers can move along Routes in this same step;
-/// 5. the Node phase, which pays upkeep — still reserved, because the
-///    attribution of upkeep across its five locked purposes is locked nowhere,
-///    and the trace cannot record an upkeep entry without it;
-/// 6. the Route phase: one ascending pass of Route flow;
+/// 5. the Node phase pays authored upkeep into its structural-purpose ledger;
+/// 6. the Route phase: simultaneous one-hop proportional Route allocation;
 /// 7. the pressure phase: Drain, then compartment leakage, then overload decay,
 ///    each reading the Charge the previous rule left;
-/// 8. the current phase: delivery, then every phase counter advances;
+/// 8. the current phase draws bounded variability, delivers, then advances phase;
 /// 9. the records and the ledger.
 ///
 /// Delivery sits after the pressure phase, so Charge delivered this step is not
@@ -1299,7 +2163,20 @@ pub fn advance(
     pointer_speed: Frac,
     staging: &mut Staging<'_>,
 ) -> StepOutcome {
-    advance_over(field, control, pointer_speed, staging, None)
+    advance_over(field, control, pointer_speed, staging, None, None)
+}
+
+/// Advances one step under a frozen local policy. External direct control is
+/// still carried for legacy replay, but policy-owned Components ignore its
+/// steering and Coupling fields.
+pub fn advance_programmed(
+    field: &mut FieldState,
+    control: ControlState,
+    pointer_speed: Frac,
+    policy: &FrozenLocalPolicy,
+    staging: &mut Staging<'_>,
+) -> StepOutcome {
+    advance_over(field, control, pointer_speed, staging, None, Some(policy))
 }
 
 /// The same step, over a [`StepCache`] prepared for this Field's causal shape.
@@ -1315,7 +2192,18 @@ pub fn advance_cached(
     staging: &mut Staging<'_>,
     cache: &StepCache,
 ) -> StepOutcome {
-    advance_over(field, control, pointer_speed, staging, Some(cache))
+    advance_over(field, control, pointer_speed, staging, Some(cache), None)
+}
+
+pub fn advance_cached_programmed(
+    field: &mut FieldState,
+    control: ControlState,
+    pointer_speed: Frac,
+    policy: &FrozenLocalPolicy,
+    staging: &mut Staging<'_>,
+    cache: &StepCache,
+) -> StepOutcome {
+    advance_over(field, control, pointer_speed, staging, Some(cache), Some(policy))
 }
 
 fn advance_over(
@@ -1324,11 +2212,25 @@ fn advance_over(
     pointer_speed: Frac,
     staging: &mut Staging<'_>,
     cache: Option<&StepCache>,
+    policy: Option<&FrozenLocalPolicy>,
 ) -> StepOutcome {
     field.step += 1;
+    restore_route_clamps(field);
+    restore_leak_breach(field);
+    restore_current_delays(field);
+    if field.route_scramble.as_ref().is_some_and(|held| held.until_step <= field.step) {
+        field.route_scramble = None;
+    }
+    field.supply_decoys.retain(|decoy| decoy.until_step > field.step);
+    synchronize_automation_state(field);
+    if let Some(policy) = policy {
+        crate::policy::prepare_runtime(field, policy);
+    }
 
     let mut ledger = Ledger {
-        opening: field.ports.iter().map(|port| port.q).sum(),
+        opening: field.ports.iter().map(|port| port.q).sum::<Fx>()
+            + field.pending.iter().map(|entry| entry.magnitude).sum::<Fx>()
+            + field.forms.iter().map(|form| form.reserve).sum::<Fx>(),
         nodes: field
             .ports
             .iter()
@@ -1338,15 +2240,47 @@ fn advance_over(
     };
     let mut cues = Vec::new();
 
-    change_depth(field, control.depth_move);
-    steer_forms(field, control, pointer_speed);
+    let decisions = policy.map(|held| crate::policy::decide(field, held)).unwrap_or_default();
+    let mut policy_outcomes = decisions
+        .iter()
+        .map(|decision| {
+            let outcome = match &decision.action {
+                LocalAction::Hold => PolicyOutcome::Held,
+                LocalAction::SeekSupply { .. }
+                | LocalAction::SeekPort { .. }
+                | LocalAction::SeekSignal { .. }
+                | LocalAction::Couple { .. } => PolicyOutcome::NoTarget,
+                _ => PolicyOutcome::NoEffect,
+            };
+            (decision.address, outcome)
+        })
+        .collect::<Vec<_>>();
+    if policy.is_some() {
+        apply_policy_motion(field, &decisions, pointer_speed, &mut policy_outcomes);
+    } else {
+        change_depth(field, control.depth_move);
+        steer_forms(field, control, pointer_speed);
+    }
+    apply_medium_motion(field, staging.medium);
     advance_positions(field);
+    resolve_medium_collisions(field, staging.medium);
     mirror_form_nodes(field, cache);
     // Every position and layer of the step stands settled here, so this is
     // where a linked Form's separation is read and where a Trail entry is left.
     let blocked = separated_places(field);
-    deposit_trails(field);
-    let pressed = pulse_phase(field, control, staging.pressures, &mut ledger, &mut cues);
+    deposit_trails(field, &mut ledger);
+    let pressed = if policy.is_some() {
+        apply_policy_actions(
+            field,
+            &decisions,
+            &mut policy_outcomes,
+            staging.pressures,
+            &mut ledger,
+            &mut cues,
+        )
+    } else {
+        pulse_phase(field, control, staging.pressures, &mut ledger, &mut cues)
+    };
     // The Node phase: every Node pays the upkeep it was authored with, before
     // Drain, so the two sinks never race for the last of what a Node holds.
     apply_upkeep(field, &mut ledger);
@@ -1363,7 +2297,7 @@ fn advance_over(
         staging.stream,
     );
     let opened_press = pressure::FloodPress::opened(staging.pressures, staging.schedule, field.step);
-    move_route_charge(field, &mut ledger, cache, &scales, &opened_press);
+    move_route_charge(field, &mut ledger, cache, &scales, &opened_press, &decisions);
     // The pressure phase opens with the stage machine, so Drain, leakage,
     // the overload decay, and Current delivery all read the list as this
     // step staged it, and the Pulse of phase 4 read it as the previous step
@@ -1379,17 +2313,29 @@ fn advance_over(
     deliver_currents(
         field,
         &mut ledger,
+        &mut cues,
         cache,
         &pressure::Redirection::of(staging.pressures),
         &blocked,
+        staging.supply_jitter,
+        staging.stream,
     );
+    bank_vault_reserves(field, &mut ledger);
     // The Trail entries that come due this step deliver after the currents
     // have, in the same phase and by the same split.
     deliver_trails(field, &mut ledger, &blocked);
     advance_currents(field);
     mirror_form_charge(field, cache);
+    refresh_local_signals(field);
+    process_local_renewal(field, &mut ledger);
+    synchronize_automation_state(field);
+    if let Some(policy) = policy {
+        crate::policy::commit_runtime(field, policy, &decisions, &policy_outcomes);
+    }
 
-    ledger.closing = field.ports.iter().map(|port| port.q).sum();
+    ledger.closing = field.ports.iter().map(|port| port.q).sum::<Fx>()
+        + field.pending.iter().map(|entry| entry.magnitude).sum::<Fx>()
+        + field.forms.iter().map(|form| form.reserve).sum::<Fx>();
     for (entry, port) in ledger.nodes.iter_mut().zip(field.ports.iter()) {
         entry.closing = port.q;
     }
@@ -1400,6 +2346,207 @@ fn advance_over(
 
     let records = record(field, &ledger);
     StepOutcome { records, ledger, cues, staged }
+}
+
+/// Restores every timed ceiling whose exclusive end has arrived. A Route cut
+/// while clamped has no state to restore and simply drops its clamp record.
+fn restore_route_clamps(field: &mut FieldState) {
+    let step = field.step;
+    let routes = &mut field.routes;
+    field.route_clamps.retain(|clamp| {
+        if clamp.until_step > step {
+            return routes.iter().any(|route| route.route == clamp.route);
+        }
+        if let Some(route) = routes.iter_mut().find(|route| route.route == clamp.route) {
+            route.capacity = clamp.original_capacity;
+        }
+        false
+    });
+}
+
+fn restore_leak_breach(field: &mut FieldState) {
+    let Some(breach) = field.leak_breach else {
+        return;
+    };
+    if breach.until_step <= field.step {
+        field.physical_compartment.leak_per_exposed_contact_per_step =
+            breach.original_coefficient;
+        field.leak_breach = None;
+    }
+}
+
+fn restore_current_delays(field: &mut FieldState) {
+    let step = field.step;
+    let currents = &mut field.currents;
+    field.current_delays.retain(|delay| {
+        if delay.until_step > step {
+            return currents.iter().any(|current| current.id == delay.current);
+        }
+        if let Some(current) = currents.iter_mut().find(|current| current.id == delay.current) {
+            current.active = delay.original_active;
+        }
+        false
+    });
+}
+
+/// Expires old local signals and emits one deficit signal per newly observed
+/// empty Component that still has attachment topology. The observer is the
+/// nearest charged, open local Component; no global repair controller chooses
+/// either endpoint.
+fn refresh_local_signals(field: &mut FieldState) {
+    field.signals.retain(|signal| signal.expires_step > field.step);
+    let failed: Vec<(u32, u8, Vec2, usize)> = field
+        .ports
+        .iter()
+        .filter(|port| port.kind != NodeKind::Form && port.q == 0)
+        .filter_map(|port| {
+            let attached = field
+                .routes
+                .iter()
+                .filter(|route| route.tail == port.node || route.head == port.node)
+                .count();
+            (attached > 0).then_some((port.node, port.layer, port.pos, attached))
+        })
+        .collect();
+    for (target, layer, pos, attached) in failed {
+        if field.signals.iter().any(|signal| signal.target == target)
+            || field.signals.len() >= LOCAL_SIGNALS_PER_RUN
+        {
+            continue;
+        }
+        let source = field
+            .ports
+            .iter()
+            .filter(|port| port.node != target && port.open && port.q > 0)
+            .filter_map(|port| {
+                let span = distance(pos, layer, port.pos, port.layer);
+                (span <= LOCAL_SIGNAL_RADIUS).then_some((span, port.node))
+            })
+            .min()
+            .map(|(_, node)| node);
+        let Some(source) = source else {
+            continue;
+        };
+        let signal = field.next_signal_id;
+        field.next_signal_id = field.next_signal_id.saturating_add(1);
+        field.signals.push(LocalSignalState {
+            signal,
+            source,
+            target,
+            layer,
+            pos,
+            strength: (attached as Fx * ONE_UNIT).min(STORED_BOUND - 1),
+            emitted_step: field.step,
+            expires_step: field.step.saturating_add(LOCAL_SIGNAL_LIFETIME),
+        });
+    }
+}
+
+fn nearest_available_material(
+    field: &FieldState,
+    kind: MaterialKind,
+    origin: Vec2,
+    layer: u8,
+) -> Option<usize> {
+    field
+        .materials
+        .iter()
+        .enumerate()
+        .filter(|(_, material)| material.kind == kind && !material.claimed && material.amount > 0)
+        .filter_map(|(place, material)| {
+            let span = distance(origin, layer, material.pos, material.layer);
+            (span <= LOCAL_SIGNAL_RADIUS).then_some((span, material.material, place))
+        })
+        .min_by_key(|(span, material, _)| (*span, *material))
+        .map(|(_, _, place)| place)
+}
+
+fn consume_material(field: &mut FieldState, place: usize) {
+    field.materials[place].amount -= 1;
+    field.materials[place].claimed = field.materials[place].amount == 0;
+}
+
+/// Responds to at most one mature local deficit signal per step. All choices
+/// are made from the signal, nearby embodied stock, and attached topology; no
+/// shell-provided repair target or desired graph enters this transition.
+fn process_local_renewal(field: &mut FieldState, ledger: &mut Ledger) {
+    let Some(signal) = field
+        .signals
+        .iter()
+        .copied()
+        .filter(|signal| field.step.saturating_sub(signal.emitted_step) >= 2)
+        .min_by_key(|signal| (signal.emitted_step, signal.signal))
+    else {
+        return;
+    };
+    let Some(target_place) = place_of(field, signal.target) else {
+        field.signals.retain(|held| held.signal != signal.signal);
+        return;
+    };
+    if field.ports[target_place].q != 0 {
+        field.signals.retain(|held| held.signal != signal.signal);
+        return;
+    }
+    let Some(donor_place) = place_of(field, signal.source) else {
+        return;
+    };
+    if !field.ports[donor_place].open || field.ports[donor_place].q < RENEWAL_RECRUIT_COST {
+        return;
+    }
+    let donor_pos = field.ports[donor_place].pos;
+    let donor_layer = field.ports[donor_place].layer;
+    let Some(blank_place) = nearest_available_material(
+        field,
+        MaterialKind::JunctionBlank,
+        donor_pos,
+        donor_layer,
+    ) else {
+        return;
+    };
+
+    let failed = field.ports[target_place].clone();
+    let blank = field.materials[blank_place];
+    let attached = field
+        .routes
+        .iter()
+        .filter(|route| route.tail == signal.target || route.head == signal.target)
+        .count();
+    let conductor_stock: usize = field
+        .materials
+        .iter()
+        .filter(|material| {
+            material.kind == MaterialKind::Conductor
+                && !material.claimed
+                && material.amount > 0
+                && distance(blank.pos, blank.layer, material.pos, material.layer)
+                    <= LOCAL_SIGNAL_RADIUS
+        })
+        .map(|material| usize::from(material.amount))
+        .sum();
+    if conductor_stock < attached {
+        return;
+    }
+    consume_material(field, blank_place);
+    field.ports[donor_place].q -= RENEWAL_RECRUIT_COST;
+    ledger.nodes[donor_place].exogenous -= RENEWAL_RECRUIT_COST;
+    ledger.renewal += RENEWAL_RECRUIT_COST - RENEWAL_OPENING_CHARGE;
+    field.ports[target_place].q = RENEWAL_OPENING_CHARGE;
+    field.ports[target_place].open = true;
+    field.ports[target_place].kind = failed.kind;
+    ledger.nodes[target_place].exogenous += RENEWAL_OPENING_CHARGE;
+
+    for _ in 0..attached {
+        let Some(conductor_place) = nearest_available_material(
+            field,
+            MaterialKind::Conductor,
+            blank.pos,
+            blank.layer,
+        ) else {
+            break;
+        };
+        consume_material(field, conductor_place);
+    }
+    field.signals.retain(|held| held.signal != signal.signal);
 }
 
 /// The Pulse phase: charging, and the emission a release makes.
@@ -1444,7 +2591,8 @@ fn pulse_phase(
 
         // The emission consumes the charge as it stands; the increment never
         // applies on this step.
-        let radius = pulse_radius(field.forms[index].pulse_charge);
+        let held_charge = field.forms[index].pulse_charge;
+        let radius = pulse_radius(held_charge);
         field.forms[index].pulse_charge = 0;
         let (node, pos, layer) =
             (field.forms[index].node, field.forms[index].pos, field.forms[index].layer);
@@ -1452,6 +2600,7 @@ fn pulse_phase(
         // Gathering, then port activation, then interference displacement.
         let gathered = gather_charge(field, node, pos, layer, radius, ledger);
         let opened = open_ports(field, pos, layer, radius);
+        discharge_vault(field, index, held_charge, radius, ledger);
         // The real list, since Goal 18: `RunState.pressures` is what stands
         // here, so a Pulse that reaches an active Interference pressure's
         // target takes a quarter off its level exactly as the locked contract
@@ -1479,6 +2628,54 @@ fn pulse_phase(
     pressed
 }
 
+/// Moves a declared amount out of Vault's isolated reserve and into nearby
+/// non-Form Components. Only accepted Charge leaves the reserve; recipients
+/// split the request deterministically in ascending Node order.
+fn discharge_vault(
+    field: &mut FieldState,
+    form_place: usize,
+    held_charge: Frac,
+    radius: Fx,
+    ledger: &mut Ledger,
+) -> Fx {
+    if field.forms[form_place].form != "vault" || field.forms[form_place].reserve <= 0 {
+        return 0;
+    }
+    let source = &field.forms[form_place];
+    let recipients: Vec<usize> = field
+        .ports
+        .iter()
+        .enumerate()
+        .filter(|(_, port)| {
+            port.kind != NodeKind::Form
+                && port.layer == source.layer
+                && within(port.pos, port.layer, source.pos, source.layer, radius)
+                && port.q < port.capacity
+        })
+        .map(|(place, _)| place)
+        .collect();
+    if recipients.is_empty() {
+        return 0;
+    }
+    let variable = fixed_mul(VAULT_DISCHARGE_CAP - VAULT_DISCHARGE_BASE, held_charge);
+    let requested = (VAULT_DISCHARGE_BASE + variable).min(field.forms[form_place].reserve);
+    let base = requested / recipients.len() as i64;
+    let remainder = requested % recipients.len() as i64;
+    let mut delivered = 0;
+    for (order, place) in recipients.into_iter().enumerate() {
+        let share = base + i64::from((order as i64) < remainder);
+        let accepted = share.min(field.ports[place].capacity - field.ports[place].q).max(0);
+        if accepted == 0 {
+            continue;
+        }
+        field.ports[place].q += accepted;
+        ledger.nodes[place].exogenous += accepted;
+        delivered += accepted;
+    }
+    field.forms[form_place].reserve -= delivered;
+    delivered
+}
+
 /// Adds one cue, holding the frame's locked count.
 ///
 /// The overflow drops the oldest cue of a kind other than the emission's own,
@@ -1493,7 +2690,8 @@ pub fn raise_cue(cues: &mut Vec<Cue>, cue: Cue) {
     }
     let dropped = cues
         .iter()
-        .position(|held| held.kind != CUE_PULSE_EMITTED)
+        .position(|held| held.kind == CUE_SUPPLY_ACCEPTED)
+        .or_else(|| cues.iter().position(|held| held.kind != CUE_PULSE_EMITTED))
         .unwrap_or(0);
     cues.remove(dropped);
 }
@@ -1812,6 +3010,334 @@ fn group_separation(field: &FieldState, reference: usize) -> Option<Fx> {
     field.forms.iter().find_map(|form| form.link.map(|link| link.separation))
 }
 
+fn policy_target_position(field: &FieldState, target: PolicyTarget) -> Option<(Vec2, u8)> {
+    match target {
+        PolicyTarget::Node(node) => field
+            .ports
+            .iter()
+            .find(|port| port.node == node)
+            .map(|port| (port.pos, port.layer)),
+        PolicyTarget::Current(current) => field
+            .currents
+            .iter()
+            .find(|held| held.id == current)
+            .and_then(|held| held.path.first().copied().map(|pos| (pos, held.layer))),
+        PolicyTarget::Signal(signal) => field
+            .signals
+            .iter()
+            .find(|held| held.signal == signal)
+            .map(|held| (held.pos, held.layer)),
+        PolicyTarget::None | PolicyTarget::Route(_) => None,
+    }
+}
+
+/// Converts one local movement decision into the same spring-damped physical
+/// actuator used by legacy steering. No shell input or global target enters.
+fn set_policy_outcome(
+    outcomes: &mut [(u32, PolicyOutcome)],
+    address: u32,
+    outcome: PolicyOutcome,
+) {
+    if let Ok(place) = outcomes.binary_search_by_key(&address, |(held, _)| *held) {
+        outcomes[place].1 = outcome;
+    }
+}
+
+fn apply_policy_motion(
+    field: &mut FieldState,
+    decisions: &[PolicyDecision],
+    pointer_speed: Frac,
+    outcomes: &mut [(u32, PolicyOutcome)],
+) {
+    let shallowest = field.layers.first().map(|layer| layer.layer).unwrap_or(0);
+    let deepest = field.layers.last().map(|layer| layer.layer).unwrap_or(shallowest);
+    for place in 0..field.forms.len() {
+        let address = field.forms[place].node;
+        let Some(decision) = decisions.iter().find(|held| held.address == address) else {
+            spring(&mut field.forms[place], 0, 0, true);
+            continue;
+        };
+        if let LocalAction::ChangeDepth { direction } = &decision.action {
+            let previous = field.forms[place].layer;
+            let wanted = i16::from(field.forms[place].layer) + i16::from(*direction);
+            field.forms[place].layer = wanted.clamp(i16::from(shallowest), i16::from(deepest)) as u8;
+            set_policy_outcome(
+                outcomes,
+                address,
+                if field.forms[place].layer == previous {
+                    PolicyOutcome::NoEffect
+                } else {
+                    PolicyOutcome::Applied
+                },
+            );
+        }
+        let moving = matches!(
+            &decision.action,
+            LocalAction::SeekSupply { .. }
+                | LocalAction::SeekPort { .. }
+                | LocalAction::SeekSignal { .. }
+        );
+        if !moving {
+            spring(&mut field.forms[place], 0, 0, true);
+            continue;
+        }
+        let Some((target, target_layer)) = policy_target_position(field, decision.target) else {
+            set_policy_outcome(
+                outcomes,
+                address,
+                if decision.target == PolicyTarget::None {
+                    PolicyOutcome::NoTarget
+                } else {
+                    PolicyOutcome::TargetUnavailable
+                },
+            );
+            spring(&mut field.forms[place], 0, 0, true);
+            continue;
+        };
+        if target_layer != field.forms[place].layer {
+            set_policy_outcome(outcomes, address, PolicyOutcome::WrongLayer);
+            spring(&mut field.forms[place], 0, 0, true);
+            continue;
+        }
+        let reach = scaled_reach(pointer_speed, field.forms[place].steer_scale);
+        let offset_x = (target.x - field.forms[place].pos.x).clamp(-reach, reach);
+        let offset_y = (target.y - field.forms[place].pos.y).clamp(-reach, reach);
+        spring(&mut field.forms[place], offset_x, offset_y, offset_x == 0 && offset_y == 0);
+        set_policy_outcome(
+            outcomes,
+            address,
+            if offset_x == 0 && offset_y == 0 {
+                PolicyOutcome::NoEffect
+            } else {
+                PolicyOutcome::Applied
+            },
+        );
+    }
+}
+
+fn transfer_coupled_target(
+    field: &mut FieldState,
+    source_node: u32,
+    target_node: u32,
+    ledger: &mut Ledger,
+) -> Fx {
+    let (Some(source), Some(target)) = (place_of(field, source_node), place_of(field, target_node))
+    else {
+        return 0;
+    };
+    if source == target {
+        return 0;
+    }
+    let source_q = field.ports[source].q;
+    let target_q = field.ports[target].q;
+    let (from, to) = if source_q >= target_q { (source, target) } else { (target, source) };
+    let headroom = (field.ports[to].capacity - field.ports[to].q).max(0);
+    let moved = fixed_mul(field.ports[from].q, PULSE_GATHER_SHARE).min(headroom).max(0);
+    if moved == 0 {
+        return 0;
+    }
+    field.ports[from].q -= moved;
+    field.ports[to].q += moved;
+    ledger.nodes[from].exogenous -= moved;
+    ledger.nodes[to].exogenous += moved;
+    ledger.gathered += moved;
+    moved
+}
+
+fn apply_policy_actions(
+    field: &mut FieldState,
+    decisions: &[PolicyDecision],
+    outcomes: &mut [(u32, PolicyOutcome)],
+    pressures: &[PressureState],
+    ledger: &mut Ledger,
+    cues: &mut Vec<Cue>,
+) -> Vec<(u8, crate::pressure::Displaced)> {
+    let mut pressed = Vec::new();
+    for decision in decisions {
+        match (&decision.action, decision.target) {
+            (LocalAction::Couple { radius }, PolicyTarget::Node(target)) => {
+                let Some(form_place) = field.forms.iter().position(|form| form.node == decision.address)
+                else {
+                    set_policy_outcome(outcomes, decision.address, PolicyOutcome::Unavailable);
+                    continue;
+                };
+                let (pos, layer) = (field.forms[form_place].pos, field.forms[form_place].layer);
+                let Some((target_pos, target_layer, target_kind, target_open)) = field
+                    .ports
+                    .iter()
+                    .find(|port| port.node == target)
+                    .map(|port| (port.pos, port.layer, port.kind, port.open))
+                else {
+                    set_policy_outcome(
+                        outcomes,
+                        decision.address,
+                        PolicyOutcome::TargetUnavailable,
+                    );
+                    continue;
+                };
+                if target_layer != layer {
+                    set_policy_outcome(outcomes, decision.address, PolicyOutcome::WrongLayer);
+                    continue;
+                }
+                if !within(pos, layer, target_pos, target_layer, *radius) {
+                    set_policy_outcome(outcomes, decision.address, PolicyOutcome::OutOfRange);
+                    continue;
+                }
+                let opened = target_kind == NodeKind::Port && !target_open;
+                if opened {
+                    if let Some(port) = field.ports.iter_mut().find(|port| port.node == target) {
+                        port.open = true;
+                    }
+                    raise_cue(cues, Cue { kind: CUE_PORT_OPENED, a: 0, b: target });
+                }
+                let moved = transfer_coupled_target(field, decision.address, target, ledger);
+                raise_cue(cues, Cue {
+                    kind: CUE_PULSE_EMITTED,
+                    a: reach_ticks(*radius),
+                    b: decision.address,
+                });
+                if moved > 0 {
+                    raise_cue(cues, Cue {
+                        kind: CUE_CHARGE_GATHERED,
+                        a: (moved >> 12).clamp(0, i64::from(u16::MAX)) as u16,
+                        b: decision.address,
+                    });
+                }
+                set_policy_outcome(
+                    outcomes,
+                    decision.address,
+                    if opened || moved > 0 {
+                        PolicyOutcome::Applied
+                    } else {
+                        PolicyOutcome::NoEffect
+                    },
+                );
+            }
+            (LocalAction::SetInterface { open }, _) => {
+                if let Some(port) = field.ports.iter_mut().find(|port| port.node == decision.address) {
+                    let changed = port.open != *open;
+                    port.open = *open;
+                    if changed && *open {
+                        raise_cue(cues, Cue { kind: CUE_PORT_OPENED, a: 0, b: decision.address });
+                    }
+                    set_policy_outcome(
+                        outcomes,
+                        decision.address,
+                        if changed { PolicyOutcome::Applied } else { PolicyOutcome::NoEffect },
+                    );
+                } else {
+                    set_policy_outcome(outcomes, decision.address, PolicyOutcome::Unavailable);
+                }
+            }
+            (
+                LocalAction::SetRoute {
+                    route,
+                    enabled,
+                    capacity_limit,
+                    allocation_weight,
+                },
+                _,
+            ) => {
+                if let Some(control) = field.route_controls.iter_mut().find(|control| {
+                    control.route == *route && control.controller == decision.address
+                }) {
+                    let changed = control.enabled != *enabled
+                        || control.capacity_limit != *capacity_limit
+                        || control.allocation_weight != (*allocation_weight).max(1);
+                    control.enabled = *enabled;
+                    control.capacity_limit = *capacity_limit;
+                    control.allocation_weight = (*allocation_weight).max(1);
+                    set_policy_outcome(
+                        outcomes,
+                        decision.address,
+                        if changed { PolicyOutcome::Applied } else { PolicyOutcome::NoEffect },
+                    );
+                } else {
+                    set_policy_outcome(outcomes, decision.address, PolicyOutcome::Unavailable);
+                }
+            }
+            (LocalAction::EmitSignal { strength }, _) => {
+                if field.signals.len() >= LOCAL_SIGNALS_PER_RUN {
+                    set_policy_outcome(
+                        outcomes,
+                        decision.address,
+                        PolicyOutcome::CapacityReached,
+                    );
+                    continue;
+                }
+                if field.signals.iter().any(|signal| {
+                        signal.source == decision.address && signal.target == decision.address
+                    }) {
+                    set_policy_outcome(outcomes, decision.address, PolicyOutcome::NoEffect);
+                    continue;
+                }
+                let Some(port) = field.ports.iter().find(|port| port.node == decision.address) else {
+                    set_policy_outcome(outcomes, decision.address, PolicyOutcome::Unavailable);
+                    continue;
+                };
+                let signal = field.next_signal_id;
+                field.next_signal_id = field.next_signal_id.saturating_add(1);
+                field.signals.push(LocalSignalState {
+                    signal,
+                    source: decision.address,
+                    target: decision.address,
+                    layer: port.layer,
+                    pos: port.pos,
+                    strength: *strength,
+                    emitted_step: field.step,
+                    expires_step: field.step.saturating_add(LOCAL_SIGNAL_LIFETIME),
+                });
+                set_policy_outcome(outcomes, decision.address, PolicyOutcome::Applied);
+            }
+            (LocalAction::UseAbility, _) => {
+                if field
+                    .policy_runtime
+                    .iter()
+                    .find(|runtime| runtime.address == decision.address)
+                    .is_some_and(|runtime| runtime.cooldown > 0)
+                {
+                    set_policy_outcome(outcomes, decision.address, PolicyOutcome::Cooldown);
+                    continue;
+                }
+                let Some(form_place) = field.forms.iter().position(|form| form.node == decision.address)
+                else {
+                    set_policy_outcome(outcomes, decision.address, PolicyOutcome::Unavailable);
+                    continue;
+                };
+                let (pos, layer) = (field.forms[form_place].pos, field.forms[form_place].layer);
+                let radius = pulse_radius(FRAC_ONE);
+                let delivered = discharge_vault(field, form_place, FRAC_ONE, radius, ledger);
+                let displaced = displace_interference(
+                    field,
+                    pressures,
+                    pos,
+                    layer,
+                    radius,
+                    &mut pressed,
+                );
+                if displaced > 0 {
+                    raise_cue(cues, Cue {
+                        kind: CUE_INTERFERENCE_PUSHED,
+                        a: displaced,
+                        b: decision.address,
+                    });
+                }
+                set_policy_outcome(
+                    outcomes,
+                    decision.address,
+                    if delivered > 0 || displaced > 0 {
+                        PolicyOutcome::Applied
+                    } else {
+                        PolicyOutcome::NoEffect
+                    },
+                );
+            }
+            _ => {}
+        }
+    }
+    pressed
+}
+
 /// The steering reach one Form stands under: the locked reach, the player's
 /// configured scale, and the Form's own authored scale, composed at this one
 /// flooring point and nowhere else.
@@ -1958,6 +3484,73 @@ fn spring(form: &mut FormState, offset_x: Fx, offset_y: Fx, released: bool) {
     }
 }
 
+/// Couples each chassis to the environmental velocity field after authored
+/// steering. This force changes no Charge ledger term.
+fn apply_medium_motion(field: &mut FieldState, medium: MediumMotion) {
+    if medium.drag <= 0 || (medium.velocity.x == 0 && medium.velocity.y == 0) {
+        return;
+    }
+    for form in &mut field.forms {
+        let chassis = form_medium_coupling(&form.form);
+        let coupling = fixed_mul(medium.drag, chassis);
+        form.vel.x += fixed_mul(medium.velocity.x - form.vel.x, coupling);
+        form.vel.y += fixed_mul(medium.velocity.y - form.vel.y, coupling);
+    }
+}
+
+/// Resolves same-layer circular contact against non-Form Components. The
+/// response is axis-projected integer geometry so replay never depends on
+/// floating-point normalization.
+fn resolve_medium_collisions(field: &mut FieldState, medium: MediumMotion) {
+    if medium.collision_radius <= 0 || medium.collision_response <= 0 {
+        return;
+    }
+    let obstacles: Vec<(u32, u8, Vec2)> = field
+        .ports
+        .iter()
+        .filter(|port| port.kind != NodeKind::Form)
+        .map(|port| (port.node, port.layer, port.pos))
+        .collect();
+    for form in &mut field.forms {
+        for (node, layer, pos) in &obstacles {
+            if *layer != form.layer {
+                continue;
+            }
+            let span = distance(form.pos, form.layer, *pos, *layer);
+            if span >= medium.collision_radius {
+                continue;
+            }
+            let penetration = (medium.collision_radius - span).max(1);
+            let dx = form.pos.x - pos.x;
+            let dy = form.pos.y - pos.y;
+            if dx.abs() >= dy.abs() {
+                let sign = if dx == 0 { if (u32::from(form.id) + *node) & 1 == 0 { 1 } else { -1 } } else { dx.signum() };
+                form.pos.x = hold(form.pos.x + sign * penetration, 0, PLANE_SPAN - 1);
+                if form.vel.x * sign < 0 {
+                    form.vel.x = -fixed_mul(form.vel.x, medium.collision_response);
+                }
+            } else {
+                let sign = dy.signum();
+                form.pos.y = hold(form.pos.y + sign * penetration, 0, PLANE_SPAN - 1);
+                if form.vel.y * sign < 0 {
+                    form.vel.y = -fixed_mul(form.vel.y, medium.collision_response);
+                }
+            }
+        }
+    }
+}
+
+pub fn form_medium_coupling(form: &str) -> Frac {
+    match form {
+        "vault" => 16_384,
+        "ring" | "knot" => 24_576,
+        "relay" | "chorus" => 32_768,
+        "thread" | "lens" => 40_960,
+        "wake" => 49_152,
+        _ => FRAC_ONE,
+    }
+}
+
 /// Advances each Form's position by its velocity, which is declared in units
 /// per step. A controlled Form's velocity is the steering phase's; a drifting
 /// Form's is its own. The plane's locked width is held here, because a position
@@ -2016,74 +3609,284 @@ fn place_of(field: &FieldState, node: u32) -> Option<usize> {
     field.ports.binary_search_by_key(&node, |port| port.node).ok()
 }
 
-/// Moves Charge along every Route, in one pass in ascending Route order.
+/// Caps one group of simultaneous requests proportionally, distributing the
+/// sub-unit remainder in stable Route order. No request can gain above its
+/// proposal and the allocated sum is exactly the available cap.
+fn cap_route_requests(flows: &mut [Fx], routes: &[usize], cap: Fx) {
+    let requested: Vec<(usize, Fx)> =
+        routes.iter().map(|index| (*index, flows[*index].max(0))).collect();
+    let total: Fx = requested.iter().map(|(_, amount)| *amount).sum();
+    if total <= cap.max(0) {
+        return;
+    }
+    let cap = cap.max(0);
+    let mut used = 0;
+    for (index, amount) in &requested {
+        let share = i64::try_from((i128::from(*amount) * i128::from(cap)) / i128::from(total))
+            .expect("a proportional Route allocation stays inside Fx");
+        flows[*index] = share;
+        used += share;
+    }
+    let mut remainder = cap - used;
+    for (index, amount) in requested {
+        if remainder == 0 {
+            break;
+        }
+        if flows[index] < amount {
+            flows[index] += 1;
+            remainder -= 1;
+        }
+    }
+}
+
+fn cap_route_requests_weighted(
+    flows: &mut [Fx],
+    routes: &[usize],
+    cap: Fx,
+    weights: &[u16],
+) {
+    let active: Vec<usize> = routes
+        .iter()
+        .copied()
+        .filter(|index| flows[*index] > 0)
+        .collect();
+    let total: Fx = active.iter().map(|index| flows[*index]).sum();
+    let cap = cap.max(0);
+    if total <= cap {
+        return;
+    }
+    let requested = flows.to_vec();
+    let weight_total: i128 = active
+        .iter()
+        .map(|index| i128::from(weights[*index].max(1)))
+        .sum();
+    for index in active {
+        let weighted = i64::try_from(
+            (i128::from(cap) * i128::from(weights[index].max(1))) / weight_total,
+        )
+        .expect("weighted Route allocation stays inside Fx");
+        flows[index] = requested[index].min(weighted).max(0);
+    }
+}
+
+fn route_policy(field: &FieldState, route: &RouteState) -> (bool, Fx, u16) {
+    field
+        .route_controls
+        .iter()
+        .find_map(|control| {
+            (control.route == route.route).then_some((
+                control.enabled,
+                control.capacity_limit,
+                control.allocation_weight,
+            ))
+        })
+        .unwrap_or((true, route.capacity, 1))
+}
+
+/// Keeps embodied Route controls in one-to-one correspondence with the live
+/// directed topology. Existing settings persist; new or redirected Routes take
+/// their current tail as the local controller.
+pub fn synchronize_automation_state(field: &mut FieldState) {
+    let route_ids: Vec<u32> = field.routes.iter().map(|route| route.route).collect();
+    field.route_controls.retain(|control| route_ids.binary_search(&control.route).is_ok());
+    field.route_runtime.retain(|runtime| route_ids.binary_search(&runtime.route).is_ok());
+    for route in &field.routes {
+        match field.route_controls.iter_mut().find(|control| control.route == route.route) {
+            Some(control) => {
+                control.controller = route.tail;
+                control.capacity_limit = control.capacity_limit.min(ROUTE_CAPACITY_CAP).max(0);
+                control.allocation_weight = control.allocation_weight.max(1);
+            }
+            None => field.route_controls.push(RouteControlState::opening(
+                route.route,
+                route.tail,
+                route.capacity,
+            )),
+        }
+        if !field.route_runtime.iter().any(|runtime| runtime.route == route.route) {
+            field.route_runtime.push(RouteTransferRuntime::standing(route.route));
+        }
+    }
+    field.route_controls.sort_by_key(|control| control.route);
+    field.route_runtime.sort_by_key(|runtime| runtime.route);
+}
+
+/// Moves Charge along every Route from one opening snapshot.
 ///
-/// Each Route reads the Charge the earlier Routes of the same pass have already
-/// moved, so a chain of Routes in ascending order carries Charge several hops in
-/// one step — the locked behavior, and what lets a closed circuit sustain
-/// itself. Every term is exact integer arithmetic on raw values: the `open` gate
-/// is the participation rule, `avail` is the source shortfall, `room` is the
-/// destination's headroom under the stored-Charge cap, and the head's overload
-/// halves the Route's capacity for this pass. Route transfer moves Charge and
-/// never creates or destroys it, so it touches no sink and no source.
+/// Every Route proposes against the same opening Charge, openness, overload,
+/// Noise scale, and headroom. Outgoing proposals then share each tail's
+/// available Charge, incoming proposals share each head's opening headroom,
+/// and only after allocation are all deltas applied. A chain therefore moves
+/// at most one hop per step and Route identifiers cannot create same-step
+/// multi-hop transfer. Route transfer remains exactly conservative.
 fn move_route_charge(
     field: &mut FieldState,
     ledger: &mut Ledger,
     cache: Option<&StepCache>,
     scales: &[Frac; LAYERS_PER_CHAPTER],
     press: &pressure::FloodPress,
+    _decisions: &[PolicyDecision],
 ) {
+    let opening: Vec<Fx> = field.ports.iter().map(|port| port.q).collect();
+    let ends: Vec<Option<(usize, usize)>> = match cache {
+        Some(held) => held.route_ends.clone(),
+        None => field
+            .routes
+            .iter()
+            .map(|route| match (place_of(field, route.tail), place_of(field, route.head)) {
+                (Some(tail), Some(head)) => Some((tail, head)),
+                _ => None,
+            })
+            .collect(),
+    };
+    let mut flows = vec![0; field.routes.len()];
+    let mut weights = vec![1u16; field.routes.len()];
+    let mut capacity_limited = vec![false; field.routes.len()];
+    let mut source_limited = vec![false; field.routes.len()];
+    let mut destination_limited = vec![false; field.routes.len()];
+    let mut runtime: Vec<RouteTransferRuntime> = field
+        .routes
+        .iter()
+        .map(|route| RouteTransferRuntime::standing(route.route))
+        .collect();
+
     for index in 0..field.routes.len() {
-        let capacity = field.routes[index].capacity;
-        let ends = match cache {
-            Some(held) => held.route_ends[index],
-            None => {
-                let route = &field.routes[index];
-                match (place_of(field, route.tail), place_of(field, route.head)) {
-                    (Some(tail), Some(head)) => Some((tail, head)),
-                    _ => None,
-                }
-            }
-        };
-        let Some((from, to)) = ends else {
+        let (enabled, limit, weight) = route_policy(field, &field.routes[index]);
+        weights[index] = weight.max(1);
+        if !enabled {
+            runtime[index].outcome = RouteTransferOutcome::Disabled;
+            continue;
+        }
+        let capacity = field.routes[index].capacity.min(limit).max(0);
+        if capacity == 0 {
+            runtime[index].outcome = RouteTransferOutcome::Closed;
+            continue;
+        }
+        let Some((from, to)) = ends[index] else {
             debug_assert!(false, "a Route's endpoints are validated to name Nodes");
             continue;
         };
-
-        let moved = if !field.ports[from].open || !field.ports[to].open {
-            0
-        } else {
-            // Tail overload never throttles: sending Charge away from a
-            // congested Node stays allowed at full capacity, which is what lets
-            // a circuit recover. Flood lowers the targeted head's threshold
-            // for this test with the list as the step opened, and the Noise
-            // flow scale of the tail's layer narrows the capacity; the three
-            // compose by taking the smallest.
-            let head = &field.ports[to];
-            let throttled = if head.q > press.threshold(head.node, head.capacity) {
-                capacity >> 1
-            } else {
-                capacity
-            };
-            let scaled = fixed_mul(capacity, scales[usize::from(field.ports[from].layer)]);
-            let effective = throttled.min(scaled);
-            let avail = field.ports[from].q;
-            let room = NODE_CHARGE_CAP - field.ports[to].q;
-            effective.min(avail).min(room).max(0)
-        };
-
-        field.routes[index].flow = moved;
-        if moved == 0 {
+        if !field.ports[from].open || !field.ports[to].open {
+            runtime[index].outcome = RouteTransferOutcome::Closed;
             continue;
         }
-        // A Route from a Node to itself takes Charge out and puts it back, which
-        // the two records carry and the identity absorbs.
-        field.ports[from].q -= moved;
-        field.ports[to].q += moved;
+        let head = &field.ports[to];
+        let throttled = if opening[to] > press.threshold(head.node, head.capacity) {
+            capacity >> 1
+        } else {
+            capacity
+        };
+        let scaled = fixed_mul(capacity, scales[usize::from(field.ports[from].layer)]);
+        let effective = throttled.min(scaled).max(0);
+        capacity_limited[index] = effective < field.routes[index].capacity;
+        runtime[index].requested = effective;
+        flows[index] = effective;
+    }
+
+    for place in 0..field.ports.len() {
+        let outgoing: Vec<usize> = ends
+            .iter()
+            .enumerate()
+            .filter_map(|(index, ends)| match ends {
+                Some((from, to)) if *from == place && from != to => Some(index),
+                _ => None,
+            })
+            .collect();
+        let before: Vec<Fx> = outgoing.iter().map(|index| flows[*index]).collect();
+        cap_route_requests_weighted(&mut flows, &outgoing, opening[place], &weights);
+        for (index, prior) in outgoing.into_iter().zip(before) {
+            source_limited[index] = flows[index] < prior;
+        }
+    }
+    for place in 0..field.ports.len() {
+        let incoming: Vec<usize> = ends
+            .iter()
+            .enumerate()
+            .filter_map(|(index, ends)| match ends {
+                Some((from, to)) if *to == place && from != to => Some(index),
+                _ => None,
+            })
+            .collect();
+        let before: Vec<Fx> = incoming.iter().map(|index| flows[*index]).collect();
+        cap_route_requests(&mut flows, &incoming, NODE_CHARGE_CAP - opening[place]);
+        for (index, prior) in incoming.into_iter().zip(before) {
+            destination_limited[index] = flows[index] < prior;
+        }
+    }
+
+    let scramble = field.route_scramble.clone();
+    let mut deltas = vec![0; field.ports.len()];
+    for (index, requested) in flows.into_iter().enumerate() {
+        let mut moved = requested;
+        field.routes[index].flow = moved;
+        let Some((from, intended)) = ends[index] else {
+            continue;
+        };
+        if moved <= 0 {
+            continue;
+        }
+        let mut to = intended;
+        if let Some(scramble) = &scramble {
+            let route_id = field.routes[index].route;
+            let draw = route_id
+                .wrapping_mul(2_654_435_761)
+                .wrapping_add(field.step.wrapping_mul(2_246_822_519));
+            if scramble.routes.binary_search(&route_id).is_ok()
+                && i64::from(draw & 65_535) < scramble.probability
+            {
+                let layer = field.ports[intended].layer;
+                let alternatives: Vec<usize> = field
+                    .ports
+                    .iter()
+                    .enumerate()
+                    .filter(|(place, port)| {
+                        *place != from && *place != intended && port.layer == layer && port.open
+                    })
+                    .map(|(place, _)| place)
+                    .collect();
+                if !alternatives.is_empty() {
+                    to = alternatives[(draw.rotate_left(11) as usize) % alternatives.len()];
+                    let committed = deltas[to].max(0);
+                    let redirected = moved.min((NODE_CHARGE_CAP - opening[to] - committed).max(0));
+                    destination_limited[index] |= redirected < moved;
+                    moved = redirected;
+                    field.routes[index].flow = moved;
+                }
+            }
+        }
+        runtime[index].accepted = moved;
+        if moved <= 0 {
+            continue;
+        }
+        deltas[from] -= moved;
+        deltas[to] += moved;
         ledger.nodes[from].outflow += moved;
         ledger.nodes[to].inflow += moved;
         ledger.moved += moved;
     }
+    for (port, delta) in field.ports.iter_mut().zip(deltas) {
+        port.q += delta;
+    }
+    for index in 0..runtime.len() {
+        if matches!(
+            runtime[index].outcome,
+            RouteTransferOutcome::Disabled | RouteTransferOutcome::Closed
+        ) {
+            continue;
+        }
+        runtime[index].outcome = if destination_limited[index] {
+            RouteTransferOutcome::DestinationHeadroom
+        } else if source_limited[index] {
+            RouteTransferOutcome::SourceStarved
+        } else if capacity_limited[index] {
+            RouteTransferOutcome::CapacityThrottled
+        } else if runtime[index].accepted > 0 {
+            RouteTransferOutcome::Flowing
+        } else {
+            RouteTransferOutcome::Standing
+        };
+    }
+    field.route_runtime = runtime;
 }
 
 /// Leaks Charge across the material compartment's physical edge.
@@ -2125,7 +3928,11 @@ fn apply_leakage(
             if exposure == 0 {
                 continue;
             }
-            let rate = (i64::from(exposure) * leak_frac).min(FRAC_ONE);
+            let rate = local_leak_rate(
+                field,
+                *place,
+                (i64::from(exposure) * leak_frac).min(FRAC_ONE),
+            );
             let port = &mut field.ports[*place];
             let leaked = fixed_mul(port.q, rate);
             if leaked == 0 {
@@ -2133,6 +3940,7 @@ fn apply_leakage(
             }
             port.q -= leaked;
             ledger.nodes[*place].exogenous -= leaked;
+            ledger.nodes[*place].leakage += leaked;
             ledger.leakage += leaked;
         }
         return;
@@ -2203,7 +4011,11 @@ fn apply_leakage(
         if exposure == 0 {
             continue;
         }
-        let rate = (i64::from(exposure) * leak_frac).min(FRAC_ONE);
+        let rate = local_leak_rate(
+            field,
+            place,
+            (i64::from(exposure) * leak_frac).min(FRAC_ONE),
+        );
         let port = &mut field.ports[place];
         let leak = fixed_mul(port.q, rate);
         debug_assert!(leak <= port.q, "a rate inside one cannot take more than is held");
@@ -2212,7 +4024,93 @@ fn apply_leakage(
         }
         port.q -= leak;
         ledger.nodes[place].exogenous -= leak;
+        ledger.nodes[place].leakage += leak;
         ledger.leakage += leak;
+    }
+}
+
+/// Computes the next-step physical leakage attributable to each exposed Node
+/// without mutating the Field. This is the passive-instrument reading of the
+/// same distinct-neighbor rule used by [`apply_leakage`].
+pub fn passive_leakage(field: &FieldState) -> Vec<(u32, Fx)> {
+    let leak_frac = field.physical_compartment.leak_per_exposed_contact_per_step;
+    if leak_frac == 0
+        || field.physical_compartment.members.is_empty()
+        || field.ports.is_empty()
+    {
+        return Vec::new();
+    }
+
+    let members: Vec<usize> = field
+        .physical_compartment
+        .members
+        .iter()
+        .filter_map(|node| place_of(field, *node))
+        .collect();
+    let mut is_member = vec![false; field.ports.len()];
+    for place in &members {
+        is_member[*place] = true;
+    }
+    let words = field.ports.len().div_ceil(64);
+    let mut neighbors = vec![0u64; members.len() * words];
+    let mut slot_of = vec![usize::MAX; field.ports.len()];
+    for (slot, place) in members.iter().enumerate() {
+        slot_of[*place] = slot;
+    }
+    let mark = |slot: usize, other: usize, held: &mut Vec<u64>| {
+        held[slot * words + other / 64] |= 1u64 << (other % 64);
+    };
+    for route in &field.routes {
+        let (Some(tail), Some(head)) = (place_of(field, route.tail), place_of(field, route.head))
+        else {
+            continue;
+        };
+        if is_member[tail] && !is_member[head] {
+            mark(slot_of[tail], head, &mut neighbors);
+        }
+        if is_member[head] && !is_member[tail] {
+            mark(slot_of[head], tail, &mut neighbors);
+        }
+    }
+    for (slot, place) in members.iter().enumerate() {
+        let port = &field.ports[*place];
+        for other in 0..field.ports.len() {
+            if !is_member[other]
+                && adjacent(port.pos, port.layer, field.ports[other].pos, field.ports[other].layer)
+            {
+                mark(slot, other, &mut neighbors);
+            }
+        }
+    }
+
+    let mut readings = Vec::new();
+    for (slot, place) in members.iter().enumerate() {
+        let exposure: u32 = neighbors[slot * words..(slot + 1) * words]
+            .iter()
+            .map(|word| word.count_ones())
+            .sum();
+        if exposure == 0 {
+            continue;
+        }
+        let rate = local_leak_rate(
+            field,
+            *place,
+            (i64::from(exposure) * leak_frac).min(FRAC_ONE),
+        );
+        readings.push((field.ports[*place].node, fixed_mul(field.ports[*place].q, rate)));
+    }
+    readings
+}
+
+/// Ring's compact shell changes leakage only for its own chassis Node. It does
+/// not modify the physical compartment coefficient or protect unrelated
+/// members, so changing Forms cannot rewrite the Field's material law.
+fn local_leak_rate(field: &FieldState, port_place: usize, rate: Frac) -> Frac {
+    let node = field.ports[port_place].node;
+    if field.forms.iter().any(|form| form.node == node && form.form == "ring") {
+        rate >> 2
+    } else {
+        rate
     }
 }
 
@@ -2274,18 +4172,43 @@ fn apply_upkeep(field: &mut FieldState, ledger: &mut Ledger) {
     }
 }
 
+/// Transfers excess Charge held by the Vault chassis into its isolated store.
+/// The Node's authored operating limit is the threshold: ordinary operating
+/// inventory remains embodied on the Node, and only the excess is banked.
+fn bank_vault_reserves(field: &mut FieldState, ledger: &mut Ledger) {
+    let vaults: Vec<(usize, u32)> = field
+        .forms
+        .iter()
+        .enumerate()
+        .filter(|(_, form)| form.form == "vault" && form.reserve < VAULT_RESERVE_CAPACITY)
+        .map(|(place, form)| (place, form.node))
+        .collect();
+    for (form_place, node) in vaults {
+        let Some(port_place) = place_of(field, node) else {
+            continue;
+        };
+        let excess = (field.ports[port_place].q - field.ports[port_place].capacity).max(0);
+        let headroom = VAULT_RESERVE_CAPACITY - field.forms[form_place].reserve;
+        let banked = excess.min(headroom);
+        if banked == 0 {
+            continue;
+        }
+        field.ports[port_place].q -= banked;
+        field.forms[form_place].reserve += banked;
+        ledger.nodes[port_place].exogenous -= banked;
+    }
+}
+
 /// Leaves a Trail entry for every Form whose authored ability declares one, on
 /// the steps its period names, at the position and layer the Form now stands
 /// at.
 ///
-/// A deposit moves no Charge: nothing leaves the Form, nothing enters a Node,
-/// and no ledger term is touched — which is what keeps the delivery's own two
-/// terms inside the one step they apply on. The queue is bounded, and a
-/// deposit past the cap drops the oldest entry standing, so a long run costs
-/// exactly as much as a short one.
-fn deposit_trails(field: &mut FieldState) {
+/// A deposit transfers retained Charge out of the Wake Form's Node and into a
+/// physical cache. A full cache queue refuses a new deposit rather than
+/// destroying an older cache.
+fn deposit_trails(field: &mut FieldState, ledger: &mut Ledger) {
     let step = field.step;
-    let left: Vec<PendingTrail> = field
+    let requested: Vec<(u8, u32, u8, Vec2, TrailState)> = field
         .forms
         .iter()
         .filter_map(|form| {
@@ -2293,20 +4216,29 @@ fn deposit_trails(field: &mut FieldState) {
             if trail.period == 0 || step % Step::from(trail.period) != 0 {
                 return None;
             }
-            Some(PendingTrail {
-                form: form.id,
-                layer: form.layer,
-                pos: form.pos,
-                due: step.saturating_add(Step::from(trail.delay)),
-                magnitude: trail.magnitude,
-            })
+            Some((form.id, form.node, form.layer, form.pos, trail))
         })
         .collect();
-    for entry in left {
+    for (form, node, layer, pos, trail) in requested {
         if field.pending.len() >= PENDING_TRAILS {
-            field.pending.remove(0);
+            break;
         }
-        field.pending.push(entry);
+        let Some(place) = place_of(field, node) else {
+            continue;
+        };
+        let magnitude = trail.magnitude.min(field.ports[place].q).max(0);
+        if magnitude == 0 {
+            continue;
+        }
+        field.ports[place].q -= magnitude;
+        ledger.nodes[place].exogenous -= magnitude;
+        field.pending.push(PendingTrail {
+            form,
+            layer,
+            pos,
+            due: step.saturating_add(Step::from(trail.delay)),
+            magnitude,
+        });
     }
 }
 
@@ -2317,19 +4249,20 @@ fn deposit_trails(field: &mut FieldState) {
 /// the reach its Form authored, split by the same remainder rule a current
 /// delivers by — the base share to every recipient, one raw unit more to the
 /// first of them in ascending NodeId — clamped by each recipient's headroom,
-/// with Charge a full Node refuses never emitted. Ledger: the `wake` source
-/// grows by what was accepted, at this step and no other. An entry that comes
-/// due where nothing stands delivers nothing and leaves the queue all the
-/// same.
+/// with Charge a full Node refuses left in the cache. Ledger: `wake` records
+/// the internal transfer while undelivered resource retries on the next step;
+/// no cache becomes a source or disappears without a sink.
 fn deliver_trails(field: &mut FieldState, ledger: &mut Ledger, blocked: &[bool]) {
     if field.pending.is_empty() {
         return;
     }
     let step = field.step;
-    let due: Vec<PendingTrail> =
-        field.pending.iter().copied().filter(|entry| entry.due <= step).collect();
-    field.pending.retain(|entry| entry.due > step);
-    for entry in due {
+    let mut retained = Vec::with_capacity(field.pending.len());
+    for mut entry in std::mem::take(&mut field.pending) {
+        if entry.due > step {
+            retained.push(entry);
+            continue;
+        }
         let Some(reach) = field
             .forms
             .iter()
@@ -2337,6 +4270,7 @@ fn deliver_trails(field: &mut FieldState, ledger: &mut Ledger, blocked: &[bool])
             .and_then(|form| form.trail)
             .map(|trail| trail.radius)
         else {
+            retained.push(entry);
             continue;
         };
         let standing: Vec<usize> = field
@@ -2351,6 +4285,7 @@ fn deliver_trails(field: &mut FieldState, ledger: &mut Ledger, blocked: &[bool])
             .map(|(place, _)| place)
             .collect();
         if standing.is_empty() || entry.magnitude <= 0 {
+            retained.push(entry);
             continue;
         }
         let count = standing.len() as i64;
@@ -2366,16 +4301,24 @@ fn deliver_trails(field: &mut FieldState, ledger: &mut Ledger, blocked: &[bool])
             port.q += delivered;
             ledger.nodes[place].exogenous += delivered;
             ledger.wake += delivered;
+            entry.magnitude -= delivered;
+        }
+        if entry.magnitude > 0 {
+            retained.push(entry);
         }
     }
+    field.pending = retained;
 }
 
 fn deliver_currents(
     field: &mut FieldState,
     ledger: &mut Ledger,
+    cues: &mut Vec<Cue>,
     cache: Option<&StepCache>,
     redirection: &pressure::Redirection,
     blocked: &[bool],
+    supply_jitter: Frac,
+    stream: &mut RngState,
 ) {
     let mut gain_of = [0 as Frac; LAYERS_PER_CHAPTER];
     for layer in &field.layers {
@@ -2391,14 +4334,35 @@ fn deliver_currents(
     let mut standing: Vec<usize> = Vec::new();
 
     for index in 0..field.currents.len() {
-        let (active, layer, strength) = {
+        let (emission_scale, layer, strength) = {
             let current = &field.currents[index];
-            (current.active, current.layer, current.strength)
+            (current_emission_scale(current), current.layer, current.strength)
         };
-        if !active {
+        if emission_scale == 0 {
             continue;
         }
-        let emitted = fixed_mul(strength, gain_of[usize::from(layer)]);
+        let scheduled = fixed_mul(
+            fixed_mul(strength, gain_of[usize::from(layer)]),
+            emission_scale,
+        );
+        // One addressed draw per physically emitting Current. The symmetric
+        // multiplier preserves the authored cycle mean while making finite
+        // trials distinct without coupling unrelated draw order.
+        let variability = if supply_jitter > 0 {
+            let centered = stream
+                .addressed(
+                    "supply_jitter",
+                    u32::from(field.currents[index].id),
+                    field.step,
+                    65_537,
+                ) as Frac
+                * 2
+                - FRAC_ONE;
+            FRAC_ONE + fixed_mul(supply_jitter, centered)
+        } else {
+            FRAC_ONE
+        };
+        let emitted = fixed_mul(scheduled, variability);
         if emitted == 0 {
             continue;
         }
@@ -2409,10 +4373,28 @@ fn deliver_currents(
         // geometric recipients by the locked remainder rule. Everything stays
         // inside the `current` source and delivery's exact conservation.
         let mut split = emitted;
+        if let Some(decoy) = field.supply_decoys.iter().find(|decoy| decoy.current == field.currents[index].id) {
+            let captured = fixed_mul(emitted, decoy.capture_fraction);
+            split -= captured;
+            if let Some(place) = place_of(field, decoy.receiver) {
+                let port = &mut field.ports[place];
+                let delivered = match blocked[place] {
+                    true => 0,
+                    false => captured.min(NODE_CHARGE_CAP - port.q),
+                };
+                if delivered > 0 {
+                    port.q += delivered;
+                    ledger.nodes[place].exogenous += delivered;
+                    ledger.nodes[place].supply += delivered;
+                    ledger.current += delivered;
+                    note_supply_accepted(cues, port.node, delivered);
+                }
+            }
+        }
         if let Some(place) = seized {
             if field.ports[place].layer == layer {
-                let redirected = fixed_mul(emitted, redirection.share);
-                split = emitted - redirected;
+                let redirected = fixed_mul(split, redirection.share);
+                split -= redirected;
                 // A separated linked Form's Node accepts nothing, the
                 // redirected share included: it refuses exactly as short
                 // headroom refuses, and refused Charge is never emitted.
@@ -2424,7 +4406,9 @@ fn deliver_currents(
                 if delivered > 0 {
                     port.q += delivered;
                     ledger.nodes[place].exogenous += delivered;
+                    ledger.nodes[place].supply += delivered;
                     ledger.current += delivered;
+                    note_supply_accepted(cues, port.node, delivered);
                 }
             }
         }
@@ -2457,31 +4441,40 @@ fn deliver_currents(
             }
             port.q += delivered;
             ledger.nodes[place].exogenous += delivered;
+            ledger.nodes[place].supply += delivered;
             ledger.current += delivered;
+            note_supply_accepted(cues, port.node, delivered);
         }
     }
 }
 
+/// Coalesces accepted Supply by addressed recipient for the current frame.
+/// The amount is a visual/evidence cue only; the exact ledger remains the
+/// authoritative accounting record used by criteria and qualification.
+fn note_supply_accepted(cues: &mut Vec<Cue>, node: u32, delivered: Fx) {
+    let amount = (delivered >> 12).clamp(1, i64::from(u16::MAX)) as u16;
+    if let Some(cue) = cues
+        .iter_mut()
+        .find(|cue| cue.kind == CUE_SUPPLY_ACCEPTED && cue.b == node)
+    {
+        cue.a = cue.a.saturating_add(amount);
+        return;
+    }
+    raise_cue(cues, Cue { kind: CUE_SUPPLY_ACCEPTED, a: amount, b: node });
+}
+
 /// Where the Nodes standing in one current sit in the Port list, ascending.
 ///
-/// The recipient rule is the vertex rule: a Node stands in the current when its
-/// distance to the nearest path point is at most the current's width, never
-/// measured to the segment between two points. "The nearest point is within the
-/// width" is the same statement as "some point is within the width", so the scan
-/// stops at the first one.
-fn standing_in(field: &FieldState, current: usize) -> Vec<usize> {
+/// A Node stands in the current when its distance to the nearest point on any
+/// closed path segment is at most the current's width. One-point paths retain
+/// point capture; every longer path is independent of authored vertex density.
+pub(crate) fn standing_in(field: &FieldState, current: usize) -> Vec<usize> {
     let current = &field.currents[current];
     field
         .ports
         .iter()
         .enumerate()
-        .filter(|(_, port)| port.layer == current.layer)
-        .filter(|(_, port)| {
-            current
-                .path
-                .iter()
-                .any(|point| within(port.pos, port.layer, *point, port.layer, current.width))
-        })
+        .filter(|(_, port)| stands_in(port, current))
         .map(|(place, _)| place)
         .collect()
 }
@@ -2537,14 +4530,10 @@ fn record(field: &FieldState, ledger: &Ledger) -> StepRecords {
         if entry.exogenous != 0 {
             records.e.push((port.node, entry.exogenous));
         }
-        // What the Node paid, attributed across the five purposes. Version 1
-        // attributes the whole payment to the first of them, the boundary,
-        // which is what the locked rule states and what Upkeep Mix reads; a
-        // richer split is authored data a later goal adds. A Node that paid
-        // nothing writes no entry, exactly as the zero-omission rule requires.
+        // A Node that paid nothing writes no entry. Purpose allocation sums
+        // exactly to the booked sink, including fixed-point odd remainders.
         if entry.upkeep != 0 {
-            let mut mix = [0 as Fx; UPKEEP_PURPOSES];
-            mix[0] = entry.upkeep;
+            let mix = upkeep_allocation(port.kind, entry.upkeep);
             records.upkeep.push(UpkeepRecord { node: port.node, v: entry.upkeep, mix });
         }
         // The failure indicator is 1 exactly when the Node ends the step with
@@ -2655,6 +4644,27 @@ pub fn validate(field: &FieldState) -> Result<(), Fault> {
     if field.routes.len() > ROUTES_PER_RUN {
         return Err(cap_fault("routes_per_run", ROUTES_PER_RUN as i64));
     }
+    if field.route_clamps.len() > ROUTE_CLAMPS {
+        return Err(cap_fault("route_clamps", ROUTE_CLAMPS as i64));
+    }
+    if field.route_controls.len() > ROUTES_PER_RUN {
+        return Err(cap_fault("route_controls", ROUTES_PER_RUN as i64));
+    }
+    if field.policy_runtime.len() > NODES_PER_RUN {
+        return Err(cap_fault("policy_runtime", NODES_PER_RUN as i64));
+    }
+    if field.materials.len() > MATERIALS_PER_RUN {
+        return Err(cap_fault("materials", MATERIALS_PER_RUN as i64));
+    }
+    if field.signals.len() > LOCAL_SIGNALS_PER_RUN {
+        return Err(cap_fault("signals", LOCAL_SIGNALS_PER_RUN as i64));
+    }
+    if field.supply_decoys.len() > SUPPLY_DECOYS_PER_RUN {
+        return Err(cap_fault("supply_decoys", SUPPLY_DECOYS_PER_RUN as i64));
+    }
+    if field.current_delays.len() > CURRENT_DELAYS_PER_RUN {
+        return Err(cap_fault("current_delays", CURRENT_DELAYS_PER_RUN as i64));
+    }
     if field.currents.len() > CURRENTS_PER_CHAPTER {
         return Err(cap_fault("currents_per_chapter", CURRENTS_PER_CHAPTER as i64));
     }
@@ -2671,6 +4681,15 @@ pub fn validate(field: &FieldState) -> Result<(), Fault> {
         LEAK_FRAC_CAP,
         "leak_per_exposed_contact_per_step",
     )?;
+    if let Some(breach) = field.leak_breach {
+        ranged(breach.original_coefficient, 0, LEAK_FRAC_CAP, "original_coefficient")?;
+        if breach.until_step <= field.step
+            || field.physical_compartment.leak_per_exposed_contact_per_step
+                < breach.original_coefficient
+        {
+            return Err(Fault::field("leak_breach"));
+        }
+    }
 
     // The layer list is contiguous from 0: a chapter declaring n layers declares
     // exactly the layers 0 through n − 1. A depth change moves a Form one layer
@@ -2745,6 +4764,92 @@ pub fn validate(field: &FieldState) -> Result<(), Fault> {
             return Err(Fault::field("formed_step"));
         }
     }
+    let controlled_routes: Vec<u32> =
+        field.route_controls.iter().map(|control| control.route).collect();
+    if controlled_routes != route_ids {
+        return Err(Fault::field("route_controls"));
+    }
+    for control in &field.route_controls {
+        let route = field
+            .routes
+            .iter()
+            .find(|route| route.route == control.route)
+            .ok_or_else(|| missing("route", control.route))?;
+        if control.controller != route.tail || control.allocation_weight == 0 {
+            return Err(Fault::field("route_controls"));
+        }
+        capped(control.capacity_limit, ROUTE_CAPACITY_CAP, "route_capacity")?;
+    }
+    let clamped_routes: Vec<u32> = field.route_clamps.iter().map(|clamp| clamp.route).collect();
+    if !ascending(&clamped_routes) {
+        return Err(Fault::field("route_clamps"));
+    }
+    for clamp in &field.route_clamps {
+        let Some(route) = field.routes.iter().find(|route| route.route == clamp.route) else {
+            return Err(missing("route", clamp.route));
+        };
+        capped(clamp.original_capacity, ROUTE_CAPACITY_CAP, "route_capacity")?;
+        if route.capacity > clamp.original_capacity || clamp.until_step <= field.step {
+            return Err(Fault::field("route_clamps"));
+        }
+    }
+    if let Some(scramble) = &field.route_scramble {
+        if scramble.routes.is_empty()
+            || !ascending(&scramble.routes)
+            || !(1..FRAC_ONE).contains(&scramble.probability)
+            || scramble.until_step <= field.step
+        {
+            return Err(Fault::field("route_scramble"));
+        }
+        for route in &scramble.routes {
+            if !route_ids.contains(route) {
+                return Err(missing("route", *route));
+            }
+        }
+    }
+    let material_ids: Vec<u32> = field.materials.iter().map(|held| held.material).collect();
+    if !ascending(&material_ids) {
+        return Err(Fault::field("materials"));
+    }
+    for material in &field.materials {
+        if material.material == 0 || !layer_ids.contains(&material.layer) {
+            return Err(Fault::field("materials"));
+        }
+        ranged(material.pos.x, 0, PLANE_SPAN - 1, "pos")?;
+        ranged(material.pos.y, 0, PLANE_SPAN - 1, "pos")?;
+        if material.claimed && material.amount > 0 {
+            return Err(Fault::field("claimed"));
+        }
+    }
+    let signal_ids: Vec<u32> = field.signals.iter().map(|held| held.signal).collect();
+    if !ascending(&signal_ids) {
+        return Err(Fault::field("signals"));
+    }
+    if let Some(last) = signal_ids.last() {
+        if *last >= field.next_signal_id {
+            return Err(Fault::field("next_signal_id"));
+        }
+    }
+    for signal in &field.signals {
+        if !node_ids.contains(&signal.source)
+            || !node_ids.contains(&signal.target)
+            || !layer_ids.contains(&signal.layer)
+            || signal.emitted_step > field.step
+            || signal.expires_step <= field.step
+        {
+            return Err(Fault::field("signals"));
+        }
+        ranged(signal.pos.x, 0, PLANE_SPAN - 1, "pos")?;
+        ranged(signal.pos.y, 0, PLANE_SPAN - 1, "pos")?;
+        ranged(signal.strength, 1, STORED_BOUND - 1, "strength")?;
+    }
+    let runtime_addresses: Vec<u32> =
+        field.policy_runtime.iter().map(|runtime| runtime.address).collect();
+    if !ascending(&runtime_addresses)
+        || runtime_addresses.iter().any(|address| !node_ids.contains(address))
+    {
+        return Err(Fault::field("policy_runtime"));
+    }
 
     let form_ids: Vec<u8> = field.forms.iter().map(|form| form.id).collect();
     if !ascending(&form_ids) {
@@ -2796,6 +4901,14 @@ pub fn validate(field: &FieldState) -> Result<(), Fault> {
             capped(trail.radius, TRAIL_RADIUS_CAP, "radius")?;
             capped(trail.magnitude, TRAIL_MAGNITUDE_CAP, "magnitude")?;
         }
+        if let Some(junction) = form.junction {
+            if form.form != "knot" {
+                return Err(Fault::field("junction"));
+            }
+            capped(junction.deploy_cost, NODE_CHARGE_CAP, "deploy_cost")?;
+            capped(junction.capacity, NODE_CHARGE_CAP, "capacity")?;
+            ranged(junction.upkeep_rate, 0, STORED_BOUND - 1, "upkeep_rate")?;
+        }
     }
 
     // The Trail entries standing: bounded, placed, and still to come. An entry
@@ -2837,8 +4950,38 @@ pub fn validate(field: &FieldState) -> Result<(), Fault> {
         }
         ranged(current.width, 0, STORED_BOUND - 1, "width")?;
         capped(current.strength, CURRENT_STRENGTH_CAP, "current_strength")?;
-        if current.period == 0 || current.phase >= current.period {
+        if current.period == 0
+            || current.phase >= current.period
+            || !(1..=FRAC_ONE).contains(&current.duty)
+        {
             return Err(Fault::field("period"));
+        }
+    }
+    let decoy_currents: Vec<u16> = field.supply_decoys.iter().map(|decoy| decoy.current).collect();
+    if !ascending(&decoy_currents) {
+        return Err(Fault::field("supply_decoys"));
+    }
+    for decoy in &field.supply_decoys {
+        if !current_ids.contains(&decoy.current) {
+            return Err(missing("current", u32::from(decoy.current)));
+        }
+        if !node_ids.contains(&decoy.receiver) {
+            return Err(missing("node", decoy.receiver));
+        }
+        if !(1..FRAC_ONE).contains(&decoy.capture_fraction) || decoy.until_step <= field.step {
+            return Err(Fault::field("supply_decoys"));
+        }
+    }
+    let delayed_currents: Vec<u16> = field.current_delays.iter().map(|delay| delay.current).collect();
+    if !ascending(&delayed_currents) {
+        return Err(Fault::field("current_delays"));
+    }
+    for delay in &field.current_delays {
+        let Some(current) = field.currents.iter().find(|current| current.id == delay.current) else {
+            return Err(missing("current", u32::from(delay.current)));
+        };
+        if delay.until_step <= field.step || current.active {
+            return Err(Fault::field("current_delays"));
         }
     }
 

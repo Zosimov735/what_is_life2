@@ -119,7 +119,7 @@ fn every_starting_form_authors_its_own_parameters() {
             .iter()
             .map(|ability| match ability {
                 Ability::LinkedForms { offsets, .. } => offsets.len(),
-                Ability::Trail { .. } => 0,
+                Ability::Trail { .. } | Ability::Junction { .. } => 0,
             })
             .sum();
         println!(

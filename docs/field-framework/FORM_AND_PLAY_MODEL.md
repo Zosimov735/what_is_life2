@@ -1,5 +1,10 @@
 # What Is Life 2 — Form and Reality-of-Play Model
 
+> Automation supersession: direct Form steering, manual Coupling input, and
+> campaign minute-to-minute play below describe the implemented legacy runtime.
+> D-019 through D-022 and `AUTOMATION_AND_CONTRACTS.md` own the target product:
+> Forms are programmable mobile Components operated by frozen local policies.
+
 Status: design authority for resolving the Form and resource model  
 Date: 2026-08-02
 
@@ -50,12 +55,12 @@ constructed system.
 | Directed Route | Transfer channel from one Component to another | Create, redirect, remove, inhibit | Yes |
 | Stored resource, `Q` | Normalized available work held at a Component | Gather, store, transfer, consume | Yes |
 | Supply Stream | External source that can deliver a finite amount of `Q` per step | Navigate into it; divert or delay it through declared tools | Yes |
-| Medium motion | Velocity or force exerted by the environment | Steer against it or use it | Yes, but not implemented yet |
+| Medium motion | Velocity or force exerted by the environment | Steer against it or use it | Yes; immutable per Regime with chassis-specific drag coupling |
 | Physical compartment | Authoritative causal membership with derived rendered geometry and a leakage coefficient | Reshape or breach as a paid intervention | Yes |
 | Observation View | Passive protocol `V = (I, C, w, S)` over immutable history | Move aperture and change instruments freely | No |
 | Intervention Budget | Meta-level limit on causal edits during an experiment | Spent only by declared physical edits | Governs allowed action; it is not `Q` |
-| Typed material | Matter used to create or replace Components | Recruit, recycle, partition | Yes, later system |
-| Addressed signal | Decodable instruction delivered to a local rule | Schedule, delay, divert, decode | Yes, later system |
+| Typed material | Matter used to create or replace Components | Recruit, recycle, partition | Yes, embodied stock |
+| Addressed signal | Decodable instruction delivered to a local rule | Schedule, delay, divert, decode | Yes, finite local record |
 | Chosen code length | Serialized size under a declared canonical code | Read only in advanced analysis | Bits under that code; not automatically entropy or capacity |
 
 Stored resource, matter, addressed signals, intervention budget, and
@@ -73,7 +78,7 @@ Charge Units (`CU`). It behaves like a coarse available-work carrier.
 - Simulation rate: `30 steps/s`.
 - Intervention Budget: separate integer points.
 - Information: bits, shown only in analysis.
-- Replacement material: typed units, once implemented.
+- Replacement material: typed units, separate from `CU`.
 
 Flow does not cost Charge. Flow *is Charge moving*.
 
@@ -111,16 +116,17 @@ The current Rust model does less than the Number 2 pictures imply:
 - Stored resource moves algebraically between Component inventories; it is not
   simulated as individual particles.
 - A `Current` is presently a finite **Supply Stream**. It distributes resource
-  among Components close to sampled points along its path.
-- A Supply Stream does not push, advect, or steer a Form.
+  among Components within the exact point-to-polyline-segment capture width.
+- A Supply Stream does not push, advect, or steer a Form. Regime-authored
+  medium velocity is a separate force applied after steering.
 - The existing Drift disturbance moves a Supply Stream's path.
 - Wake entries remain at the location where they were left until their delayed
   effect becomes due.
 
-Therefore, the current instruction “ride the returning current” means “keep the
-Form inside a moving Supply Stream so the Form receives resource.” If the game
-visually pushes the Form with the stream, the engine must first add a distinct
-medium-velocity field.
+Therefore, “ride the returning current” still means keeping the Form inside a
+moving Supply Stream to receive resource. Environmental streaks instead show
+the distinct medium-velocity field that changes Form motion without delivering
+resource.
 
 Target separation:
 
@@ -133,13 +139,24 @@ struct SupplyStream {
 }
 
 struct MediumVelocityField {
-    sample_grid: VelocityGrid,
-    drag_by_component_kind: Map<ComponentKind, Frac>,
+    regime_velocity: Vec2,
+    drag: Frac,
+    chassis_coupling: Map<FormKind, Frac>,
+    component_collision_radius: Fx,
+    collision_response: Frac,
 }
 ```
 
 The first system delivers resource. The second changes motion. They may occupy
 the same visible channel but remain separate causal rules.
+
+The current version implements a uniform regime-level sample rather than a
+spatial grid. Each step applies `drag * chassis_coupling * (medium - velocity)`
+after steering and before position integration. Open Field and Periodic
+Transport are still; Crowded Medium, Vestige Pressure, and Holdout Atmosphere
+carry distinct vectors, coupling strengths, and same-layer Component collision
+envelopes. Collision uses deterministic axis-projected integer response after
+position integration and before the Form's Component mirror is written.
 
 ## The Form's physical contract
 
@@ -152,28 +169,27 @@ Every selectable Form must disclose the same independently measured fields:
    genuinely authored;
 5. maximum construction span;
 6. capacity of newly constructed Routes;
-7. chassis-local permeability or loss, if implemented;
+7. chassis-local permeability or loss;
 8. chassis-specific ability;
 9. whether that ability is implemented, analysis-only, or proposed.
 
-The selected Form must not set the whole generator's physical-compartment
-permeability. The current `leak_frac` copied from Form content into the global
-Boundary state is a migration defect. Permeability belongs to the physical
-compartment. A Form may alter a local segment only through an explicit ability
-with a stated upkeep cost.
+The selected Form does not set the whole generator's physical-compartment
+permeability. Permeability belongs to authoritative physical-compartment state;
+Ring modifies only its own local loss. A Form may alter a material boundary
+only through an explicit ability with a stated cost.
 
 ### Current and target Form contracts
 
-| Form | Real current distinction | Player reality | Required correction |
+| Form | Real current distinction | Player reality | Current causal implementation |
 |---|---|---|---|
-| Thread | `2x` commanded offset entering the steering spring; construction span `448`; operating limit `2048 CU` | High-acceleration, high-steady-speed survey chassis under the current law | Do not claim a shorter damping time constant; remove its current global-leakage implication and show measured acceleration, steady speed, and stopping curve |
-| Ring | Construction span `384`; operating limit `1536 CU`; lowest authored `leak_frac` | Compact chassis intended for retention | Apply low permeability only to the Ring chassis or to an explicitly maintained local seal, not the entire generator |
-| Relay | Construction span `1088`; new Route capacity `64 CU/step`; operating limit `1024 CU` | Builds long, high-throughput connections while carrying little reserve | Require the Form to stand within commissioning reach of the selected endpoints |
-| Vault | `0.5x` steering; operating limit `4096 CU`; authored reserve `768 CU` | Slow storage chassis | Implement reserve charging and discharge; `reserve` currently exists but is not spent |
-| Lens | Declared forecast horizon `30 steps / 1 s`; operating limit `256 CU` | Local-sensing chassis with a bounded projection from currently sensed state | Do not expose omniscient authoritative state; define sensor radius, sensed fields, computation/resource cost, belief uncertainty, and hidden-input behavior before enabling it |
-| Knot | Operating limit `2560 CU`; upkeep `0.25 CU/step`; construction span `704` | Junction-building chassis | Implement an actual junction or multi-Route ability; high upkeep alone does not create dense routing |
-| Wake | Existing automatic delayed source: `16 CU` every `15` steps, due after `60` steps within radius `64` | Cache-laying logistics chassis | Stop creating unaccounted resource; a cache must receive `Q` from the Form or a named Supply Stream |
-| Chorus | Three linked Forms with separation limit `256` | Distributed chassis with direct-control handoff | Make formation control, separation, and handoff explicit; it is not evidence of autonomous organization |
+| Thread | `2x` commanded offset entering the steering spring; construction span `448`; operating limit `2048 CU` | High-acceleration, high-steady-speed survey chassis under the current law | Doubled steering response with the shared damping law and ordinary paid construction |
+| Ring | Construction span `384`; operating limit `1536 CU`; local leakage reduction | Compact chassis intended for retention | Lower loss applies only to the Ring Form Component, never the generator boundary |
+| Relay | Construction span `1088`; new Route capacity `64 CU/step`; operating limit `1024 CU` | Builds long, high-throughput connections while carrying little reserve | Commissioning enforces endpoint reach and stamps Relay Route capacity |
+| Vault | `0.5x` steering; operating limit `4096 CU`; authored reserve `768 CU` | Slow storage chassis | Excess stock banks into an isolated reserve and discharges conservatively to nearby Components |
+| Lens | Forecast horizon `30 steps / 1 s`; operating limit `256 CU`; sensor radius `192` | Local-sensing chassis with a bounded projection from currently sensed state | A paid `1 CU` packet builds eight local belief-Field realizations without remote or hidden input state |
+| Knot | Operating limit `2560 CU`; upkeep `0.25 CU/step`; construction span `704` | Junction-building chassis | Four typed blanks support finite paid junction deployment with persistent upkeep |
+| Wake | Conserving cache: up to `16 CU`, due after `60` steps within radius `64` | Cache-laying logistics chassis | Deposits transfer stock out of Wake and release only retained stock to local recipients |
+| Chorus | Three linked Forms with separation limit `256` | Distributed chassis with direct-control handoff | Formation following, separation, supply eligibility, and handoff are explicit state |
 
 Forms with unimplemented defining abilities should remain visibly unavailable
 or carry an explicit `Ability Pending` status. They should not compete through
@@ -181,8 +197,8 @@ descriptive promises that the simulation does not enact.
 
 ## Concrete chassis abilities
 
-These are the target mechanics to make each chassis legible. Values already
-implemented are retained; new values require tuning only after the causal rule
+These are the implemented mechanics that make each chassis legible. Values
+require tuning only after the causal rule
 exists.
 
 ### Thread
@@ -238,7 +254,7 @@ Lens changes what the player can sense and project, not the laws of the Field.
   unresolved local state.
 - Render only locally supported ghost positions, Route flows, and predicted
   limit crossings; fade or widen the display as uncertainty grows.
-- Charge a declared sensing/computation cost once that resource rule exists.
+- Charge `1 CU` for each local sensor packet.
 - Hidden Holdout conditions and unsensed remote state are never revealed.
 
 ```text
@@ -249,16 +265,20 @@ for step in 1..=30:
 render_noncausal_local_range(preview)
 ```
 
-This becomes a genuine gameplay advantage only after the local sensor and cost
-contract exists. Until then Lens is `Ability Pending`; the omniscient cloned
-world remains a laboratory Observe tool. Neither version establishes generator
-self-prediction.
+Lens now pays `1 CU` for an authoritative local sensor packet inside a
+192-unit radius. Rust partitions a local belief Field to the sensed Nodes,
+internal Routes, local materials, signals, caches, and known Supply geometry,
+then runs eight addressed 30-step neutral-control realizations. The laboratory
+receives only sensed identities and low/expected/high local Charge trajectories;
+it does not receive remote topology or hidden Holdout inputs and does not
+establish generator self-prediction.
 
 ### Knot
 
 - The ability deploys a junction Component at the Form's current position.
-- Deployment consumes a stated amount of stored resource, typed material, and
-  one Intervention Budget point.
+- Knot carries four typed junction blanks. Deployment consumes one blank,
+  `32 CU` of stored resource, and one Intervention Budget point.
+- The deployed junction holds up to `64 CU` and pays `0.25 CU/step` in upkeep.
 - The junction accepts several short Directed Routes but pays continuing
   upkeep.
 - The player gains local routing density at a persistent resource cost.
@@ -311,9 +331,15 @@ The current Pulse has three direct effects:
 2. it opens closed Port Components inside its radius;
 3. it reduces a reachable Supply Diversion disturbance.
 
-Holding the input increases radius. Releasing applies the Pulse. The current
+Holding `E` increases radius. Releasing `E` applies the Pulse. The current
 Pulse spends no stored resource. The interface must not imply otherwise.
 Pulse radius is currently global rather than a per-Form catalog value.
+
+During the hold, the renderer draws the true radius around the controlled Form,
+locks every affected object, and distinguishes inward resource transfer, Port
+activation, and Interference suppression through direction, hue, and motion.
+The shell reports only nonzero aggregate outcomes. A missed release remains a
+valid zero-cost action but cannot satisfy an instructional objective.
 
 Before release, the preview must state exactly what will happen:
 
@@ -359,7 +385,7 @@ distinct local rule exists.
    of the network.
 2. Watch a small set of literal readings: Form inventory, required Route flow,
    Component operating margin, and time remaining before a criterion fails.
-3. Hold and release the coupling Pulse to transfer existing resource, open
+3. Hold and release E to apply Coupling: transfer existing resource, open
    interfaces, or push back a compatible disturbance.
 4. Decide whether to keep piloting or stop and make a structural change.
 

@@ -27,6 +27,7 @@ use crate::sha256;
 use crate::slate::CandidateSlate;
 use crate::state::{
     CheckpointState, ControlState, FieldState, Frac, GeneratorSpec, InputConfig, Progress,
+    RegimeSpec, ScenarioSpec,
     RecordKind, RunState, Trace, TraceStep, ViewDeclaration, AUTOSAVE_STEPS, SAVE_PAYLOAD_CAP,
 };
 
@@ -36,6 +37,307 @@ pub const FORMS: [&str; 8] =
 
 /// The most steps one `InputFrame` may ask for.
 const MAX_ADVANCE_STEPS: i64 = 1800;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RouteMechanismReading {
+    route: u32,
+    enabled: bool,
+    capacity_limit: crate::state::Fx,
+    allocation_weight: u16,
+    requested: crate::state::Fx,
+    accepted: crate::state::Fx,
+    stance: &'static str,
+}
+
+#[derive(Clone, Debug)]
+struct MechanismSnapshot {
+    policies: Vec<crate::policy::PolicyRuntimeState>,
+    policy_objects: Vec<(u32, &'static str, u32)>,
+    interfaces: Vec<(u32, bool)>,
+    routes: Vec<RouteMechanismReading>,
+    reserves: Vec<(u8, u32, crate::state::Fx)>,
+    supplies: Vec<(u16, bool)>,
+}
+
+impl MechanismSnapshot {
+    fn of(field: &FieldState) -> Self {
+        let policy_objects = field
+            .policy_runtime
+            .iter()
+            .map(|runtime| {
+                field.forms.iter().find(|form| form.node == runtime.address).map_or(
+                    (runtime.address, "node", runtime.address),
+                    |form| (runtime.address, "form", u32::from(form.id)),
+                )
+            })
+            .collect();
+        let interfaces = field.ports.iter().map(|port| (port.node, port.open)).collect();
+        let routes = field
+            .routes
+            .iter()
+            .map(|route| {
+                let control = field
+                    .route_controls
+                    .iter()
+                    .find(|control| control.route == route.route);
+                let enabled = control.is_none_or(|control| control.enabled);
+                let capacity_limit = control.map_or(route.capacity, |control| {
+                    control.capacity_limit.min(route.capacity)
+                });
+                let allocation_weight = control.map_or(1, |control| control.allocation_weight);
+                let runtime = field
+                    .route_runtime
+                    .iter()
+                    .find(|runtime| runtime.route == route.route);
+                let stance = if !enabled {
+                    "disabled"
+                } else if capacity_limit == 0 {
+                    "closed"
+                } else {
+                    runtime.map_or("standing", |runtime| runtime.outcome.name())
+                };
+                RouteMechanismReading {
+                    route: route.route,
+                    enabled,
+                    capacity_limit,
+                    allocation_weight,
+                    requested: runtime.map_or(0, |runtime| runtime.requested),
+                    accepted: runtime.map_or(route.flow, |runtime| runtime.accepted),
+                    stance,
+                }
+            })
+            .collect();
+        let supplies = field
+            .currents
+            .iter()
+            .map(|current| (current.id, crate::field::current_emitting(current)))
+            .collect();
+        let reserves = field
+            .forms
+            .iter()
+            .filter(|form| form.reserve > 0 || form.form == "vault")
+            .map(|form| (form.id, form.node, form.reserve))
+            .collect();
+        Self {
+            policies: field.policy_runtime.clone(),
+            policy_objects,
+            interfaces,
+            routes,
+            reserves,
+            supplies,
+        }
+    }
+
+    fn events_since(&self, before: &Self) -> Vec<String> {
+        let mut events = Vec::new();
+        for runtime in &self.policies {
+            let changed = before
+                .policies
+                .iter()
+                .find(|held| held.address == runtime.address)
+                .is_none_or(|held| {
+                    held.active_rule != runtime.active_rule
+                        || held.active_action != runtime.active_action
+                        || held.outcome != runtime.outcome
+                        || held.target != runtime.target
+                });
+            if !changed {
+                continue;
+            }
+            let mut body = String::new();
+            let mut object = Obj::new(&mut body);
+            object.text(
+                "action",
+                runtime.active_action.as_ref().map_or("none", |action| action.name()),
+            );
+            object.int("address", i64::from(runtime.address));
+            object.text("kind", "policy");
+            let (_, object_kind, object_id) = self
+                .policy_objects
+                .iter()
+                .find(|(address, _, _)| *address == runtime.address)
+                .copied()
+                .unwrap_or((runtime.address, "node", runtime.address));
+            object.int("object_id", i64::from(object_id));
+            object.text("object_kind", object_kind);
+            object.text("outcome", runtime.outcome.name());
+            object.int("rule", i64::from(runtime.active_rule));
+            let (target_kind, target) = runtime.target.parts();
+            object.int_or_null("target", target);
+            object.text("target_kind", target_kind);
+            object.end();
+            events.push(body);
+        }
+        for (node, open) in &self.interfaces {
+            if before
+                .interfaces
+                .iter()
+                .find(|(held, _)| held == node)
+                .is_some_and(|(_, held)| held == open)
+            {
+                continue;
+            }
+            let mut body = String::new();
+            let mut object = Obj::new(&mut body);
+            object.text("kind", "interface");
+            object.int("node", i64::from(*node));
+            object.bool("open", *open);
+            object.end();
+            events.push(body);
+        }
+        for route in &self.routes {
+            if before
+                .routes
+                .iter()
+                .find(|held| held.route == route.route)
+                .is_some_and(|held| {
+                    held.enabled == route.enabled
+                        && held.capacity_limit == route.capacity_limit
+                        && held.allocation_weight == route.allocation_weight
+                        && held.requested == route.requested
+                        && held.accepted == route.accepted
+                        && held.stance == route.stance
+                })
+            {
+                continue;
+            }
+            let mut body = String::new();
+            let mut object = Obj::new(&mut body);
+            object.int("allocation_weight", i64::from(route.allocation_weight));
+            object.int("accepted_flow", route.accepted);
+            object.int("capacity_limit", route.capacity_limit);
+            object.bool("enabled", route.enabled);
+            object.text("kind", "route");
+            object.int("requested_flow", route.requested);
+            object.int("route", i64::from(route.route));
+            object.text("state", route.stance);
+            object.end();
+            events.push(body);
+        }
+        for (current, emitting) in &self.supplies {
+            if before
+                .supplies
+                .iter()
+                .find(|(held, _)| held == current)
+                .is_some_and(|(_, held)| held == emitting)
+            {
+                continue;
+            }
+            let mut body = String::new();
+            let mut object = Obj::new(&mut body);
+            object.int("current", i64::from(*current));
+            object.bool("emitting", *emitting);
+            object.text("kind", "supply");
+            object.end();
+            events.push(body);
+        }
+        for (form, node, closing) in &self.reserves {
+            let opening = before
+                .reserves
+                .iter()
+                .find(|(held, _, _)| held == form)
+                .map_or(0, |(_, _, amount)| *amount);
+            if opening == *closing {
+                continue;
+            }
+            let mut body = String::new();
+            let mut object = Obj::new(&mut body);
+            object.int("closing", *closing);
+            object.int("delta", closing.saturating_sub(opening));
+            object.int("form", i64::from(*form));
+            object.text("kind", "reserve");
+            object.int("node", i64::from(*node));
+            object.int("opening", opening);
+            object.text("state", if closing > &opening { "banked" } else { "released" });
+            object.end();
+            events.push(body);
+        }
+        events
+    }
+}
+
+/// Periodic exact Charge accounting for the commissioning evidence trail.
+/// Transitions remain immediate above; continuous transfers are sampled on a
+/// fixed core-step cadence so accelerated Commission does not flood the event
+/// boundary with one record per mechanism per step.
+fn charge_mechanism_event(step: u32, ledger: &crate::field::Ledger) -> Option<String> {
+    let active = ledger.current != 0
+        || ledger.gathered != 0
+        || ledger.moved != 0
+        || ledger.upkeep != 0
+        || ledger.leakage != 0
+        || ledger.drain != 0
+        || ledger.opening != ledger.closing;
+    let cadence = step == 1 || step % 15 == 0 || ledger.gathered != 0 && step % 5 == 0;
+    if !active || !cadence {
+        return None;
+    }
+
+    let dominant_node = ledger
+        .nodes
+        .iter()
+        .map(|entry| {
+            let activity = entry
+                .inflow
+                .unsigned_abs()
+                .saturating_add(entry.outflow.unsigned_abs())
+                .saturating_add(entry.upkeep.unsigned_abs())
+                .saturating_add(entry.supply.unsigned_abs())
+                .saturating_add(entry.leakage.unsigned_abs())
+                .saturating_add(entry.exogenous.unsigned_abs());
+            (activity, entry.node)
+        })
+        .max_by_key(|(activity, node)| (*activity, std::cmp::Reverse(*node)))
+        .filter(|(activity, _)| *activity > 0)
+        .map(|(_, node)| node);
+
+    let mut out = String::new();
+    let mut object = Obj::new(&mut out);
+    object.int("accepted_supply", ledger.current);
+    object.int("closing", ledger.closing);
+    object.int("coupled_transfer", ledger.gathered);
+    object.int("drain", ledger.drain);
+    object.int_or_null("dominant_node", dominant_node.map(i64::from));
+    object.text("kind", "charge");
+    object.int("leakage", ledger.leakage);
+    {
+        let mut nodes = object.list("nodes");
+        for entry in &ledger.nodes {
+            if entry.inflow == 0
+                && entry.outflow == 0
+                && entry.upkeep == 0
+                && entry.supply == 0
+                && entry.leakage == 0
+                && entry.exogenous == 0
+                && entry.opening == entry.closing
+            {
+                continue;
+            }
+            let mut node = nodes.object();
+            node.int("closing", entry.closing);
+            node.int("exogenous", entry.exogenous);
+            node.int("inflow", entry.inflow);
+            node.int("leakage", entry.leakage);
+            node.int("node", i64::from(entry.node));
+            node.int("opening", entry.opening);
+            node.int("outflow", entry.outflow);
+            node.int("supply", entry.supply);
+            node.int("upkeep", entry.upkeep);
+            node.end();
+        }
+        nodes.end();
+    }
+    object.int("opening", ledger.opening);
+    object.int("route_transfer", ledger.moved);
+    object.int("upkeep", ledger.upkeep);
+    object.end();
+    Some(out)
+}
+
+/// Lens pays one Charge unit to read the chassis-local 192-unit neighborhood.
+pub const LENS_SAMPLE_COST: crate::state::Fx = crate::fx::ONE_UNIT;
+pub const LENS_SENSOR_RADIUS: crate::state::Fx = 192 * crate::fx::ONE_UNIT;
+const LENS_FORECAST_TRIALS: usize = 8;
 
 /// The steering component limit. The value −32768 is never sent.
 const STEER_LIMIT: i64 = 32767;
@@ -320,6 +622,20 @@ impl InputFrame {
             depth_move,
         }
     }
+
+    /// Whether this frame asks only for the current frozen render snapshot.
+    pub fn is_passive_snapshot(&self) -> bool {
+        self.steer_x == 0
+            && self.steer_y == 0
+            && !self.pulse_held
+            && !self.pulse_release
+            && self.wheel == 0
+            && self.depth_key == 0
+            && !self.toggle_still
+            && !self.pause
+            && self.inspect.is_none()
+            && self.advance_steps == Some(0)
+    }
 }
 
 /// One loaded run: the authoritative state, the mode, the queue, and the cues
@@ -339,6 +655,10 @@ impl InputFrame {
 pub struct Run {
     state: RunState,
     mode: Mode,
+    /// Whether the active attempt branch has been closed by an explicit return
+    /// to the contract ladder. Session authority only; the immutable browser
+    /// evidence record owns durable closure and resume creates a new branch.
+    returned: bool,
     form: String,
     last_seq: u32,
     queue: PlanQueue,
@@ -394,28 +714,109 @@ impl Run {
     /// Opens a new run under a run key, a starting Form, and the content hash
     /// the build computed over the authored content this run stands on.
     pub fn start(run_id: &str, form: &str, content_hash: &str) -> Result<Self, Fault> {
+        Self::start_in_regime(run_id, form, content_hash, "open_field")
+    }
+
+    pub fn start_in_regime(
+        run_id: &str,
+        form: &str,
+        content_hash: &str,
+        regime: &str,
+    ) -> Result<Self, Fault> {
+        let scenario = ScenarioSpec::commissioning(
+            content_hash.to_string(),
+            crate::pressure::Schedule::default(),
+            RegimeSpec::named(regime)?,
+            GeneratorSpec::empty(),
+            Vec::new(),
+        );
+        Self::start_with_scenario(run_id, form, scenario)
+    }
+
+    /// Opens a new run under a fully frozen scenario specification.
+    pub fn start_with_scenario(
+        run_id: &str,
+        form: &str,
+        scenario: ScenarioSpec,
+    ) -> Result<Self, Fault> {
+        let kind = if scenario.contract_id().is_some() {
+            crate::state::RunKind::AutomationContract
+        } else {
+            crate::state::RunKind::OpenField
+        };
+        Self::start_with_scenario_kind(run_id, form, scenario, kind)
+    }
+
+    /// Opens a new run with an explicit product-path discriminator.
+    pub fn start_with_scenario_kind(
+        run_id: &str,
+        form: &str,
+        scenario: ScenarioSpec,
+        run_kind: crate::state::RunKind,
+    ) -> Result<Self, Fault> {
         if !is_hex(run_id, 16) {
             return Err(Fault::field("run_id"));
         }
         if !FORMS.contains(&form) {
             return Err(Fault::field("form"));
         }
-        if !is_hex(content_hash, 64) {
+        if !is_hex(scenario.content_hash(), 64) {
             return Err(Fault::field("content_hash"));
         }
         // A new run opens on the first branch, so its stream is the trajectory
         // split of the run's own root.
         let branch_nonce = 0;
         let now = FieldState::opening();
+        let criterion = scenario
+            .criterion(0)
+            .map(|_| crate::criterion::CriterionRuntime::opening(0));
+        let (attempt, attempt_branch) = match run_kind {
+            crate::state::RunKind::AutomationContract => {
+                let contract_id = scenario
+                    .contract_id()
+                    .ok_or_else(|| Fault::field("run_kind"))?
+                    .to_string();
+                let assembly_hash = scenario
+                    .assembly_template_hash()
+                    .ok_or_else(|| Fault::field("assembly_template"))?
+                    .to_string();
+                let generator_hash = scenario.generator().specification_hash();
+                let attempt = crate::state::AttemptRecord::new(
+                    run_id.to_string(),
+                    contract_id,
+                    scenario.content_hash().to_string(),
+                    generator_hash.clone(),
+                    assembly_hash.clone(),
+                    crate::state::AttemptSource::Opened,
+                )?;
+                let branch = crate::state::AttemptBranchRecord::new(
+                    run_id.to_string(),
+                    None,
+                    crate::state::BranchOperation::Opening,
+                    generator_hash,
+                    assembly_hash,
+                    branch_nonce,
+                )?;
+                (Some(attempt), Some(branch))
+            }
+            crate::state::RunKind::OpenField | crate::state::RunKind::LegacyCampaign => {
+                if scenario.contract_id().is_some() {
+                    return Err(Fault::field("run_kind"));
+                }
+                (None, None)
+            }
+        };
         let state = RunState {
             run_id: run_id.to_string(),
+            run_kind,
+            attempt,
+            attempt_branch,
             rng: trajectory_stream(run_id, branch_nonce),
-            spec: GeneratorSpec::new(
-                content_hash.to_string(),
-                crate::pressure::Schedule::default(),
-            ),
+            scenario,
+            criterion,
             branch_nonce,
             progress: Progress::opening(),
+            qualification_request: None,
             trace: Trace::opening(now.clone()),
             now,
             view: ViewDeclaration::opening(),
@@ -426,7 +827,8 @@ impl Run {
         };
         Ok(Run {
             state,
-            mode: Mode::Running,
+            mode: Mode::Still,
+            returned: false,
             form: form.to_string(),
             last_seq: 0,
             queue: PlanQueue::new(),
@@ -449,17 +851,25 @@ impl Run {
     /// admitted them ran before this, so identical restore inputs still yield
     /// byte-equivalent state.
     ///
-    /// A successful restore lands in `running` with the time scale full and the
-    /// plan queue cleared, whatever mode the run was in when it was written;
-    /// the shell re-enters Still Mode explicitly if it wants it. The frame
-    /// counter it lands on is the restored one, so the sequence a fresh worker
-    /// session numbers from starts over at 1.
+    /// A successful editable restore lands in `running` with the time scale
+    /// full and the plan queue cleared, whatever mode the run was in when it
+    /// was written; the shell re-enters Still Mode explicitly if it wants it.
+    /// A qualification-frozen restore lands in `still` because causal frames
+    /// are closed and only passive snapshot carriage remains legal. The frame
+    /// counter is restored in either case, while a fresh worker session numbers
+    /// its frame sequence from 1.
     pub fn restore(mut state: RunState, form: &str) -> Result<Self, Fault> {
         state.coherent()?;
         state.now.prev_assembly_step = Some(state.now.step);
+        let mode = if state.qualification_request.is_some() {
+            Mode::Still
+        } else {
+            Mode::Running
+        };
         Ok(Run {
             state,
-            mode: Mode::Running,
+            mode,
+            returned: false,
             form: form.to_string(),
             last_seq: 0,
             queue: PlanQueue::new(),
@@ -478,17 +888,178 @@ impl Run {
     /// the trajectory stream at position zero of that branch's own stream. The
     /// physical state is untouched, which is what makes the readings re-draw
     /// rather than the Field change.
-    pub fn rebranch(&mut self, branch_nonce: u32) {
+    pub fn rebranch(&mut self, branch_nonce: u32) -> Result<(), Fault> {
+        let attempt_branch = self.descendant_attempt_branch(
+            &self.state.scenario,
+            branch_nonce,
+            crate::state::BranchOperation::Rebranch,
+        )?;
         self.state.branch_nonce = branch_nonce;
         self.state.rng = trajectory_stream(&self.state.run_id, branch_nonce);
+        self.state.attempt_branch = attempt_branch;
+        Ok(())
+    }
+
+    /// Continues one returned automation attempt as an explicit child branch.
+    /// The embodied machine is unchanged; the retained trace and criterion
+    /// window begin again at the addressed resume boundary.
+    pub fn resume_commission(&mut self) -> Result<(), Fault> {
+        if self.state.run_kind != crate::state::RunKind::AutomationContract {
+            return Err(Fault::field("run_kind"));
+        }
+        if !self.returned {
+            return Err(Fault::field("attempt_branch"));
+        }
+        let branch_nonce = self
+            .state
+            .branch_nonce
+            .checked_add(1)
+            .ok_or_else(|| Fault::field("branch_nonce"))?;
+        let attempt_branch = self.descendant_attempt_branch(
+            &self.state.scenario,
+            branch_nonce,
+            crate::state::BranchOperation::Resume,
+        )?;
+        self.end_window();
+        self.state.branch_nonce = branch_nonce;
+        self.state.rng = trajectory_stream(&self.state.run_id, branch_nonce);
+        self.state.attempt_branch = attempt_branch;
+        self.state.trace.keyframe = self.state.now.clone();
+        self.state.trace.start_step = self.state.now.step;
+        self.state.criterion = self
+            .state
+            .scenario
+            .criterion(self.state.progress.chapter_index)
+            .map(|_| crate::criterion::CriterionRuntime::opening(self.state.now.step));
+        self.state.qualification_request = None;
+        self.returned = false;
+        Ok(())
+    }
+
+    /// Closes live authority for the current automation branch while the
+    /// contract ladder owns navigation. No causal state or identity changes.
+    pub fn return_commission(&mut self) -> Result<(), Fault> {
+        if self.state.run_kind != crate::state::RunKind::AutomationContract {
+            return Err(Fault::field("run_kind"));
+        }
+        if self.returned {
+            return Err(Fault::field("attempt_branch"));
+        }
+        self.returned = true;
+        Ok(())
+    }
+
+    /// Seals one exact qualification request against the current Commission
+    /// branch. The machine does not advance and no trial is executed here.
+    pub fn freeze_qualification_request(
+        &mut self,
+        request: crate::state::QualificationRequest,
+    ) -> Result<(), Fault> {
+        if self.state.run_kind != crate::state::RunKind::AutomationContract {
+            return Err(Fault::field("run_kind"));
+        }
+        if self.returned || self.mode != Mode::Still {
+            return Err(Fault::field("qualification_request"));
+        }
+        if let Some(existing) = &self.state.qualification_request {
+            if existing.request_id() == request.request_id() {
+                return Ok(());
+            }
+            return Err(Fault::field("qualification_request"));
+        }
+        self.state.qualification_request = Some(request);
+        if let Err(fault) = self.state.coherent() {
+            self.state.qualification_request = None;
+            return Err(fault);
+        }
+        Ok(())
+    }
+
+    /// Advances one hands-off analysis step through the exact live transition.
+    /// The returned ledger is observational; the cloned run owns every change.
+    pub fn analysis_step(&mut self) -> field::Ledger {
+        let before = self.state.now.step;
+        let ledger = self.step_once(ControlState::default(), None, false);
+        debug_assert_eq!(self.state.now.step, before.saturating_add(1));
+        ledger
+    }
+
+    /// Advances one cold-path step under the scenario's declared external
+    /// control source. The external-control flag marks an intervention applied
+    /// immediately before this step for the criterion's hands-off gate.
+    pub fn analysis_step_with(
+        &mut self,
+        control: ControlState,
+        other_external_control: bool,
+    ) -> field::Ledger {
+        let before = self.state.now.step;
+        let ledger = self.step_once(control, None, other_external_control);
+        debug_assert_eq!(self.state.now.step, before.saturating_add(1));
+        ledger
+    }
+
+    /// Applies one typed intervention to a cloned analysis run without spending
+    /// the live run's Impulse. Preconditions and mutation are the same plan
+    /// projection used by Still Mode commits.
+    pub fn analysis_apply(&mut self, plan: PlanCommand) -> Result<(), Fault> {
+        let mut projected = crate::plan::Projection::of(&self.state.now);
+        crate::plan::check(&plan, &projected).map_err(crate::plan::Refusal::fault)?;
+        crate::plan::apply(&plan, &mut projected).map_err(crate::plan::Refusal::fault)?;
+        self.end_window();
+        self.state.now = projected.field;
+        self.carry_keyframe();
+        Ok(())
     }
 
     pub fn mode(&self) -> Mode {
         self.mode
     }
 
+    pub fn lifecycle(&self) -> &'static str {
+        if self.returned {
+            "returned"
+        } else if self.state.qualification_request.is_some() {
+            "qualification_frozen"
+        } else {
+            self.mode.name()
+        }
+    }
+
     pub fn state(&self) -> &RunState {
         &self.state
+    }
+
+    fn descendant_attempt_branch(
+        &self,
+        scenario: &ScenarioSpec,
+        branch_nonce: u32,
+        operation: crate::state::BranchOperation,
+    ) -> Result<Option<crate::state::AttemptBranchRecord>, Fault> {
+        if self.state.run_kind != crate::state::RunKind::AutomationContract {
+            return Ok(None);
+        }
+        let attempt = self
+            .state
+            .attempt
+            .as_ref()
+            .ok_or_else(|| Fault::field("attempt_record"))?;
+        let parent = self
+            .state
+            .attempt_branch
+            .as_ref()
+            .ok_or_else(|| Fault::field("attempt_branch"))?;
+        let assembly_hash = scenario
+            .assembly_template_hash()
+            .ok_or_else(|| Fault::field("assembly_template"))?;
+        crate::state::AttemptBranchRecord::new(
+            attempt.attempt_id().to_string(),
+            Some(parent.branch_id().to_string()),
+            operation,
+            scenario.generator().specification_hash(),
+            assembly_hash.to_string(),
+            branch_nonce,
+        )
+        .map(Some)
     }
 
     /// The starting Form this run opened with. Which Form stands in the Field,
@@ -514,12 +1085,29 @@ impl Run {
     /// first step or not at all.
     pub fn establish_field(
         &mut self,
-        field: FieldState,
+        mut field: FieldState,
         view: ViewDeclaration,
     ) -> Result<(), Fault> {
+        if self.state.scenario.contract_id().is_none() {
+            self.state.scenario.regime().apply(&mut field);
+        }
+        let chapter_index = self.state.progress.chapter_index;
+        let defaults = self.state.scenario.generator().route_defaults(chapter_index);
+        if !defaults.is_empty() {
+            Self::validate_route_defaults(&field, &defaults)?;
+            field.route_controls = defaults;
+        }
         field::validate(&field)?;
         field::establishable(&field)?;
         field::establishable_view(&view, &field)?;
+        if !self
+            .state
+            .scenario
+            .generator()
+            .establishes_field(chapter_index, &field)
+        {
+            return Err(Fault::field("generator_spec"));
+        }
         if field.step != 0 || self.state.now.step != 0 {
             return Err(Fault::field("step"));
         }
@@ -529,18 +1117,258 @@ impl Run {
         Ok(())
     }
 
+    /// Re-roots Commission on the current contract's authored opening
+    /// assembly while retaining the accepted generator and durable records.
+    /// The branch advances only after the replacement Field and View have
+    /// passed the same establishment and Route-default checks as a new run.
+    pub fn restart_commission(
+        &mut self,
+        field: FieldState,
+        view: ViewDeclaration,
+    ) -> Result<(), Fault> {
+        self.restart_commission_as(field, view, crate::state::BranchOperation::Restart)
+    }
+
+    fn prepared_assembly_field(
+        &self,
+        assembly: &crate::state::AssemblyTemplate,
+    ) -> Result<FieldState, Fault> {
+        self.prepared_scenario_assembly_field(&self.state.scenario, assembly, &self.state.view)
+    }
+
+    fn prepared_scenario_assembly_field(
+        &self,
+        scenario: &crate::state::ScenarioSpec,
+        assembly: &crate::state::AssemblyTemplate,
+        view: &ViewDeclaration,
+    ) -> Result<FieldState, Fault> {
+        if self.state.run_kind != crate::state::RunKind::AutomationContract {
+            return Err(Fault::field("run_kind"));
+        }
+        let mut field = assembly
+            .field()
+            .cloned()
+            .ok_or_else(|| Fault::field("assembly_template"))?;
+        let chapter_index = self.state.progress.chapter_index;
+        let defaults = scenario.generator().route_defaults(chapter_index);
+        if !defaults.is_empty() {
+            Self::validate_route_defaults(&field, &defaults)?;
+            field.route_controls = defaults;
+        }
+        if !scenario.generator().local_policy().is_empty() {
+            for form in &mut field.forms {
+                form.controlled = false;
+                form.focus = false;
+                form.pulse_charge = 0;
+            }
+        }
+        field::validate(&field)?;
+        field::establishable(&field)?;
+        field::establishable_view(view, &field)?;
+        if !scenario.generator().establishes_field(chapter_index, &field) {
+            return Err(Fault::field("generator_spec"));
+        }
+        Ok(field)
+    }
+
+    pub fn preview_restart_assembly(&self) -> Result<FieldState, Fault> {
+        let assembly = self
+            .state
+            .scenario
+            .assembly_template()
+            .filter(|assembly| assembly.is_exact())
+            .ok_or_else(|| Fault::field("assembly_template"))?;
+        self.prepared_assembly_field(assembly)
+    }
+
+    pub fn restart_assembly(&mut self) -> Result<(), Fault> {
+        let field = self.preview_restart_assembly()?;
+        let view = self.state.view.clone();
+        self.restart_commission_as(
+            field,
+            view,
+            crate::state::BranchOperation::RestartAssembly,
+        )
+    }
+
+    pub fn preview_generator_reconstruction(
+        &self,
+        generator: &crate::state::GeneratorSpec,
+    ) -> Result<FieldState, Fault> {
+        let assembly = self
+            .state
+            .scenario
+            .assembly_template()
+            .filter(|assembly| assembly.is_exact())
+            .ok_or_else(|| Fault::field("assembly_template"))?;
+        let scenario = self.state.scenario.with_generator(generator.clone())?;
+        self.prepared_scenario_assembly_field(&scenario, assembly, &self.state.view)
+    }
+
+    pub fn preview_scenario_reconstruction(
+        &self,
+        scenario: &crate::state::ScenarioSpec,
+        view: &ViewDeclaration,
+    ) -> Result<FieldState, Fault> {
+        let assembly = scenario
+            .assembly_template()
+            .filter(|assembly| assembly.is_exact())
+            .ok_or_else(|| Fault::field("assembly_template"))?;
+        self.prepared_scenario_assembly_field(scenario, assembly, view)
+    }
+
+    pub fn preview_assembly_revision(
+        &self,
+        draft: &crate::state::AssemblyDraft,
+    ) -> Result<crate::state::AssemblyTemplate, Fault> {
+        let current = self
+            .state
+            .scenario
+            .assembly_template()
+            .filter(|assembly| assembly.is_exact())
+            .ok_or_else(|| Fault::field("assembly_template"))?;
+        let candidate = current.adapted(draft)?;
+        self.prepared_assembly_field(&candidate)?;
+        Ok(candidate)
+    }
+
+    pub fn commit_assembly_revision(
+        &mut self,
+        assembly: crate::state::AssemblyTemplate,
+    ) -> Result<(), Fault> {
+        let field = self.prepared_assembly_field(&assembly)?;
+        let view = self.state.view.clone();
+        let prior = self.state.scenario.clone();
+        self.state.scenario = prior.with_assembly_template(assembly)?;
+        if let Err(fault) = self.restart_commission_as(
+            field,
+            view,
+            crate::state::BranchOperation::AssemblyCommit,
+        ) {
+            self.state.scenario = prior;
+            return Err(fault);
+        }
+        Ok(())
+    }
+
+    fn restart_commission_as(
+        &mut self,
+        mut field: FieldState,
+        view: ViewDeclaration,
+        operation: crate::state::BranchOperation,
+    ) -> Result<(), Fault> {
+        if self.state.run_kind != crate::state::RunKind::AutomationContract {
+            return Err(Fault::field("run_kind"));
+        }
+        let chapter_index = self.state.progress.chapter_index;
+        if self.state.scenario.contract_id().is_none() {
+            self.state.scenario.regime().apply(&mut field);
+        }
+        let defaults = self.state.scenario.generator().route_defaults(chapter_index);
+        if !defaults.is_empty() {
+            Self::validate_route_defaults(&field, &defaults)?;
+            field.route_controls = defaults;
+        }
+        if !self.state.scenario.generator().local_policy().is_empty() {
+            for form in &mut field.forms {
+                form.controlled = false;
+                form.focus = false;
+                form.pulse_charge = 0;
+            }
+        }
+        field::validate(&field)?;
+        field::establishable(&field)?;
+        field::establishable_view(&view, &field)?;
+        if !self
+            .state
+            .scenario
+            .generator()
+            .establishes_field(chapter_index, &field)
+        {
+            return Err(Fault::field("generator_spec"));
+        }
+        let branch_nonce = self
+            .state
+            .branch_nonce
+            .checked_add(1)
+            .ok_or_else(|| Fault::field("branch_nonce"))?;
+        let attempt_branch = self.descendant_attempt_branch(
+            &self.state.scenario,
+            branch_nonce,
+            operation,
+        )?;
+        let impulse = self.state.progress.impulse;
+
+        self.end_window();
+        self.state.branch_nonce = branch_nonce;
+        self.state.rng = trajectory_stream(&self.state.run_id, branch_nonce);
+        self.state.attempt_branch = attempt_branch;
+        self.state.progress = Progress {
+            chapter_index,
+            objective: crate::state::ObjectiveState::hidden(),
+            complete: Vec::new(),
+            impulse,
+        };
+        self.state.criterion = self
+            .state
+            .scenario
+            .criterion(chapter_index)
+            .map(|_| crate::criterion::CriterionRuntime::opening(0));
+        self.state.trace = Trace::opening(field.clone());
+        self.state.now = field;
+        self.state.view = view;
+        self.state.qualification_request = None;
+        self.state.slate = None;
+        self.state.pressures.clear();
+        self.mode = Mode::Still;
+        self.queue = PlanQueue::new();
+        self.cues.clear();
+        self.events.clear();
+        self.objective_ordinal = 0;
+        self.ramp = 0;
+        self.t_prev_us = None;
+        self.pending_echo = None;
+        self.interrupted = None;
+        Ok(())
+    }
+
+    pub fn full_contract_reset(
+        &mut self,
+        field: FieldState,
+        view: ViewDeclaration,
+        scenario: crate::state::ScenarioSpec,
+    ) -> Result<(), Fault> {
+        let prior = self.state.scenario.clone();
+        self.state.scenario = scenario;
+        if let Err(fault) = self.restart_commission_as(
+            field,
+            view,
+            crate::state::BranchOperation::FullContractReset,
+        ) {
+            self.state.scenario = prior;
+            return Err(fault);
+        }
+        Ok(())
+    }
+
     /// Opens the authored sequence on a chapter the run stands on: the chapter
     /// the shell is told about, and the objective the run holds when it starts.
     ///
     /// A run that opens on a state it has already advanced keeps whatever
     /// objective the record carried; only the events are raised again, because
     /// a fresh worker session has told the shell nothing.
-    pub fn open_chapter(&mut self, chapter: &crate::content::Chapter) {
+    pub fn open_chapter(&mut self, chapter: &crate::content::Chapter, chapter_count: usize) {
         self.raise(
             "chapter_changed",
             &format!(
-                "{{\"chapter_index\":{},\"title_key\":{},\"view\":{}}}",
+                "{{\"chapter_count\":{},\"chapter_index\":{},\"objective_count\":{},\"route_defaults\":{},\"title_key\":{},\"view\":{}}}",
+                chapter_count,
                 self.state.progress.chapter_index,
+                chapter.objectives.len(),
+                self.state
+                    .scenario
+                    .generator()
+                    .route_defaults_written(self.state.progress.chapter_index),
                 crate::fault::quoted(&chapter.title_key),
                 self.state.view.written(),
             ),
@@ -551,17 +1379,6 @@ impl Run {
         if !self.state.progress.objective.id.is_empty() {
             self.raise_objective(&self.state.progress.objective.written(), None);
         }
-    }
-
-    /// Gives the run the authored pressure tables the stage machine reads.
-    ///
-    /// Called once when a session opens a run, on a fresh run and on a restored
-    /// one alike: the tables are content rather than state, so a record carries
-    /// none and the session hands them over from the bundle it holds. A run
-    /// whose content hash has moved gets none, which is the same reading the
-    /// authored sequence takes of a chapter it can no longer trust.
-    pub fn set_schedule(&mut self, schedule: crate::pressure::Schedule) {
-        self.state.spec = GeneratorSpec::new(self.state.spec.content_hash().to_string(), schedule);
     }
 
     /// Seats the chapter's authored schedule as queued pressures.
@@ -647,7 +1464,7 @@ impl Run {
             let mut copy = self.state.pressures.clone();
             crate::pressure::settle_boundary(
                 &mut copy,
-                self.state.spec.schedule(),
+                self.state.scenario.pressure_schedule(),
                 &staged.spent,
                 &staged.pressed,
                 next_step,
@@ -707,8 +1524,8 @@ impl Run {
                         // the entry.
                         let held = self
                             .state
-                            .spec
-                            .schedule()
+                            .scenario
+                            .pressure_schedule()
                             .table(pressure.pressure)
                             .map_or(0, |table| table.level(*stage));
                         let floored = match pressure.displaced {
@@ -736,7 +1553,7 @@ impl Run {
         self.end_window();
         let settled = crate::pressure::settle_boundary(
             &mut self.state.pressures,
-            self.state.spec.schedule(),
+            self.state.scenario.pressure_schedule(),
             &staged.spent,
             &staged.pressed,
             next_step,
@@ -891,6 +1708,251 @@ impl Run {
         &self.queue
     }
 
+    /// Compatibility adapter for the former policy-only command. A caller
+    /// crossing this boundary still produces one complete Design revision by
+    /// retaining the current chapter's committed Route defaults, or freezing
+    /// its embodied controls when migrating a legacy generator.
+    pub fn install_local_policy(
+        &mut self,
+        policy: crate::policy::FrozenLocalPolicy,
+    ) -> Result<(), Fault> {
+        let chapter_index = self.state.progress.chapter_index;
+        let mut route_defaults =
+            self.state.scenario.generator().route_defaults(chapter_index);
+        if route_defaults.is_empty() {
+            route_defaults = self.state.now.route_controls.clone();
+        }
+        self.install_design_patch(policy, route_defaults)
+    }
+
+    /// Installs one complete Design revision. Policy and Route defaults are
+    /// validated against the same paused Field before any retained state or
+    /// generator identity changes.
+    pub fn install_design_patch(
+        &mut self,
+        policy: crate::policy::FrozenLocalPolicy,
+        route_defaults: Vec<crate::policy::RouteControlState>,
+    ) -> Result<(), Fault> {
+        Self::validate_local_policy(&self.state.now, &policy)?;
+        Self::validate_route_defaults(&self.state.now, &route_defaults)?;
+        let chapter_index = self.state.progress.chapter_index;
+        let generator = self.state.scenario.generator().with_design(
+            chapter_index,
+            policy,
+            route_defaults.clone(),
+        )?;
+        self.install_generator_revision(
+            generator,
+            route_defaults,
+            crate::state::BranchOperation::DesignCommit,
+        )
+    }
+
+    pub fn revert_generator(
+        &mut self,
+        field: FieldState,
+        view: ViewDeclaration,
+        scenario: crate::state::ScenarioSpec,
+    ) -> Result<(), Fault> {
+        let prior = self.state.scenario.clone();
+        self.state.scenario = scenario;
+        if let Err(fault) = self.restart_commission_as(
+            field,
+            view,
+            crate::state::BranchOperation::RevertGenerator,
+        ) {
+            self.state.scenario = prior;
+            return Err(fault);
+        }
+        Ok(())
+    }
+
+    pub fn clone_blueprint_generator(
+        &mut self,
+        generator: crate::state::GeneratorSpec,
+    ) -> Result<(), Fault> {
+        let route_defaults = generator.route_defaults(self.state.progress.chapter_index);
+        self.install_generator_revision(
+            generator,
+            route_defaults,
+            crate::state::BranchOperation::CloneBlueprint,
+        )
+    }
+
+    fn install_generator_revision(
+        &mut self,
+        generator: crate::state::GeneratorSpec,
+        route_defaults: Vec<crate::policy::RouteControlState>,
+        operation: crate::state::BranchOperation,
+    ) -> Result<(), Fault> {
+        Self::validate_local_policy(&self.state.now, generator.local_policy())?;
+        Self::validate_route_defaults(&self.state.now, &route_defaults)?;
+        let chapter_index = self.state.progress.chapter_index;
+        if !generator.accepts_field(chapter_index, &self.state.now) {
+            return Err(Fault::field("generator_spec"));
+        }
+        let scenario = self.state.scenario.with_generator(generator)?;
+        let attempt_branch = self.descendant_attempt_branch(
+            &scenario,
+            self.state.branch_nonce,
+            operation,
+        )?;
+        let mut projected = self.state.now.clone();
+        projected.route_controls = route_defaults;
+        projected.policy_runtime.clear();
+        if !scenario.generator().local_policy().is_empty() {
+            for form in &mut projected.forms {
+                form.controlled = false;
+                form.focus = false;
+                form.pulse_charge = 0;
+            }
+        }
+        field::validate(&projected)?;
+
+        self.end_window();
+        self.state.scenario = scenario;
+        self.state.attempt_branch = attempt_branch;
+        self.state.now = projected;
+        self.state.trace.keyframe = self.state.now.clone();
+        self.state.trace.start_step = self.state.now.step;
+        Ok(())
+    }
+
+    pub fn attach_engineering_transition_receipt(
+        &mut self,
+        receipt: crate::engineering::EngineeringTransitionReceipt,
+    ) -> Result<(), Fault> {
+        self.state
+            .attempt_branch
+            .as_mut()
+            .ok_or_else(|| Fault::field("attempt_branch"))?
+            .attach_transition_receipt(receipt)
+    }
+
+    /// Projects one complete policy against the current paused embodied
+    /// snapshot without applying an action or changing any retained state.
+    pub fn preview_local_policy(
+        &self,
+        policy: &crate::policy::FrozenLocalPolicy,
+        route_defaults: &[crate::policy::RouteControlState],
+        address: u32,
+    ) -> Result<crate::policy::PolicyPreview, Fault> {
+        let mut projected = self.state.now.clone();
+        Self::validate_route_defaults(&projected, route_defaults)?;
+        projected.route_controls = route_defaults.to_vec();
+        Self::validate_local_policy(&projected, policy)?;
+        crate::policy::preview(&projected, policy, address)
+            .ok_or_else(|| Fault::field("address"))
+    }
+
+    fn validate_route_defaults(
+        field: &FieldState,
+        defaults: &[crate::policy::RouteControlState],
+    ) -> Result<(), Fault> {
+        let routes: Vec<u32> = field.routes.iter().map(|route| route.route).collect();
+        let controlled: Vec<u32> = defaults.iter().map(|control| control.route).collect();
+        if controlled != routes {
+            return Err(Fault::field("route_defaults"));
+        }
+        for control in defaults {
+            let route = field
+                .routes
+                .iter()
+                .find(|route| route.route == control.route)
+                .ok_or_else(|| Fault::field("route"))?;
+            if control.controller != route.tail {
+                return Err(Fault::field("controller"));
+            }
+            if control.capacity_limit < 0 || control.capacity_limit > route.capacity {
+                return Err(Fault::field("capacity_limit"));
+            }
+            if control.allocation_weight == 0 {
+                return Err(Fault::field("allocation_weight"));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_local_policy(
+        field: &FieldState,
+        policy: &crate::policy::FrozenLocalPolicy,
+    ) -> Result<(), Fault> {
+        for component in policy.components() {
+            if !field.ports.iter().any(|port| port.node == component.address) {
+                return Err(Fault::field("address"));
+            }
+            for rule in &component.rules {
+                Self::validate_policy_action(field, component.address, &rule.action)?;
+                Self::validate_policy_condition(field, component.address, &rule.condition)?;
+            }
+            Self::validate_policy_action(field, component.address, &component.fallback)?;
+        }
+        Ok(())
+    }
+
+    fn validate_policy_condition(
+        field: &FieldState,
+        address: u32,
+        condition: &crate::policy::LocalCondition,
+    ) -> Result<(), Fault> {
+        if let crate::policy::LocalCondition::TargetInRange { radius } = condition {
+            if *radius > crate::field::pulse_radius(crate::state::FRAC_ONE) {
+                return Err(Fault::field("radius"));
+            }
+        }
+        let route = match condition {
+            crate::policy::LocalCondition::RouteFlowBelow { route, .. }
+            | crate::policy::LocalCondition::RouteFlowAbove { route, .. } => Some(*route),
+            _ => None,
+        };
+        if let Some(route) = route {
+            let attached = field.routes.iter().any(|held| {
+                held.route == route && (held.tail == address || held.head == address)
+            });
+            if !attached {
+                return Err(Fault::field("route"));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_policy_action(
+        field: &FieldState,
+        address: u32,
+        action: &crate::policy::LocalAction,
+    ) -> Result<(), Fault> {
+        if let crate::policy::LocalAction::Couple { radius } = action {
+            if *radius > crate::field::pulse_radius(crate::state::FRAC_ONE) {
+                return Err(Fault::field("radius"));
+            }
+        }
+        if let crate::policy::LocalAction::SetRoute { route, capacity_limit, .. } = action {
+            let Some(held) = field
+                .routes
+                .iter()
+                .find(|held| held.route == *route && held.tail == address)
+            else {
+                return Err(Fault::field("route"));
+            };
+            if *capacity_limit > held.capacity {
+                return Err(Fault::field("capacity_limit"));
+            }
+        }
+        let mobile_action = matches!(
+            action,
+            crate::policy::LocalAction::SeekSupply { .. }
+                | crate::policy::LocalAction::SeekPort { .. }
+                | crate::policy::LocalAction::SeekSignal { .. }
+                | crate::policy::LocalAction::ChangeDepth { .. }
+                | crate::policy::LocalAction::Couple { .. }
+                | crate::policy::LocalAction::UseAbility
+        );
+        if mobile_action && !field.forms.iter().any(|form| form.node == address) {
+            return Err(Fault::field("action"));
+        }
+        Ok(())
+    }
+
     /// Takes one frame of input: resolves the pause level and the mode, then
     /// runs exactly the steps the frame asks for, each consuming this frame's
     /// control state.
@@ -965,8 +2027,7 @@ impl Run {
             self.mode = self.interrupted.take().unwrap_or(Mode::Running);
         }
 
-        let elapsed = self.elapsed(&frame);
-        self.advance_ramp(elapsed);
+        let _elapsed = self.elapsed(&frame);
         if frame.toggle_still {
             self.toggle_still();
         }
@@ -1006,7 +2067,7 @@ impl Run {
             let first = index == 0;
             let control =
                 frame.control(if first { depth_move } else { 0 }, first && frame.pulse_release);
-            self.step_once(control, campaign);
+            self.step_once(control, campaign, false);
             ran += 1;
             // A campaign that ended mid-batch runs no further step of it: the
             // frame asked for steps of a run that was still going, and the
@@ -1257,38 +2318,27 @@ impl Run {
         }
     }
 
-    /// The one thing Space does, exactly as the mode table has it.
+    /// Moves immediately between Design and Commission authority.
     ///
-    /// Four triggers: `ramp_in` from `running` or from `ramp_out`, `ramp_out`
-    /// from `still` or from `ramp_in`. A fresh entry or exit opens its ramp at
-    /// zero; **a reversal mirrors the position it turned around at**, taking
-    /// `RAMP_UNITS - ramp`.
-    ///
-    /// The mirror is what makes a reversal honest in both directions at once.
-    /// The time scale is a linear function of the span a ramp has left to run,
-    /// so mirroring the position leaves that remainder exactly where it stood
-    /// and the scale does not jump across the turn. And the span left to run
-    /// after the turn is exactly the span already run before it, so cancelling
-    /// an entry costs only the time the entry had spent — a Space pressed
-    /// straight after a Space is back at full speed on the next frame, and one
-    /// pressed halfway takes the other half back.
+    /// The former presentation ramp made pausing feel like an actuator. In the
+    /// automation product a pause is an authority boundary, so it takes effect
+    /// on the frame that asks for it and consumes no simulation time.
     fn toggle_still(&mut self) {
         match self.mode {
-            Mode::Running => {
-                self.mode = Mode::RampIn;
+            Mode::Running | Mode::RampOut => {
+                self.mode = Mode::Still;
                 self.ramp = 0;
+                self.assemble_slate();
             }
-            Mode::Still => {
-                self.mode = Mode::RampOut;
+            Mode::Still | Mode::RampIn => {
+                self.mode = Mode::Running;
                 self.ramp = 0;
-            }
-            Mode::RampIn => {
-                self.mode = Mode::RampOut;
-                self.ramp = RAMP_UNITS - self.ramp;
-            }
-            Mode::RampOut => {
-                self.mode = Mode::RampIn;
-                self.ramp = RAMP_UNITS - self.ramp;
+                if let Some(echo) = self.pending_echo.take() {
+                    self.raise(
+                        "review_ready",
+                        &format!("{{\"review\":{{\"kind\":\"echo\",\"echo\":{}}}}}", echo.written()),
+                    );
+                }
             }
             // A suspended run reads no toggle, because a frame carrying the
             // pause level resolves nothing else; an ended one moves no more.
@@ -1343,7 +2393,12 @@ impl Run {
     }
 
     /// One step of exactly 1/30 s of simulated time.
-    fn step_once(&mut self, control: ControlState, campaign: Option<&crate::content::Content>) {
+    fn step_once(
+        &mut self,
+        control: ControlState,
+        campaign: Option<&crate::content::Content>,
+        other_external_control: bool,
+    ) -> field::Ledger {
         // The chapter the run stands in, read out of the campaign the session
         // holds. It is read per step rather than per frame because a step can
         // be the one that carries the run into the next chapter, and the next
@@ -1351,6 +2406,8 @@ impl Run {
         let chapter = campaign.and_then(|content| {
             content.chapter(self.state.progress.chapter_index)
         });
+        let mechanism_before = MechanismSnapshot::of(&self.state.now);
+        let criterion_before = self.state.criterion.as_ref().map(|runtime| runtime.status());
         // The stream position before the step ran, which is what a replay of
         // this step reads. Nothing stochastic exists yet, so the position is
         // recorded and not advanced: the goals that add exogenous terms to
@@ -1359,20 +2416,110 @@ impl Run {
         // Physical membership and its leakage coefficient live in the Field.
         // The active View is observation metadata and is deliberately absent
         // from this causal transition call.
-        let outcome = field::advance(
-            &mut self.state.now,
-            control,
-            self.state.input_config.pointer_speed,
-            &mut field::Staging {
-                pressures: &mut self.state.pressures,
-                schedule: self.state.spec.schedule(),
-                stream: &mut self.state.rng,
-            },
-        );
+        let local_policy = self.state.scenario.generator().local_policy().clone();
+        let outcome = if local_policy.is_empty() {
+            field::advance(
+                &mut self.state.now,
+                control,
+                self.state.input_config.pointer_speed,
+                &mut field::Staging {
+                    pressures: &mut self.state.pressures,
+                    schedule: self.state.scenario.pressure_schedule(),
+                    stream: &mut self.state.rng,
+                    medium: self.state.scenario.regime().medium_motion(),
+                    supply_jitter: self.state.scenario.regime().supply_jitter(),
+                },
+            )
+        } else {
+            field::advance_programmed(
+                &mut self.state.now,
+                ControlState::default(),
+                self.state.input_config.pointer_speed,
+                &local_policy,
+                &mut field::Staging {
+                    pressures: &mut self.state.pressures,
+                    schedule: self.state.scenario.pressure_schedule(),
+                    stream: &mut self.state.rng,
+                    medium: self.state.scenario.regime().medium_motion(),
+                    supply_jitter: self.state.scenario.regime().supply_jitter(),
+                },
+            )
+        };
         debug_assert!(
             outcome.ledger.balanced(),
             "the step's Charge deltas sum to zero across the ledger",
         );
+        for body in MechanismSnapshot::of(&self.state.now).events_since(&mechanism_before) {
+            self.raise("mechanism_event", &body);
+        }
+        let ledger = outcome.ledger.clone();
+        if let Some(body) = charge_mechanism_event(self.state.now.step, &ledger) {
+            self.raise("mechanism_event", &body);
+        }
+        let criterion_event = match (
+            self.state
+                .scenario
+                .criterion(self.state.progress.chapter_index),
+            self.state.criterion.as_mut(),
+        ) {
+            (Some(spec), Some(runtime)) => {
+                let before = runtime.status();
+                match runtime.advance(
+                    spec,
+                    crate::criterion::CriterionStepInput {
+                        field: &self.state.now,
+                        records: &outcome.records,
+                        ledger: &outcome.ledger,
+                        control,
+                        other_external_control,
+                    },
+                ) {
+                    Ok(reading)
+                        if reading.status != before
+                            || reading.observed_steps == 1
+                            || self.state.now.step % 15 == 0 =>
+                    {
+                        Some(format!("{{\"criterion\":{}}}", reading.written()))
+                    }
+                    Ok(_) => None,
+                    Err(_) => {
+                        debug_assert!(false, "criterion runtime accepts contiguous live steps");
+                        None
+                    }
+                }
+            }
+            _ => None,
+        };
+        if let Some(body) = criterion_event {
+            self.raise("criterion_changed", &body);
+        }
+        let criterion_after = self.state.criterion.as_ref().map(|runtime| runtime.status());
+        if criterion_after != criterion_before {
+            if let Some(status) = criterion_after {
+                let mut body = String::new();
+                let mut object = Obj::new(&mut body);
+                object.int(
+                    "chapter_index",
+                    i64::from(self.state.progress.chapter_index),
+                );
+                object.text("kind", "criterion");
+                object.text("status", status.name());
+                object.end();
+                self.raise("mechanism_event", &body);
+                if status == crate::criterion::CriterionStatus::Failed {
+                    let mut failure = String::new();
+                    let mut object = Obj::new(&mut failure);
+                    object.int(
+                        "chapter_index",
+                        i64::from(self.state.progress.chapter_index),
+                    );
+                    object.text("kind", "failure");
+                    object.text("source", "criterion");
+                    object.end();
+                    self.raise("mechanism_event", &failure);
+                }
+            }
+        }
         // The authored sequence reads the step the Field just took, and writes
         // only into `progress` — the payload's own field — so what it keeps
         // between steps is what a restore lands on. It runs after the step and
@@ -1438,6 +2585,7 @@ impl Run {
         } else if let Some(chapter) = chapter {
             self.settle_events(chapter, &mut cues);
         }
+        field::synchronize_automation_state(&mut self.state.now);
         // The Anchor is written after the step is closed, and for the same
         // reason a record is checked before it is stored: the payload it holds
         // is the whole run state, and the run state is only coherent once the
@@ -1459,6 +2607,7 @@ impl Run {
         for cue in cues {
             field::raise_cue(&mut self.cues, cue);
         }
+        ledger
     }
 
     /// Closes the chapter the run has just completed: the next chapter opens,
@@ -1508,6 +2657,14 @@ impl Run {
             // where it is, with its sequence complete and its line clear.
             return false;
         };
+        self.state.scenario.regime().apply(&mut field);
+        let defaults = self.state.scenario.generator().route_defaults(next);
+        if !defaults.is_empty() {
+            if Self::validate_route_defaults(&field, &defaults).is_err() {
+                return false;
+            }
+            field.route_controls = defaults;
+        }
         let at = self.state.now.step;
         field.step = at;
         // The assembly ordinal counts the evaluations of one Run rather than of
@@ -1515,7 +2672,8 @@ impl Run {
         // ordinal, and the streams they name stay distinct across the boundary.
         field.assembly_ordinal = self.state.now.assembly_ordinal;
         field.prev_assembly_step = Some(at);
-        if field::validate(&field).is_err()
+        if !self.state.scenario.generator().establishes_field(next, &field)
+            || field::validate(&field).is_err()
             || field::establishable(&field).is_err()
             || field::establishable_view(&view, &field).is_err()
         {
@@ -1529,6 +2687,12 @@ impl Run {
         self.state.trace.keyframe = self.state.now.clone();
         self.state.trace.start_step = at;
         self.state.progress.chapter_index = next;
+        self.state.criterion = self
+            .state
+            .scenario
+            .criterion(next)
+            .map(|_| crate::criterion::CriterionRuntime::opening(at));
+        self.raise("criterion_changed", "{\"criterion\":null}");
         self.state.progress.objective = crate::state::ObjectiveState::hidden();
         self.state.pressures.clear();
         self.seat_schedule(chapter, at);
@@ -1537,7 +2701,7 @@ impl Run {
         }
         // The chapter's own opening: the event that tells the shell which
         // chapter stands, and the first objective of it.
-        self.open_chapter(chapter);
+        self.open_chapter(chapter, content.chapters.len());
         // One autosave record on every `chapter_changed`, which is the locked
         // cadence read literally. It stands beside the Anchor the caller
         // writes, and costs one payload: the two are different kinds of record
@@ -1703,6 +2867,40 @@ impl Run {
         self.state.trace.steps.back().map(|recorded| &recorded.records)
     }
 
+    /// Reconstructs a read-only state at one retained timeline step. This is
+    /// used only by exact inspection; it never replaces the live state or
+    /// writes events, records, or runtime inputs.
+    pub fn inspection_state_at(&self, step: u32) -> Option<RunState> {
+        if step == self.state.now.step {
+            return Some(self.state.clone());
+        }
+        if step < self.state.trace.start_step || step > self.state.now.step {
+            return None;
+        }
+        let mut field = self.state.trace.keyframe.clone();
+        let cache = field::StepCache::of(&field);
+        for recorded in self.state.trace.steps.iter().filter(|recorded| recorded.step <= step) {
+            replay_onto(
+                &mut field,
+                recorded,
+                self.state.input_config.pointer_speed,
+                &self.state.pressures,
+                self.state.scenario.pressure_schedule(),
+                self.state.scenario.regime().medium_motion(),
+                self.state.scenario.regime().supply_jitter(),
+                self.state.scenario.generator().local_policy(),
+                &cache,
+            );
+        }
+        if field.step != step {
+            return None;
+        }
+        let mut state = self.state.clone();
+        state.now = field;
+        state.trace.steps.retain(|recorded| recorded.step <= step);
+        Some(state)
+    }
+
     /// Carries the trajectory's keyframe forward to where the retained span
     /// puts it, by replaying the recorded steps it passes over. A regeneration
     /// draws no fresh randomness and reads no live input.
@@ -1725,7 +2923,10 @@ impl Run {
                 &recorded,
                 self.state.input_config.pointer_speed,
                 &self.state.pressures,
-                self.state.spec.schedule(),
+                self.state.scenario.pressure_schedule(),
+                self.state.scenario.regime().medium_motion(),
+                self.state.scenario.regime().supply_jitter(),
+                self.state.scenario.generator().local_policy(),
                 &cache,
             );
             self.state.trace.start_step = recorded.step;
@@ -1863,6 +3064,191 @@ impl Run {
         self.queue.len()
     }
 
+    /// Pays for one Lens-local sensor packet. The paid observation ends the
+    /// preceding trace window before Charge changes, then builds a bounded
+    /// local belief ensemble. The shell receives sensed identities and the
+    /// aggregate forecast, never remote topology or hidden pressure schedules.
+    pub fn sample_lens(&mut self) -> Result<String, Fault> {
+        let form_place = self
+            .state
+            .now
+            .forms
+            .iter()
+            .position(|form| form.controlled && form.form == "lens" && form.forecast_depth > 0)
+            .ok_or_else(|| Fault::field("lens"))?;
+        let form = &self.state.now.forms[form_place];
+        let port_place = self
+            .state
+            .now
+            .ports
+            .iter()
+            .position(|port| port.node == form.node)
+            .ok_or_else(|| Fault::field("lens_node"))?;
+        if self.state.now.ports[port_place].q < LENS_SAMPLE_COST {
+            return Err(Fault::because(Code::Validation, "lens_charge"));
+        }
+
+        let origin = form.pos;
+        let layer = form.layer;
+        let horizon = form.forecast_depth;
+        let nodes: Vec<u32> = self
+            .state
+            .now
+            .ports
+            .iter()
+            .filter(|port| {
+                crate::fx::distance(origin, layer, port.pos, port.layer) <= LENS_SENSOR_RADIUS
+            })
+            .map(|port| port.node)
+            .collect();
+        let routes: Vec<u32> = self
+            .state
+            .now
+            .routes
+            .iter()
+            .filter(|route| nodes.contains(&route.tail) && nodes.contains(&route.head))
+            .map(|route| route.route)
+            .collect();
+
+        self.end_window();
+        self.state.now.ports[port_place].q -= LENS_SAMPLE_COST;
+        self.state.now.forms[form_place].charge -= LENS_SAMPLE_COST;
+        self.state.slate = None;
+        self.state.trace.keyframe = self.state.now.clone();
+        self.state.trace.start_step = self.state.now.step;
+
+        let forecast = self.lens_forecast(&nodes, &routes, origin, layer, horizon);
+
+        let mut out = String::new();
+        let mut object = Obj::new(&mut out);
+        object.int("cost", LENS_SAMPLE_COST);
+        object.int("horizon", i64::from(horizon));
+        {
+            let mut listed = object.list("node_ids");
+            for node in &nodes {
+                listed.int(i64::from(*node));
+            }
+            listed.end();
+        }
+        {
+            let mut listed = object.list("points");
+            for (step, low, expected, high) in forecast {
+                let mut written = String::new();
+                let mut point = Obj::new(&mut written);
+                point.int("expected", expected);
+                point.int("high", high);
+                point.int("low", low);
+                point.int("step", i64::from(step));
+                point.end();
+                listed.raw(&written);
+            }
+            listed.end();
+        }
+        {
+            let mut listed = object.list("route_ids");
+            for route in &routes {
+                listed.int(i64::from(*route));
+            }
+            listed.end();
+        }
+        object.int("sensor_radius", LENS_SENSOR_RADIUS);
+        object.end();
+        Ok(out)
+    }
+
+    fn lens_forecast(
+        &self,
+        nodes: &[u32],
+        routes: &[u32],
+        origin: crate::fx::Vec2,
+        layer: u8,
+        horizon: u16,
+    ) -> Vec<(u32, crate::state::Fx, crate::state::Fx, crate::state::Fx)> {
+        let mut local = self.state.now.clone();
+        local.ports.retain(|port| nodes.binary_search(&port.node).is_ok());
+        local.routes.retain(|route| routes.binary_search(&route.route).is_ok());
+        local.forms.retain(|form| nodes.binary_search(&form.node).is_ok());
+        local.physical_compartment.members.retain(|node| nodes.binary_search(node).is_ok());
+        local.route_clamps.retain(|clamp| routes.binary_search(&clamp.route).is_ok());
+        let empty_scramble = if let Some(scramble) = &mut local.route_scramble {
+            scramble.routes.retain(|route| routes.binary_search(route).is_ok());
+            scramble.routes.is_empty()
+        } else {
+            false
+        };
+        if empty_scramble {
+            local.route_scramble = None;
+        }
+        local.supply_decoys.retain(|decoy| nodes.binary_search(&decoy.receiver).is_ok());
+        local.signals.retain(|signal| {
+            nodes.binary_search(&signal.source).is_ok()
+                && nodes.binary_search(&signal.target).is_ok()
+        });
+        local.materials.retain(|material| {
+            crate::fx::distance(origin, layer, material.pos, material.layer) <= LENS_SENSOR_RADIUS
+        });
+        local.pending.retain(|cache| {
+            crate::fx::distance(origin, layer, cache.pos, cache.layer) <= LENS_SENSOR_RADIUS
+        });
+        for held in &mut local.layers {
+            held.port_ids.retain(|node| nodes.binary_search(node).is_ok());
+        }
+
+        let mut trials = vec![vec![0; usize::from(horizon)]; LENS_FORECAST_TRIALS];
+        for (ordinal, series) in trials.iter_mut().enumerate() {
+            let mut field = local.clone();
+            let cache = field::StepCache::of(&field);
+            let mut pressures = Vec::new();
+            let schedule = crate::pressure::Schedule::default();
+            let mut stream = trajectory_stream(
+                &self.state.run_id,
+                self.state
+                    .branch_nonce
+                    .wrapping_add(0x4c45_4e53)
+                    .wrapping_add(ordinal as u32),
+            );
+            for value in series {
+                let mut staging = field::Staging {
+                    pressures: &mut pressures,
+                    schedule: &schedule,
+                    stream: &mut stream,
+                    medium: self.state.scenario.regime().medium_motion(),
+                    supply_jitter: self.state.scenario.regime().supply_jitter(),
+                };
+                let policy = self.state.scenario.generator().local_policy();
+                if policy.is_empty() {
+                    field::advance_cached(
+                        &mut field,
+                        ControlState::default(),
+                        self.state.input_config.pointer_speed,
+                        &mut staging,
+                        &cache,
+                    );
+                } else {
+                    field::advance_cached_programmed(
+                        &mut field,
+                        ControlState::default(),
+                        self.state.input_config.pointer_speed,
+                        policy,
+                        &mut staging,
+                        &cache,
+                    );
+                }
+                *value = field.ports.iter().map(|port| port.q).sum();
+            }
+        }
+
+        (0..usize::from(horizon))
+            .map(|place| {
+                let values: Vec<crate::state::Fx> = trials.iter().map(|trial| trial[place]).collect();
+                let low = *values.iter().min().unwrap_or(&0);
+                let high = *values.iter().max().unwrap_or(&0);
+                let expected = values.iter().sum::<crate::state::Fx>() / values.len() as i64;
+                (self.state.now.step.saturating_add(place as u32 + 1), low, expected, high)
+            })
+            .collect()
+    }
+
     /// The canonical save payload, held to its locked cap. The cap is checked
     /// at every write and every export, so a payload that crossed it would be
     /// refused rather than stored.
@@ -1883,6 +3269,7 @@ impl Run {
         let hash = crate::json::hex_bytes(&sha256::digest(text.as_bytes()));
         let mut out = String::new();
         let mut object = Obj::new(&mut out);
+        object.text("embodied_state_hash", &self.state.now.embodied_hash());
         object.text("filename_hint", &self.state.filename_hint());
         object.text("sha256", &hash);
         object.text("text", &text);
@@ -1977,6 +3364,7 @@ impl Run {
             pressures: &self.state.pressures,
             objective_ordinal: self.objective_ordinal,
             forecast: self.forecast(),
+            medium: self.state.scenario.regime().medium_motion(),
         })
     }
 
@@ -2075,8 +3463,22 @@ impl Run {
             plan::apply(entry, &mut projected)
                 .map_err(|refusal| refusal.positioned(position))?;
         }
-
         if !entries.is_empty() {
+            Self::validate_local_policy(
+                &projected.field,
+                self.state.scenario.generator().local_policy(),
+            )?;
+            let generator = self
+                .state
+                .scenario
+                .generator()
+                .with_field(self.state.progress.chapter_index, &projected.field)?;
+            let scenario = self.state.scenario.with_generator(generator)?;
+            let attempt_branch = self.descendant_attempt_branch(
+                &scenario,
+                self.state.branch_nonce,
+                crate::state::BranchOperation::DesignCommit,
+            )?;
             // The Echo is derived here, before anything is applied, whichever
             // branch it takes: a perturbation replays the pre-commit window,
             // which the commit is about to end, and an evaluation highlight
@@ -2090,6 +3492,9 @@ impl Run {
             // under, then restarts on the Field the commit leaves.
             self.end_window();
             self.state.now = projected.field;
+            self.state.scenario = scenario;
+            self.state.attempt_branch = attempt_branch;
+            field::synchronize_automation_state(&mut self.state.now);
             self.state.progress.impulse -= cost as u8;
             // The second of the two assembly moments: a committed change
             // reassembles the slate, under the span the commit just clamped.
@@ -2104,9 +3509,16 @@ impl Run {
             self.state.trace.start_step = self.state.now.step;
         }
         self.queue.clear();
-        // The mode table's other trigger into `ramp_out`: a committed exit.
-        self.mode = Mode::RampOut;
+        // Design edits remain in Design authority. Commissioning starts only
+        // when the operator explicitly runs the generator.
+        self.mode = Mode::Still;
         self.ramp = 0;
+        if let Some(echo) = self.pending_echo.take() {
+            self.raise(
+                "review_ready",
+                &format!("{{\"review\":{{\"kind\":\"echo\",\"echo\":{}}}}}", echo.written()),
+            );
+        }
         Ok(entries.len() as u8)
     }
 
@@ -2181,7 +3593,15 @@ impl Run {
             // A physical reshape has no candidate-View evaluation to borrow.
             // It leaves no Echo until a typed compartment counterfactual is
             // implemented.
-            PlanCommand::ReshapeCompartment { .. } => None,
+            PlanCommand::ReshapeCompartment { .. }
+            | PlanCommand::DeployJunction
+            | PlanCommand::LimitRoute { .. }
+            | PlanCommand::RaiseLeak { .. }
+            | PlanCommand::DivertSupply { .. }
+            | PlanCommand::ReplaceComponent { .. }
+            | PlanCommand::Transplant { .. }
+            | PlanCommand::DelaySupply { .. }
+            | PlanCommand::ScrambleRoutes { .. } => None,
             PlanCommand::Connect { .. } | PlanCommand::Redirect { .. } => {
                 let slate = self.state.slate.as_ref()?;
                 crate::perturb::evaluation_highlight(slate.candidates.first()?, slate.ordinal)
@@ -2221,7 +3641,10 @@ impl Run {
                 &recorded,
                 self.state.input_config.pointer_speed,
                 &self.state.pressures,
-                self.state.spec.schedule(),
+                self.state.scenario.pressure_schedule(),
+                self.state.scenario.regime().medium_motion(),
+                self.state.scenario.regime().supply_jitter(),
+                self.state.scenario.generator().local_policy(),
                 &cache,
             );
             self.state.trace.start_step = recorded.step;
@@ -2282,6 +3705,9 @@ fn replay_onto(
     pointer_speed: Frac,
     pressures: &[crate::pressure::PressureState],
     schedule: &crate::pressure::Schedule,
+    medium: field::MediumMotion,
+    supply_jitter: crate::state::Frac,
+    policy: &crate::policy::FrozenLocalPolicy,
     cache: &field::StepCache,
 ) {
     // The pressure list a replayed step runs under is the live list: no window
@@ -2295,13 +3721,25 @@ fn replay_onto(
     // machine's own re-derivation for the replayed step.
     let mut carried = pressures.to_vec();
     let mut stream = recorded.rng;
-    field::advance_cached(
-        state,
-        recorded.ctl,
-        pointer_speed,
-        &mut field::Staging { pressures: &mut carried, schedule, stream: &mut stream },
-        cache,
-    );
+    let mut staging = field::Staging {
+        pressures: &mut carried,
+        schedule,
+        stream: &mut stream,
+        medium,
+        supply_jitter,
+    };
+    if policy.is_empty() {
+        field::advance_cached(state, recorded.ctl, pointer_speed, &mut staging, cache);
+    } else {
+        field::advance_cached_programmed(
+            state,
+            ControlState::default(),
+            pointer_speed,
+            policy,
+            &mut staging,
+            cache,
+        );
+    }
     debug_assert_eq!(state.step, recorded.step, "a replayed step lands on its own step");
 }
 

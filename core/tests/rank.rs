@@ -24,8 +24,8 @@ use field_game_core::slate::{
     TAU_DEFAULT,
 };
 use field_game_core::state::{
-    ControlState, FieldState, Frac, GeneratorSpec, InputConfig, Progress, RunState, Surround,
-    Trace, TraceStep, ViewDeclaration, FRAC_ONE,
+    ControlState, FieldState, Frac, InputConfig, Progress, RunState, Surround, Trace, TraceStep,
+    ViewDeclaration, FRAC_ONE,
 };
 
 const KEY: &str = "0123456789abcdef";
@@ -184,6 +184,7 @@ fn fixture_field() -> FieldState {
         route_capacity: 32 * ONE_UNIT,
         link: None,
         trail: None,
+        junction: None,
     }];
 
     field.layers = (0..2u8)
@@ -236,7 +237,8 @@ fn played(steps: usize, view: ViewDeclaration) -> RunState {
     RunState {
         run_id: KEY.to_string(),
         rng: field_game_core::rng::trajectory_stream(KEY, 0),
-        spec: GeneratorSpec::new(NO_CONTENT.to_string(), Default::default()),
+        scenario: field_game_core::state::ScenarioSpec::legacy(NO_CONTENT.to_string()),
+        criterion: None,
         branch_nonce: 0,
         progress: Progress::opening(),
         now,

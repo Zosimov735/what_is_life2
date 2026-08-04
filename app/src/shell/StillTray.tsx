@@ -34,6 +34,7 @@
 import { copy } from './copy';
 import type { CandidateSlate, QueueState } from './worker-client';
 import type {
+  FormId,
   PrivilegeValue,
   SlateCandidate,
   Surround,
@@ -41,9 +42,15 @@ import type {
 } from '../../../worker/src/protocol';
 import type { FrameState } from '../../../worker/src/frame-state';
 import type { StillTool } from './still-edits';
+import knot from '../../../content/forms/knot.json';
 
 /** The raw form of 1: every value and every range bound is a fraction of it. */
 const WHOLE = 65536;
+const JUNCTION = knot.abilities[0];
+
+function chargeUnits(raw: number): string {
+  return (raw / WHOLE).toLocaleString('en-US');
+}
 
 /**
  * The four values, in the order the surface reads them, each with the catalog
@@ -136,6 +143,14 @@ interface StillTrayProps {
   exposedPhysicalMembers?: number;
   /** Raw Q0.16 leakage per exposed external contact per simulation step. */
   leakPerExposedContactPerStep?: number;
+  /** Opens the paused run's laboratory workspace. */
+  openLab?: () => void;
+  /** Whether the laboratory workspace currently covers the Field. */
+  labOpen?: boolean;
+  /** The commissioned chassis, used to expose its local material action. */
+  form?: FormId;
+  /** Stages one Knot junction at the controlled Form's current position. */
+  deployJunction?: () => void;
 }
 
 const SURROUND_KEYS: Readonly<Record<Surround, string>> = {
@@ -196,40 +211,63 @@ export function StillTray({
   proposedPhysicalMembers = 0,
   exposedPhysicalMembers = 0,
   leakPerExposedContactPerStep = 0,
+  openLab = () => {},
+  labOpen = false,
+  form,
+  deployJunction = () => {},
 }: StillTrayProps) {
   if (!mode || !SHOWN_IN.includes(mode)) return null;
+  const conflicted = queue.entries.some((entry) => entry.conflict);
+  const canCommit = mode === 'still'
+    && queue.entries.length > 0
+    && queue.cost_total <= impulse
+    && !conflicted;
+  const canUndo = mode === 'still' && queue.entries.length > 0;
 
   return (
-    <div className="tray" data-mode={mode} data-tool={tool}>
+    <div
+      className="tray field-still-shell"
+      data-mode={mode}
+      data-tool={tool}
+      data-queue={queue.entries.length > 0 ? 'queued' : 'empty'}
+      data-can-commit={canCommit}
+      data-can-undo={canUndo}
+      data-conflicted={conflicted}
+    >
       {/* Announced when it changes, exactly as the one objective is: entering
           the mode is the thing a player who cannot see the surface settle
           most needs told, and the tray is the only place it is said. */}
       <p className="tray-name" role="status" aria-live="polite">
         {copy('label.still_mode')}
       </p>
-      <div className="tray-mode-panel">
-        <div className="tray-tools" role="group" aria-label={copy('label.still_mode')}>
-          <button
-            type="button"
-            className="tray-tool"
-            data-tool="view"
-            aria-pressed={tool === 'view'}
-            onClick={() => setTool('view')}
-          >
-            <span>{copy('label.observation_view')}</span>
-            <small>{copy('label.passive_free')}</small>
-          </button>
-          <button
-            type="button"
-            className="tray-tool"
-            data-tool="compartment"
-            aria-pressed={tool === 'compartment'}
-            onClick={() => setTool('compartment')}
-          >
-            <span>{copy('label.physical_compartment')}</span>
-            <small>{copy('label.causal_paid')}</small>
-          </button>
-        </div>
+      <div className="tray-tools" role="group" aria-label={copy('label.still_mode')}>
+        <button
+          type="button"
+          className="tray-tool"
+          data-tool="view"
+          aria-pressed={tool === 'view'}
+          onClick={() => setTool('view')}
+        >
+          <span>{copy('label.observation_view')}</span>
+          <small>{copy('label.passive_free')}</small>
+        </button>
+        <button
+          type="button"
+          className="tray-tool"
+          data-tool="compartment"
+          aria-pressed={tool === 'compartment'}
+          onClick={() => setTool('compartment')}
+        >
+          <span>{copy('label.physical_compartment')}</span>
+          <small>{copy('label.causal_paid')}</small>
+        </button>
+      </div>
+      <section
+        className="tray-mode-panel tray-physical-panel"
+        data-active={tool === 'compartment'}
+        aria-label={copy('label.physical_compartment')}
+      >
+        <p className="tray-panel-kicker">{copy('label.physical_compartment')}</p>
         <div className="tray-physical-readings">
           <p className="tray-reading">
             <span className="tray-term">{copy('label.physical_members')}</span>
@@ -253,8 +291,52 @@ export function StillTray({
             </p>
           ) : null}
         </div>
-      </div>
-      <section className="tray-view-panel" aria-label={copy('label.observation_view')}>
+        {form === 'knot' ? (
+          <section className="tray-junction" aria-label={copy('ability.junction_material')}>
+            <div className="tray-junction-head">
+              <span>{copy('ability.junction_material')}</span>
+              <strong>{copy('ability.junction_blanks')}</strong>
+            </div>
+            <div className="tray-junction-spec">
+              <p className="tray-reading">
+                <span className="tray-term">{copy('ability.junction_deployment')}</span>
+                <span className="tray-value">{chargeUnits(JUNCTION.deploy_cost)} {copy('unit.cu')}</span>
+              </p>
+              <p className="tray-reading">
+                <span className="tray-term">{copy('ability.junction_capacity')}</span>
+                <span className="tray-value">{chargeUnits(JUNCTION.capacity)} {copy('unit.cu')}</span>
+              </p>
+              <p className="tray-reading">
+                <span className="tray-term">{copy('ability.junction_upkeep')}</span>
+                <span className="tray-value">{chargeUnits(JUNCTION.upkeep_rate)} {copy('unit.cu_per_step')}</span>
+              </p>
+            </div>
+            <button
+              type="button"
+              className="tray-deploy-junction"
+              onClick={deployJunction}
+              disabled={mode !== 'still' || queue.entries.length >= 6 || impulse <= queue.cost_total}
+            >
+              {copy('ability.junction_deploy')}
+            </button>
+          </section>
+        ) : null}
+        <button
+          type="button"
+          className="tray-open-lab"
+          aria-controls="field-laboratory"
+          aria-expanded={labOpen}
+          onClick={openLab}
+          disabled={mode !== 'still'}
+        >
+          {copy('lab.open')}
+        </button>
+      </section>
+      <section
+        className="tray-view-panel"
+        data-active={tool === 'view'}
+        aria-label={copy('label.observation_view')}
+      >
         <p className="tray-panel-kicker">{copy('label.view_protocol')}</p>
         <div className="tray-view-readings">
           <p className="tray-reading">
@@ -367,26 +449,41 @@ export function StillTray({
         </>
       ) : null}
       </section>
-      <div className="tray-budget">
-        <p className="tray-reading">
-          <span className="tray-term">{copy('label.impulse')}</span>
-          <span className="tray-value">{impulse}</span>
-        </p>
-        <p className="tray-reading">
-          <span className="tray-term">{copy('label.queue')}</span>
-          <span className="tray-value">{queue.entries.length}</span>
-        </p>
-        <p className="tray-reading" data-total="cost">
-          <span className="tray-term">{copy('label.cost')}</span>
-          <span className="tray-value">{queue.cost_total}</span>
-        </p>
-        <ul className="tray-queue">
+      <div
+        className="tray-budget tray-operation-dock"
+        data-can-commit={canCommit}
+        data-can-undo={canUndo}
+        data-conflicted={conflicted}
+      >
+        <div className="tray-operation-summary">
+          <p className="tray-reading">
+            <span className="tray-term">{copy('label.impulse')}</span>
+            <span className="tray-value">{impulse}</span>
+          </p>
+          <p className="tray-reading">
+            <span className="tray-term">{copy('label.queue')}</span>
+            <span className="tray-value">{queue.entries.length}</span>
+          </p>
+          <p className="tray-reading" data-total="cost">
+            <span className="tray-term">{copy('label.cost')}</span>
+            <span className="tray-value">{queue.cost_total}</span>
+          </p>
+          <meter
+            className="tray-budget-meter"
+            min={0}
+            max={Math.max(1, impulse)}
+            value={Math.min(queue.cost_total, Math.max(1, impulse))}
+            aria-label={copy('label.cost')}
+          />
+        </div>
+        <ul className="tray-queue" aria-label={copy('label.queue')}>
           {queue.entries.map((entry) => (
             <li
               key={entry.position}
               className="tray-entry"
               data-conflict={entry.conflict}
               data-op={entry.plan.op}
+              aria-label={`${copy('label.queue')} ${entry.position}`}
             >
               <span className="tray-mark" />
               <span className="tray-entry-cost">{entry.cost}</span>

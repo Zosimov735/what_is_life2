@@ -88,15 +88,18 @@
 //!   chapter close on an ending that names what this run built rather than on
 //!   one sentence every run reads. See [`Chapter::ending_id`].
 
+use std::collections::BTreeSet;
+
 use crate::fault::{Code, Fault};
 use crate::field::{
-    self, BoundaryState, CurrentState, Cue, FieldLayer, FormState, LinkState, NodeKind,
-    PhysicalCompartment, PortState, RouteState, TrailState, CUE_COLLAPSE,
+    self, BoundaryState, CurrentState, Cue, FieldLayer, FormState, JunctionState, LinkState,
+    MaterialKind, MaterialState, NodeKind, PhysicalCompartment, PortState, RouteState, TrailState,
+    CUE_COLLAPSE,
     CUE_OBJECTIVE_COMPLETE, CUE_RECOVERY, CURRENTS_PER_CHAPTER, LAYERS_PER_CHAPTER,
     NODES_PER_RUN, ROUTES_PER_RUN,
 };
 use crate::fx::{within, Vec2, ONE_UNIT, STORED_BOUND};
-use crate::json::{parse, Json};
+use crate::json::{parse, Json, Obj};
 use crate::read;
 use crate::sha256;
 use crate::state::{
@@ -106,6 +109,41 @@ use crate::state::{
 
 /// The content version this build reads.
 pub const CONTENT_VERSION: i64 = 2;
+
+/// The automation-contract source version this build compiles.
+pub const CONTRACT_VERSION: i64 = 2;
+
+/// Contract files are intentionally bounded independently from legacy chapter
+/// files. The target ladder contains nine; sixteen leaves room for additions
+/// without making one malformed manifest unbounded.
+pub const CONTRACTS_CAP: usize = 16;
+pub const CONTRACT_GUIDANCE_CAP: usize = 16;
+pub const CONTRACT_PREREQUISITES_CAP: usize = 16;
+pub const CONTRACT_CAPABILITIES_CAP: usize = 32;
+pub const CONTRACT_UNLOCKS_CAP: usize = 32;
+pub const CONTRACT_CRITERIA_CAP: usize = 32;
+pub const CONTRACT_GRADE_BANDS: usize = 4;
+
+/// Hardware vocabulary implemented by the first contract slice. Later
+/// hardware requires a contract-version decision and an authoritative
+/// capability implementation before its id joins this list.
+pub const CONTRACT_HARDWARE_KINDS: [&str; 6] = [
+    "mobile_component",
+    "local_sensor",
+    "coupler",
+    "interface_actuator",
+    "route_actuator",
+    "finite_reserve",
+];
+
+/// Regimes contract openings may address in version 1.
+pub const CONTRACT_REGIME_IDS: [&str; 5] = [
+    "open_field",
+    "periodic_transport",
+    "crowded_medium",
+    "vestige_pressure",
+    "holdout_atmosphere",
+];
 
 /// The three manifest lists, in the order the concatenation reads them — the
 /// same order `tools/content-build.mjs` hashes in.
@@ -134,15 +172,598 @@ pub const CHAPTER_IDS: [&str; 8] = [
     "the_quiet_edge",
 ];
 
+/// The temporary opening adapter used while the first contracts compile from
+/// retained authored Fields. Normal shell state receives the resolved
+/// contract/generator/assembly identities, never this chapter reference.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ContractCurrentDuty {
+    pub current: u16,
+    pub duty: Frac,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ContractOpening {
+    LegacyChapter {
+        chapter: String,
+        component_ids: Vec<u32>,
+        current_duties: Vec<ContractCurrentDuty>,
+        current_ids: Vec<u16>,
+        form: String,
+        regime: String,
+        route_ids: Vec<u32>,
+    },
+}
+
+impl ContractOpening {
+    pub fn chapter(&self) -> &str {
+        match self {
+            Self::LegacyChapter { chapter, .. } => chapter,
+        }
+    }
+
+    pub fn form(&self) -> &str {
+        match self {
+            Self::LegacyChapter { form, .. } => form,
+        }
+    }
+
+    pub fn regime(&self) -> &str {
+        match self {
+            Self::LegacyChapter { regime, .. } => regime,
+        }
+    }
+
+    fn component_ids(&self) -> &[u32] {
+        match self {
+            Self::LegacyChapter { component_ids, .. } => component_ids,
+        }
+    }
+
+    fn current_ids(&self) -> &[u16] {
+        match self {
+            Self::LegacyChapter { current_ids, .. } => current_ids,
+        }
+    }
+
+    fn current_duties(&self) -> &[ContractCurrentDuty] {
+        match self {
+            Self::LegacyChapter { current_duties, .. } => current_duties,
+        }
+    }
+
+    fn route_ids(&self) -> &[u32] {
+        match self {
+            Self::LegacyChapter { route_ids, .. } => route_ids,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContractCapabilities {
+    pub actions: Vec<String>,
+    pub conditions: Vec<String>,
+    pub hardware: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContractUnlocks {
+    pub actions: Vec<String>,
+    pub conditions: Vec<String>,
+    pub hardware: Vec<String>,
+    pub next_contract: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ContractLimits {
+    pub max_components: u16,
+    pub max_routes: u16,
+    pub max_rules_per_component: u8,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CommissioningSpec {
+    pub expected_minutes: u16,
+    pub maximum_wall_wait_seconds: u16,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CriterionSource {
+    Field,
+    Component(u32),
+    Route(u32),
+}
+
+impl CriterionSource {
+    pub fn parts(self) -> (&'static str, Option<u32>) {
+        match self {
+            Self::Field => ("field", None),
+            Self::Component(id) => ("component", Some(id)),
+            Self::Route(id) => ("route", Some(id)),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CriterionMetric {
+    StoredCharge,
+    AcceptedFlow,
+    LeakageRatio,
+    HandsOffSteps,
+}
+
+impl CriterionMetric {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::StoredCharge => "stored_charge",
+            Self::AcceptedFlow => "accepted_flow",
+            Self::LeakageRatio => "leakage_ratio",
+            Self::HandsOffSteps => "hands_off_steps",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CriterionComparison {
+    AtLeast,
+    AtMost,
+}
+
+impl CriterionComparison {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::AtLeast => "at_least",
+            Self::AtMost => "at_most",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CriterionAggregation {
+    Minimum,
+    Maximum,
+    Final,
+}
+
+impl CriterionAggregation {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Minimum => "minimum",
+            Self::Maximum => "maximum",
+            Self::Final => "final",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContractCriterion {
+    pub id: String,
+    pub source: CriterionSource,
+    pub metric: CriterionMetric,
+    pub comparison: CriterionComparison,
+    pub threshold: i64,
+    pub aggregation: CriterionAggregation,
+    pub window_steps: Step,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QualificationSpec {
+    pub trial_count: u16,
+    pub duration_steps: Step,
+    pub failure_grace_steps: Step,
+    pub criteria: Vec<ContractCriterion>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContractGradeBands {
+    pub throughput: [Frac; CONTRACT_GRADE_BANDS],
+    pub resilience: [Frac; CONTRACT_GRADE_BANDS],
+    pub economy: [Frac; CONTRACT_GRADE_BANDS],
+    pub complexity: [Frac; CONTRACT_GRADE_BANDS],
+}
+
+/// One immutable, content-hashed automation contract.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContractSpec {
+    pub id: String,
+    pub order: u16,
+    pub title_key: String,
+    pub brief_key: String,
+    pub success_key: String,
+    pub failure_key: String,
+    pub guidance_keys: Vec<String>,
+    pub opening: ContractOpening,
+    pub prerequisites: Vec<String>,
+    pub capabilities: ContractCapabilities,
+    pub unlocks: ContractUnlocks,
+    pub limits: ContractLimits,
+    pub commissioning: CommissioningSpec,
+    pub qualification: QualificationSpec,
+    pub grade_bands: ContractGradeBands,
+}
+
+impl ContractCriterion {
+    pub fn written(&self) -> String {
+        let mut out = String::new();
+        let mut object = Obj::new(&mut out);
+        object.text("aggregation", self.aggregation.name());
+        object.text("comparison", self.comparison.name());
+        object.text("id", &self.id);
+        object.text("metric", self.metric.name());
+        {
+            let (kind, id) = self.source.parts();
+            let mut source = object.object("source");
+            source.int_or_null("id", id.map(i64::from));
+            source.text("kind", kind);
+            source.end();
+        }
+        object.int("threshold", self.threshold);
+        object.int("window_steps", i64::from(self.window_steps));
+        object.end();
+        out
+    }
+}
+
+impl ContractSpec {
+    /// Resolves the temporary chapter adapter into this contract's own opening
+    /// assembly. Empty subset lists retain the complete legacy opening; a
+    /// populated list is an explicit, content-hashed inclusion boundary.
+    pub fn establish(&self, content: &Content) -> Result<(FieldState, ViewDeclaration), Fault> {
+        let chapter = content
+            .chapters
+            .iter()
+            .find(|held| held.id == self.opening.chapter())
+            .ok_or_else(|| Fault::because(Code::ContentInvalid, "opening"))?;
+        let form = content
+            .form(self.opening.form())
+            .ok_or_else(|| Fault::because(Code::ContentInvalid, "opening"))?;
+        let (mut field, mut view) = establish(chapter, form)?;
+        let components = self.opening.component_ids();
+        let current_duties = self.opening.current_duties();
+        let currents = self.opening.current_ids();
+        let routes = self.opening.route_ids();
+        if !components.is_empty() {
+            field.ports.retain(|port| {
+                port.kind == NodeKind::Form || components.binary_search(&port.node).is_ok()
+            });
+        }
+        if !routes.is_empty() {
+            field.routes.retain(|route| routes.binary_search(&route.route).is_ok());
+            field
+                .route_controls
+                .retain(|control| routes.binary_search(&control.route).is_ok());
+        }
+        if !currents.is_empty() {
+            field
+                .currents
+                .retain(|current| currents.binary_search(&current.id).is_ok());
+        }
+        let nodes: BTreeSet<u32> = field.ports.iter().map(|port| port.node).collect();
+        field.routes.retain(|route| nodes.contains(&route.tail) && nodes.contains(&route.head));
+        let route_ids: BTreeSet<u32> = field.routes.iter().map(|route| route.route).collect();
+        field
+            .route_controls
+            .retain(|control| route_ids.contains(&control.route));
+        field.physical_compartment.members.retain(|node| nodes.contains(node));
+        field.boundaries.authored = field
+            .boundaries
+            .authored
+            .iter()
+            .map(|boundary| {
+                boundary.iter().copied().filter(|node| nodes.contains(node)).collect::<Vec<_>>()
+            })
+            .filter(|boundary| !boundary.is_empty())
+            .collect();
+        field.boundaries.drawn.clear();
+        view.inside.retain(|node| nodes.contains(node));
+        for layer in &mut field.layers {
+            layer.port_ids = field
+                .ports
+                .iter()
+                .filter(|port| port.layer == layer.layer && port.kind != NodeKind::Form)
+                .map(|port| port.node)
+                .collect();
+            layer.current_ids = field
+                .currents
+                .iter()
+                .filter(|current| current.layer == layer.layer)
+                .map(|current| current.id)
+                .collect();
+        }
+        field.next_node_id = field
+            .ports
+            .iter()
+            .map(|port| port.node)
+            .max()
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or_else(|| Fault::field("component_ids"))?;
+        field.next_route_id = field
+            .routes
+            .iter()
+            .map(|route| route.route)
+            .max()
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or_else(|| Fault::field("route_ids"))?;
+        crate::state::RegimeSpec::named(self.opening.regime())?.apply(&mut field);
+        for authored in current_duties {
+            let current = field
+                .currents
+                .iter_mut()
+                .find(|current| current.id == authored.current)
+                .ok_or_else(|| Fault::field("current_duties"))?;
+            current.duty = authored.duty;
+        }
+        field::validate(&field)?;
+        field::establishable(&field)?;
+        field::establishable_view(&view, &field)?;
+        Ok((field, view))
+    }
+
+    /// Compiles the first contract criteria into the standing authoritative
+    /// rolling-window engine. The v1 content shape deliberately admits only
+    /// the metric family that engine can resolve exactly.
+    pub fn function_criterion(
+        &self,
+    ) -> Result<crate::criterion::FunctionCriterionSpec, Fault> {
+        let mut components = Vec::new();
+        let mut routes = Vec::new();
+        let mut route_floor = None;
+        let mut leakage_ceiling = None;
+        let mut hands_off_steps = None;
+        let mut window_steps = None;
+        for criterion in &self.qualification.criteria {
+            match (criterion.metric, criterion.source) {
+                (CriterionMetric::StoredCharge, CriterionSource::Component(node)) => {
+                    components.push(crate::criterion::ComponentRequirement::new(
+                        node,
+                        criterion.threshold,
+                    )?);
+                    match window_steps {
+                        None => window_steps = Some(criterion.window_steps),
+                        Some(window) if window == criterion.window_steps => {}
+                        _ => return Err(Fault::field("criteria")),
+                    }
+                }
+                (CriterionMetric::AcceptedFlow, CriterionSource::Route(route)) => {
+                    routes.push(route);
+                    match route_floor {
+                        None => route_floor = Some(criterion.threshold),
+                        Some(floor) if floor == criterion.threshold => {}
+                        _ => return Err(Fault::field("criteria")),
+                    }
+                    match window_steps {
+                        None => window_steps = Some(criterion.window_steps),
+                        Some(window) if window == criterion.window_steps => {}
+                        _ => return Err(Fault::field("criteria")),
+                    }
+                }
+                (CriterionMetric::LeakageRatio, CriterionSource::Field) => {
+                    if leakage_ceiling.replace(criterion.threshold).is_some() {
+                        return Err(Fault::field("criteria"));
+                    }
+                    match window_steps {
+                        None => window_steps = Some(criterion.window_steps),
+                        Some(window) if window == criterion.window_steps => {}
+                        _ => return Err(Fault::field("criteria")),
+                    }
+                }
+                (CriterionMetric::HandsOffSteps, CriterionSource::Field) => {
+                    if hands_off_steps.replace(criterion.threshold as Step).is_some() {
+                        return Err(Fault::field("criteria"));
+                    }
+                }
+                _ => return Err(Fault::field("criteria")),
+            }
+        }
+        components.sort_by_key(crate::criterion::ComponentRequirement::node);
+        routes.sort_unstable();
+        crate::criterion::FunctionCriterionSpec::new(
+            routes,
+            route_floor.unwrap_or(0),
+            components,
+            leakage_ceiling.ok_or_else(|| Fault::field("criteria"))?,
+            window_steps.ok_or_else(|| Fault::field("criteria"))?,
+            self.qualification.failure_grace_steps,
+            hands_off_steps.ok_or_else(|| Fault::field("criteria"))?,
+        )
+    }
+
+    fn catalog_written(
+        &self,
+        assembly_template_hash: &str,
+        component_count: usize,
+        generator_spec_hash: &str,
+        route_count: usize,
+        supply_cycles: &[CurrentState],
+        completed: &BTreeSet<String>,
+    ) -> String {
+        let missing: Vec<&str> = self
+            .prerequisites
+            .iter()
+            .filter(|required| !completed.contains(*required))
+            .map(String::as_str)
+            .collect();
+        let retained_pass = completed.contains(&self.id);
+        let available = retained_pass || missing.is_empty();
+        let mut out = String::new();
+        let mut object = Obj::new(&mut out);
+        object.bool("available", available);
+        object.text("brief_key", &self.brief_key);
+        {
+            let mut capabilities = object.object("capabilities");
+            {
+                let mut actions = capabilities.list("actions");
+                for action in &self.capabilities.actions {
+                    actions.text(action);
+                }
+                actions.end();
+            }
+            {
+                let mut conditions = capabilities.list("conditions");
+                for condition in &self.capabilities.conditions {
+                    conditions.text(condition);
+                }
+                conditions.end();
+            }
+            {
+                let mut hardware = capabilities.list("hardware");
+                for capability in &self.capabilities.hardware {
+                    hardware.text(capability);
+                }
+                hardware.end();
+            }
+            capabilities.end();
+        }
+        {
+            let mut commissioning = object.object("commissioning");
+            commissioning.int("expected_minutes", i64::from(self.commissioning.expected_minutes));
+            commissioning.int(
+                "maximum_wall_wait_seconds",
+                i64::from(self.commissioning.maximum_wall_wait_seconds),
+            );
+            commissioning.end();
+        }
+        {
+            let mut criteria = object.list("criteria");
+            for criterion in &self.qualification.criteria {
+                criteria.raw(&criterion.written());
+            }
+            criteria.end();
+        }
+        object.text("failure_key", &self.failure_key);
+        {
+            let mut grades = object.object("grade_bands");
+            for (key, values) in [
+                ("complexity", &self.grade_bands.complexity),
+                ("economy", &self.grade_bands.economy),
+                ("resilience", &self.grade_bands.resilience),
+                ("throughput", &self.grade_bands.throughput),
+            ] {
+                let mut list = grades.list(key);
+                for value in values {
+                    list.int(*value);
+                }
+                list.end();
+            }
+            grades.end();
+        }
+        {
+            let mut guidance = object.list("guidance_keys");
+            for key in &self.guidance_keys {
+                guidance.text(key);
+            }
+            guidance.end();
+        }
+        object.text("id", &self.id);
+        {
+            let mut limits = object.object("limits");
+            limits.int("max_components", i64::from(self.limits.max_components));
+            limits.int("max_routes", i64::from(self.limits.max_routes));
+            limits.int(
+                "max_rules_per_component",
+                i64::from(self.limits.max_rules_per_component),
+            );
+            limits.end();
+        }
+        {
+            let mut list = object.list("missing_prerequisites");
+            for required in &missing {
+                list.text(required);
+            }
+            list.end();
+        }
+        {
+            let mut opening = object.object("opening");
+            opening.text("assembly_template_hash", assembly_template_hash);
+            opening.int("component_count", component_count as i64);
+            opening.text("form", self.opening.form());
+            opening.text("generator_spec_hash", generator_spec_hash);
+            opening.text("regime", self.opening.regime());
+            opening.int("route_count", route_count as i64);
+            {
+                let mut cycles = opening.list("supply_cycles");
+                for current in supply_cycles {
+                    let mut cycle = cycles.object();
+                    cycle.int("current", i64::from(current.id));
+                    cycle.int("duty", current.duty);
+                    cycle.int("on_steps", i64::from(field::current_on_steps(current)));
+                    cycle.int("period", i64::from(current.period));
+                    cycle.end();
+                }
+                cycles.end();
+            }
+            opening.end();
+        }
+        object.int("order", i64::from(self.order));
+        {
+            let mut prerequisites = object.list("prerequisites");
+            for required in &self.prerequisites {
+                prerequisites.text(required);
+            }
+            prerequisites.end();
+        }
+        {
+            let mut qualification = object.object("qualification");
+            qualification.int(
+                "duration_steps",
+                i64::from(self.qualification.duration_steps),
+            );
+            qualification.int(
+                "failure_grace_steps",
+                i64::from(self.qualification.failure_grace_steps),
+            );
+            qualification.int("trial_count", i64::from(self.qualification.trial_count));
+            qualification.end();
+        }
+        object.text(
+            "status",
+            if retained_pass { "completed" } else if available { "available" } else { "locked" },
+        );
+        object.text("success_key", &self.success_key);
+        object.text("title_key", &self.title_key);
+        {
+            let mut unlocks = object.object("unlocks");
+            {
+                let mut actions = unlocks.list("actions");
+                for action in &self.unlocks.actions {
+                    actions.text(action);
+                }
+                actions.end();
+            }
+            {
+                let mut conditions = unlocks.list("conditions");
+                for condition in &self.unlocks.conditions {
+                    conditions.text(condition);
+                }
+                conditions.end();
+            }
+            {
+                let mut hardware = unlocks.list("hardware");
+                for capability in &self.unlocks.hardware {
+                    hardware.text(capability);
+                }
+                hardware.end();
+            }
+            match &self.unlocks.next_contract {
+                Some(next) => unlocks.text("next_contract", next),
+                None => unlocks.null("next_contract"),
+            };
+            unlocks.end();
+        }
+        object.end();
+        out
+    }
+}
+
 /// One starting Form's authored parameters.
 ///
 /// Every one of them is authored per Form and copied into the state the run
 /// stands on when the Field is established: `route_reach`, `forecast_depth`,
 /// and `steer_scale` onto the Form, and `upkeep_rate`, `capacity`, and
-/// `reserve` onto the Form's own Node. Which of
-/// them a rule reads is the rule's business, and `reserve` is authored here all
-/// the same though the rule that spends it is pending, because the parameter is
-/// the Form's and only its rule is. Physical leakage is chapter-authored and
+/// `reserve` onto the Form's own Node. Which of them a rule reads is the rule's
+/// business; Vault's conserving bank and discharge rule spends `reserve`, and
+/// no other Form receives that behavior. Physical leakage is chapter-authored and
 /// therefore cannot change when another Form opens the same chapter.
 #[derive(Clone, Debug)]
 pub struct FormContent {
@@ -168,7 +789,7 @@ pub struct FormContent {
 /// other kind is content this build cannot apply, and is refused rather than
 /// ignored — an ability that reached the Field as nothing would be a promise
 /// the run does not keep.
-pub const ABILITY_KINDS: [&str; 2] = ["linked_forms", "trail"];
+pub const ABILITY_KINDS: [&str; 3] = ["linked_forms", "trail", "junction"];
 
 /// How many Forms one `linked_forms` ability may stand beside the controlled
 /// one: the Forms-per-Run cap less the controlled Form itself.
@@ -196,6 +817,10 @@ pub enum Ability {
     /// entry falls due `delay` steps later and delivers `magnitude` to the
     /// Nodes inside `radius` of where it was left.
     Trail { period: u16, delay: u16, radius: Fx, magnitude: Fx },
+    /// Knot carries a finite number of typed junction blanks. Deploying one
+    /// consumes the authored Charge cost and stands up one upkeep-paying
+    /// Module with the authored operating limit.
+    Junction { blanks: u8, deploy_cost: Fx, capacity: Fx, upkeep_rate: Fx },
 }
 
 /// What an objective's authored condition counts, and how a step that does not
@@ -206,13 +831,17 @@ pub enum Condition {
     InCurrent { current: u16, steps: i64 },
     /// The controlled Form stands within `radius` of a point on a layer.
     HoldPosition { layer: u8, pos: Vec2, radius: Fx, steps: i64 },
+    /// The controlled Form's own Component holds at least this much stored Q.
+    StoredCharge { amount: Fx },
     /// A controlled Form emitted a Pulse. Cumulative.
     PulseReleased { count: i64 },
     /// Every named Port stands open.
     PortsOpen { ports: Vec<u32> },
     /// Every named Route carried Charge on the same step.
     RoutesFlowing { routes: Vec<u32> },
-    /// Every named Route carried Charge and no named Node stood overloaded.
+    /// Every named Route carried Charge and no named Node stood in unrelieved
+    /// overload. A one-hop occupancy overshoot with an active outgoing Route
+    /// is transport in flight, not a collapsed circuit.
     /// The one condition whose failure is read as a recoverable setback.
     PatternHeld { routes: Vec<u32>, nodes: Vec<u32>, steps: i64 },
     /// The physical compartment's membership no longer matches the chapter's
@@ -229,6 +858,7 @@ impl Condition {
             | Condition::HoldPosition { steps, .. }
             | Condition::PatternHeld { steps, .. }
             | Condition::CompartmentReshaped { steps } => *steps,
+            Condition::StoredCharge { amount } => *amount,
             Condition::PulseReleased { count } => *count,
             Condition::PortsOpen { .. } | Condition::RoutesFlowing { .. } => 1,
         }
@@ -261,46 +891,65 @@ impl Condition {
                     (Some(current), Some(form)) => stands_in(current, form.pos, form.layer),
                     _ => false,
                 };
-                Outcome { met, setback: false }
+                Outcome { met, setback: false, progress: None }
             }
             Condition::HoldPosition { layer, pos, radius, .. } => {
                 let met = reading.controlled().is_some_and(|form| {
                     form.layer == *layer && within(form.pos, form.layer, *pos, *layer, *radius)
                 });
-                Outcome { met, setback: false }
+                Outcome { met, setback: false, progress: None }
+            }
+            Condition::StoredCharge { amount } => {
+                let held = reading
+                    .controlled()
+                    .and_then(|form| reading.field.ports.iter().find(|port| port.node == form.node))
+                    .map_or(0, |port| port.q.max(0));
+                let progress = if *amount <= 0 {
+                    FRAC_ONE
+                } else {
+                    ((held.saturating_mul(FRAC_ONE)) / *amount).clamp(0, FRAC_ONE)
+                };
+                Outcome { met: held >= *amount, setback: false, progress: Some(progress) }
             }
             Condition::PulseReleased { .. } => Outcome {
                 met: reading.cues.iter().any(|cue| cue.kind == field::CUE_PULSE_EMITTED),
                 setback: false,
+                progress: None,
             },
             Condition::PortsOpen { ports } => Outcome {
                 met: ports.iter().all(|node| {
                     reading.field.ports.iter().any(|port| port.node == *node && port.open)
                 }),
                 setback: false,
+                progress: None,
             },
             Condition::RoutesFlowing { routes } => {
-                Outcome { met: reading.flowing(routes), setback: false }
+                Outcome { met: reading.flowing(routes), setback: false, progress: None }
             }
             Condition::PatternHeld { routes, nodes, .. } => {
                 let flowing = reading.flowing(routes);
                 let strained = nodes.iter().any(|node| {
-                    reading
-                        .field
-                        .ports
-                        .iter()
-                        .any(|port| port.node == *node && port.q > port.capacity)
+                    reading.field.ports.iter().any(|port| {
+                        if port.node != *node || port.q <= port.capacity {
+                            return false;
+                        }
+                        let relief = reading.field.routes.iter().any(|route| {
+                            route.tail == port.node && route.flow > 0
+                        });
+                        !relief
+                    })
                 });
                 // The authored break: the pattern is standing, and one of its
-                // Nodes is carrying more than it can hold. Nothing about it is
-                // terminal — the Charge above the threshold sheds, the state
-                // says so, and the run carries on either way.
-                Outcome { met: flowing && !strained, setback: strained }
+                // Nodes has no active relief.
+                // Nothing about it is terminal: excess still sheds and the
+                // run carries on either way.
+                Outcome { met: flowing && !strained, setback: strained, progress: None }
             }
             Condition::CompartmentReshaped { .. } => Outcome {
                 met: reading.field.physical_compartment.members.as_slice()
                     != opening_compartment.members.as_slice(),
                 setback: false,
+                progress: None,
             },
         }
     }
@@ -311,6 +960,8 @@ struct Outcome {
     met: bool,
     /// True while the authored recoverable setback stands.
     setback: bool,
+    /// An authoritative absolute completion share, for quantity thresholds.
+    progress: Option<Frac>,
 }
 
 /// True when a placed Node stands in a current's band: the vertex rule, the
@@ -682,6 +1333,8 @@ pub struct Content {
     pub forms: Vec<FormContent>,
     /// The six authored pressure tables the stage machine reads.
     pub pressures: crate::pressure::Schedule,
+    /// Automation contracts in manifest order.
+    pub contracts: Vec<ContractSpec>,
 }
 
 impl Content {
@@ -692,23 +1345,509 @@ impl Content {
     pub fn form(&self, id: &str) -> Option<&FormContent> {
         self.forms.iter().find(|held| held.id == id)
     }
+
+    pub fn contract(&self, id: &str) -> Option<&ContractSpec> {
+        self.contracts.iter().find(|held| held.id == id)
+    }
+
+    /// Canonical ladder facts. `completed` is empty until M-021 can supply
+    /// retained qualification evidence; no shell-authored threshold enters the
+    /// response.
+    pub fn contract_catalog_written(&self, completed: &[String]) -> Result<String, Fault> {
+        let completed: BTreeSet<String> = completed.iter().cloned().collect();
+        let mut out = String::new();
+        let mut object = Obj::new(&mut out);
+        object.int("contract_version", CONTRACT_VERSION);
+        {
+            let mut contracts = object.list("contracts");
+            for contract in &self.contracts {
+                let (field, _) = contract.establish(self)?;
+                let generator = crate::state::GeneratorSpec::for_field(&field)
+                    .with_design(
+                        0,
+                        crate::policy::FrozenLocalPolicy::empty(),
+                        field.route_controls.clone(),
+                    )?;
+                contracts.raw(&contract.catalog_written(
+                    &field.embodied_hash(),
+                    field.ports.len(),
+                    &generator.specification_hash(),
+                    field.routes.len(),
+                    &field.currents,
+                    &completed,
+                ));
+            }
+            contracts.end();
+        }
+        object.end();
+        Ok(out)
+    }
+}
+
+fn machine_id(id: &str) -> bool {
+    id.starts_with(|first: char| first.is_ascii_lowercase())
+        && id
+            .chars()
+            .all(|held| held.is_ascii_lowercase() || held.is_ascii_digit() || held == '_')
+}
+
+fn read_unique_texts(value: &Json, key: &str, cap: usize) -> Result<Vec<String>, Fault> {
+    let mut unique = BTreeSet::new();
+    let mut found = Vec::new();
+    for entry in read::list(value, key, cap)? {
+        let id = entry.as_text().filter(|held| machine_id(held)).ok_or_else(|| Fault::field(key))?;
+        if !unique.insert(id.to_string()) {
+            return Err(Fault::field(key));
+        }
+        found.push(id.to_string());
+    }
+    Ok(found)
+}
+
+fn read_copy_keys(text: &str) -> Result<BTreeSet<String>, Fault> {
+    let catalog = parse(text).map_err(|reason| Fault::because(Code::ContentInvalid, reason))?;
+    read::exact_keys(&catalog, "copy_catalog", &["catalogVersion", "entries", "locale", "note"])
+        .map_err(invalid)?;
+    read::int(&catalog, "catalogVersion", 1, 1).map_err(invalid)?;
+    if read::text(&catalog, "locale").map_err(invalid)? != "en" {
+        return Err(Fault::because(Code::ContentInvalid, "locale"));
+    }
+    let _ = read::list(&catalog, "note", 64).map_err(invalid)?;
+    let Json::Map(entries) = read::map(&catalog, "entries").map_err(invalid)? else {
+        unreachable!("read::map already established the map shape")
+    };
+    let mut keys = BTreeSet::new();
+    for (key, entry) in entries {
+        read::exact_keys(entry, "copy_entry", &["kind", "text"]).map_err(invalid)?;
+        if key.is_empty()
+            || read::text(entry, "kind").map_err(invalid)?.is_empty()
+            || read::text(entry, "text").map_err(invalid)?.is_empty()
+            || !keys.insert(key.clone())
+        {
+            return Err(Fault::because(Code::ContentInvalid, "copy_catalog"));
+        }
+    }
+    Ok(keys)
+}
+
+fn read_contract_manifest(text: &str) -> Result<Vec<String>, Fault> {
+    let manifest = parse(text).map_err(|reason| Fault::because(Code::ContentInvalid, reason))?;
+    read::exact_keys(&manifest, "contract_manifest", &["contract_version", "contracts"])
+        .map_err(invalid)?;
+    read::int(&manifest, "contract_version", CONTRACT_VERSION, CONTRACT_VERSION)
+        .map_err(invalid)?;
+    read_unique_texts(&manifest, "contracts", CONTRACTS_CAP).map_err(invalid)
+}
+
+fn read_contract_opening(value: &Json) -> Result<ContractOpening, Fault> {
+    read::exact_keys(
+        value,
+        "opening",
+        &[
+            "chapter",
+            "component_ids",
+            "current_duties",
+            "current_ids",
+            "form",
+            "kind",
+            "regime",
+            "route_ids",
+        ],
+    )?;
+    if read::text(value, "kind")? != "legacy_chapter" {
+        return Err(Fault::field("kind"));
+    }
+    let chapter = read::text(value, "chapter")?;
+    let form = read::text(value, "form")?;
+    let regime = read::text(value, "regime")?;
+    if !machine_id(chapter) || !machine_id(form) || !CONTRACT_REGIME_IDS.contains(&regime) {
+        return Err(Fault::field("opening"));
+    }
+    let component_ids = read::ids(value, "component_ids", NODES_PER_RUN, i64::from(u32::MAX))?;
+    let mut current_duties = Vec::new();
+    for entry in read::list(value, "current_duties", CURRENTS_PER_CHAPTER)? {
+        read::exact_keys(entry, "current_duties", &["current", "duty"])?;
+        current_duties.push(ContractCurrentDuty {
+            current: read::int(entry, "current", 1, i64::from(u16::MAX))? as u16,
+            duty: read::int(entry, "duty", 1, FRAC_ONE)?,
+        });
+    }
+    if !read::ascending(
+        &current_duties.iter().map(|authored| u32::from(authored.current)).collect::<Vec<_>>(),
+    ) {
+        return Err(Fault::field("current_duties"));
+    }
+    let route_ids = read::ids(value, "route_ids", ROUTES_PER_RUN, i64::from(u32::MAX))?;
+    let current_ids = read::ids(
+        value,
+        "current_ids",
+        CURRENTS_PER_CHAPTER,
+        i64::from(u16::MAX),
+    )?
+    .into_iter()
+    .map(|id| id as u16)
+    .collect();
+    Ok(ContractOpening::LegacyChapter {
+        chapter: chapter.to_string(),
+        component_ids,
+        current_duties,
+        current_ids,
+        form: form.to_string(),
+        regime: regime.to_string(),
+        route_ids,
+    })
+}
+
+fn read_optional_machine_id(value: &Json, key: &str) -> Result<Option<String>, Fault> {
+    match read::at(value, key)? {
+        Json::Null => Ok(None),
+        Json::Text(id) if machine_id(id) => Ok(Some(id.clone())),
+        _ => Err(Fault::field(key)),
+    }
+}
+
+fn read_contract_tokens(
+    value: &Json,
+    key: &str,
+    cap: usize,
+) -> Result<(Vec<String>, Vec<String>, Vec<String>), Fault> {
+    let actions = read_unique_texts(value, "actions", cap)?;
+    let conditions = read_unique_texts(value, "conditions", cap)?;
+    let hardware = read_unique_texts(value, "hardware", cap)?;
+    if !actions.iter().all(|kind| crate::policy::action_kind_known(kind)) {
+        return Err(Fault::field("actions"));
+    }
+    if !conditions.iter().all(|kind| crate::policy::condition_kind_known(kind)) {
+        return Err(Fault::field("conditions"));
+    }
+    if !hardware.iter().all(|kind| CONTRACT_HARDWARE_KINDS.contains(&kind.as_str())) {
+        return Err(Fault::field("hardware"));
+    }
+    if actions.is_empty() && conditions.is_empty() && hardware.is_empty() && key == "capabilities" {
+        return Err(Fault::field(key));
+    }
+    Ok((actions, conditions, hardware))
+}
+
+fn capability_dependencies_valid(
+    actions: &[String],
+    conditions: &[String],
+    hardware: &[String],
+) -> bool {
+    let has = |kind: &str| hardware.iter().any(|held| held == kind);
+    let needs_mobile = actions
+        .iter()
+        .any(|kind| matches!(kind.as_str(), "seek_supply" | "seek_port" | "seek_signal" | "change_depth"));
+    !(needs_mobile && !has("mobile_component")
+        || actions.iter().any(|kind| kind == "couple")
+            && (!has("mobile_component") || !has("coupler"))
+        || actions.iter().any(|kind| kind == "set_interface") && !has("interface_actuator")
+        || actions.iter().any(|kind| kind == "set_route") && !has("route_actuator")
+        || actions.iter().any(|kind| kind == "use_ability") && !has("finite_reserve")
+        || conditions.iter().any(|kind| matches!(kind.as_str(), "supply" | "target_in_range"))
+            && !has("local_sensor")
+        || conditions.iter().any(|kind| {
+            matches!(kind.as_str(), "route_flow_below" | "route_flow_above")
+        }) && !has("route_actuator"))
+}
+
+fn read_contract_capabilities(value: &Json) -> Result<ContractCapabilities, Fault> {
+    read::exact_keys(value, "capabilities", &["actions", "conditions", "hardware"])?;
+    let (actions, conditions, hardware) =
+        read_contract_tokens(value, "capabilities", CONTRACT_CAPABILITIES_CAP)?;
+    if !capability_dependencies_valid(&actions, &conditions, &hardware) {
+        return Err(Fault::field("hardware"));
+    }
+    Ok(ContractCapabilities { actions, conditions, hardware })
+}
+
+fn read_contract_unlocks(
+    value: &Json,
+    capabilities: &ContractCapabilities,
+) -> Result<ContractUnlocks, Fault> {
+    read::exact_keys(value, "unlocks", &["actions", "conditions", "hardware", "next_contract"])?;
+    let (actions, conditions, hardware) =
+        read_contract_tokens(value, "unlocks", CONTRACT_UNLOCKS_CAP)?;
+    if actions.iter().any(|kind| capabilities.actions.contains(kind))
+        || conditions.iter().any(|kind| capabilities.conditions.contains(kind))
+        || hardware.iter().any(|kind| capabilities.hardware.contains(kind))
+    {
+        return Err(Fault::field("unlocks"));
+    }
+    let mut available_actions = capabilities.actions.clone();
+    available_actions.extend(actions.iter().cloned());
+    let mut available_conditions = capabilities.conditions.clone();
+    available_conditions.extend(conditions.iter().cloned());
+    let mut available_hardware = capabilities.hardware.clone();
+    available_hardware.extend(hardware.iter().cloned());
+    if !capability_dependencies_valid(
+        &available_actions,
+        &available_conditions,
+        &available_hardware,
+    ) {
+        return Err(Fault::field("hardware"));
+    }
+    Ok(ContractUnlocks {
+        actions,
+        conditions,
+        hardware,
+        next_contract: read_optional_machine_id(value, "next_contract")?,
+    })
+}
+
+fn read_criterion_source(value: &Json) -> Result<CriterionSource, Fault> {
+    read::exact_keys(value, "source", &["id", "kind"])?;
+    let id = read::int_or_null(value, "id", 1, i64::from(u32::MAX))?.map(|held| held as u32);
+    Ok(match read::text(value, "kind")? {
+        "field" if id.is_none() => CriterionSource::Field,
+        "component" => CriterionSource::Component(id.ok_or_else(|| Fault::field("id"))?),
+        "route" => CriterionSource::Route(id.ok_or_else(|| Fault::field("id"))?),
+        _ => return Err(Fault::field("kind")),
+    })
+}
+
+fn read_contract_criterion(value: &Json) -> Result<ContractCriterion, Fault> {
+    read::exact_keys(
+        value,
+        "criterion",
+        &["aggregation", "comparison", "id", "metric", "source", "threshold", "window_steps"],
+    )?;
+    let id = read::text(value, "id")?;
+    if !machine_id(id) {
+        return Err(Fault::field("id"));
+    }
+    let source = read_criterion_source(read::map(value, "source")?)?;
+    let metric = match read::text(value, "metric")? {
+        "stored_charge" => CriterionMetric::StoredCharge,
+        "accepted_flow" => CriterionMetric::AcceptedFlow,
+        "leakage_ratio" => CriterionMetric::LeakageRatio,
+        "hands_off_steps" => CriterionMetric::HandsOffSteps,
+        _ => return Err(Fault::field("metric")),
+    };
+    let comparison = match read::text(value, "comparison")? {
+        "at_least" => CriterionComparison::AtLeast,
+        "at_most" => CriterionComparison::AtMost,
+        _ => return Err(Fault::field("comparison")),
+    };
+    let aggregation = match read::text(value, "aggregation")? {
+        "minimum" => CriterionAggregation::Minimum,
+        "maximum" => CriterionAggregation::Maximum,
+        "final" => CriterionAggregation::Final,
+        _ => return Err(Fault::field("aggregation")),
+    };
+    let threshold_high = match metric {
+        CriterionMetric::StoredCharge => STORED_BOUND - 1,
+        CriterionMetric::AcceptedFlow => crate::field::ROUTE_CAPACITY_CAP,
+        CriterionMetric::LeakageRatio => FRAC_ONE,
+        CriterionMetric::HandsOffSteps => i64::from(u16::MAX),
+    };
+    let expected = match metric {
+        CriterionMetric::StoredCharge => {
+            (matches!(source, CriterionSource::Component(_)), CriterionComparison::AtLeast, CriterionAggregation::Minimum)
+        }
+        CriterionMetric::AcceptedFlow => {
+            (matches!(source, CriterionSource::Route(_)), CriterionComparison::AtLeast, CriterionAggregation::Minimum)
+        }
+        CriterionMetric::LeakageRatio => {
+            (matches!(source, CriterionSource::Field), CriterionComparison::AtMost, CriterionAggregation::Maximum)
+        }
+        CriterionMetric::HandsOffSteps => {
+            (matches!(source, CriterionSource::Field), CriterionComparison::AtLeast, CriterionAggregation::Final)
+        }
+    };
+    if !expected.0 || comparison != expected.1 || aggregation != expected.2 {
+        return Err(Fault::field("criterion"));
+    }
+    Ok(ContractCriterion {
+        id: id.to_string(),
+        source,
+        metric,
+        comparison,
+        threshold: read::int(value, "threshold", 0, threshold_high)?,
+        aggregation,
+        window_steps: read::int(value, "window_steps", 1, i64::from(u16::MAX))? as Step,
+    })
+}
+
+fn read_qualification(value: &Json) -> Result<QualificationSpec, Fault> {
+    read::exact_keys(
+        value,
+        "qualification",
+        &["criteria", "duration_steps", "failure_grace_steps", "trial_count"],
+    )?;
+    let duration_steps = read::int(value, "duration_steps", 1, i64::from(u16::MAX))? as Step;
+    let failure_grace_steps =
+        read::int(value, "failure_grace_steps", 0, i64::from(duration_steps))? as Step;
+    let mut criteria = Vec::new();
+    let mut ids = BTreeSet::new();
+    for entry in read::list(value, "criteria", CONTRACT_CRITERIA_CAP)? {
+        let criterion = read_contract_criterion(entry)?;
+        if criterion.window_steps > duration_steps || !ids.insert(criterion.id.clone()) {
+            return Err(Fault::field("criteria"));
+        }
+        criteria.push(criterion);
+    }
+    if criteria.is_empty()
+        || !criteria.iter().any(|held| held.metric == CriterionMetric::HandsOffSteps)
+    {
+        return Err(Fault::field("criteria"));
+    }
+    Ok(QualificationSpec {
+        trial_count: read::int(value, "trial_count", 1, 64)? as u16,
+        duration_steps,
+        failure_grace_steps,
+        criteria,
+    })
+}
+
+fn read_grade_band(value: &Json, key: &str, ascending: bool) -> Result<[Frac; CONTRACT_GRADE_BANDS], Fault> {
+    let list = read::list(value, key, CONTRACT_GRADE_BANDS)?;
+    if list.len() != CONTRACT_GRADE_BANDS {
+        return Err(Fault::field(key));
+    }
+    let mut values = [0; CONTRACT_GRADE_BANDS];
+    for (index, entry) in list.iter().enumerate() {
+        values[index] = entry
+            .as_int()
+            .filter(|held| (0..=FRAC_ONE).contains(held))
+            .ok_or_else(|| Fault::field(key))?;
+    }
+    let ordered = if ascending {
+        values.windows(2).all(|pair| pair[0] < pair[1])
+    } else {
+        values.windows(2).all(|pair| pair[0] > pair[1])
+    };
+    if !ordered {
+        return Err(Fault::field(key));
+    }
+    Ok(values)
+}
+
+fn read_grade_bands(value: &Json) -> Result<ContractGradeBands, Fault> {
+    read::exact_keys(
+        value,
+        "grade_bands",
+        &["complexity", "economy", "resilience", "throughput"],
+    )?;
+    Ok(ContractGradeBands {
+        throughput: read_grade_band(value, "throughput", true)?,
+        resilience: read_grade_band(value, "resilience", true)?,
+        economy: read_grade_band(value, "economy", true)?,
+        complexity: read_grade_band(value, "complexity", false)?,
+    })
+}
+
+fn read_contract_spec(value: &Json) -> Result<ContractSpec, Fault> {
+    read::exact_keys(
+        value,
+        "contract",
+        &[
+            "brief_key",
+            "capabilities",
+            "commissioning",
+            "failure_key",
+            "grade_bands",
+            "guidance_keys",
+            "id",
+            "limits",
+            "opening",
+            "order",
+            "prerequisites",
+            "qualification",
+            "success_key",
+            "title_key",
+            "unlocks",
+        ],
+    )?;
+    let id = read::text(value, "id")?;
+    if !machine_id(id) {
+        return Err(Fault::field("id"));
+    }
+    let copy_key = |key: &str| -> Result<String, Fault> {
+        let found = read::text(value, key)?;
+        if is_key_of("contract.", found) {
+            Ok(found.to_string())
+        } else {
+            Err(Fault::field(key))
+        }
+    };
+    let mut guidance_keys = Vec::new();
+    let mut guidance_set = BTreeSet::new();
+    for entry in read::list(value, "guidance_keys", CONTRACT_GUIDANCE_CAP)? {
+        let key = entry.as_text().ok_or_else(|| Fault::field("guidance_keys"))?;
+        if !is_key_of("contract.", key) || !guidance_set.insert(key.to_string()) {
+            return Err(Fault::field("guidance_keys"));
+        }
+        guidance_keys.push(key.to_string());
+    }
+    let limits = read::map(value, "limits")?;
+    read::exact_keys(limits, "limits", &["max_components", "max_routes", "max_rules_per_component"])?;
+    let commissioning = read::map(value, "commissioning")?;
+    read::exact_keys(
+        commissioning,
+        "commissioning",
+        &["expected_minutes", "maximum_wall_wait_seconds"],
+    )?;
+    let capabilities = read_contract_capabilities(read::map(value, "capabilities")?)?;
+    let unlocks = read_contract_unlocks(read::map(value, "unlocks")?, &capabilities)?;
+    Ok(ContractSpec {
+        id: id.to_string(),
+        order: read::int(value, "order", 1, CONTRACTS_CAP as i64)? as u16,
+        title_key: copy_key("title_key")?,
+        brief_key: copy_key("brief_key")?,
+        success_key: copy_key("success_key")?,
+        failure_key: copy_key("failure_key")?,
+        guidance_keys,
+        opening: read_contract_opening(read::map(value, "opening")?)?,
+        prerequisites: read_unique_texts(value, "prerequisites", CONTRACT_PREREQUISITES_CAP)?,
+        capabilities,
+        unlocks,
+        limits: ContractLimits {
+            max_components: read::int(limits, "max_components", 1, NODES_PER_RUN as i64)? as u16,
+            max_routes: read::int(limits, "max_routes", 0, ROUTES_PER_RUN as i64)? as u16,
+            max_rules_per_component: read::int(
+                limits,
+                "max_rules_per_component",
+                1,
+                crate::policy::POLICY_RULES_PER_COMPONENT as i64,
+            )? as u8,
+        },
+        commissioning: CommissioningSpec {
+            expected_minutes: read::int(commissioning, "expected_minutes", 1, 120)? as u16,
+            maximum_wall_wait_seconds: read::int(
+                commissioning,
+                "maximum_wall_wait_seconds",
+                0,
+                20,
+            )? as u16,
+        },
+        qualification: read_qualification(read::map(value, "qualification")?)?,
+        grade_bands: read_grade_bands(read::map(value, "grade_bands")?)?,
+    })
 }
 
 /// Reads the bundle the worker hands over at construction.
 ///
-/// The shape is `{ "hash": hex64, "manifest": text, "files": [text] }`, with
-/// the files in manifest order. Every failure here is the `content_invalid`
-/// envelope, which is the one the document names for content that does not
-/// validate at load.
+/// The bundle carries the legacy manifest/files, contract manifest/files, and
+/// copy catalog as exact text. The hash concatenates them in that order. Every
+/// failure here is the `content_invalid` envelope, which is the one the
+/// document names for content that does not validate at load.
 pub fn read_bundle(value: &Json) -> Result<Content, Fault> {
-    read::exact_keys(value, "content", &["files", "hash", "manifest"])
-        .map_err(invalid)?;
+    read::exact_keys(
+        value,
+        "content",
+        &["contract_files", "contract_manifest", "copy_catalog", "files", "hash", "manifest"],
+    )
+    .map_err(invalid)?;
     let hash = read::hex(value, "hash", 64).map_err(invalid)?.to_string();
     let manifest_text = read::text(value, "manifest").map_err(invalid)?;
     let files = read::list(value, "files", MANIFEST_FILES_CAP).map_err(invalid)?;
+    let contract_manifest_text = read::text(value, "contract_manifest").map_err(invalid)?;
+    let contract_files = read::list(value, "contract_files", CONTRACTS_CAP).map_err(invalid)?;
+    let copy_catalog_text = read::text(value, "copy_catalog").map_err(invalid)?;
 
-    // The locked rule, recomputed over exactly the bytes that arrived: the
-    // manifest, then every listed file, in manifest order.
+    // Recompute over exactly the bytes that arrived: legacy manifest/files,
+    // contract manifest/files, then the copy catalog.
     let mut concatenated: Vec<u8> = manifest_text.as_bytes().to_vec();
     let mut texts = Vec::with_capacity(files.len());
     for entry in files {
@@ -716,9 +1855,25 @@ pub fn read_bundle(value: &Json) -> Result<Content, Fault> {
         concatenated.extend_from_slice(text.as_bytes());
         texts.push(text);
     }
+    concatenated.extend_from_slice(contract_manifest_text.as_bytes());
+    let mut contract_texts = Vec::with_capacity(contract_files.len());
+    for entry in contract_files {
+        let text = entry
+            .as_text()
+            .ok_or_else(|| Fault::because(Code::ContentInvalid, "contract_files"))?;
+        concatenated.extend_from_slice(text.as_bytes());
+        contract_texts.push(text);
+    }
+    concatenated.extend_from_slice(copy_catalog_text.as_bytes());
     if crate::json::hex_bytes(&sha256::digest(&concatenated)) != hash {
         return Err(Fault::because(Code::ContentInvalid, "content_hash"));
     }
+
+    let contract_ids = read_contract_manifest(contract_manifest_text)?;
+    if contract_ids.len() != contract_texts.len() {
+        return Err(Fault::because(Code::ContentInvalid, "contract_files"));
+    }
+    let copy_keys = read_copy_keys(copy_catalog_text)?;
 
     let manifest =
         parse(manifest_text).map_err(|reason| Fault::because(Code::ContentInvalid, reason))?;
@@ -794,9 +1949,109 @@ pub fn read_bundle(value: &Json) -> Result<Content, Fault> {
             }
         }
     }
-    let content = Content { hash, version, chapters, forms, pressures };
+    let mut contracts = Vec::with_capacity(contract_ids.len());
+    for (id, text) in contract_ids.iter().zip(contract_texts.iter()) {
+        let file = parse(text).map_err(|reason| Fault::because(Code::ContentInvalid, reason))?;
+        let contract = read_contract_spec(&file).map_err(invalid)?;
+        if &contract.id != id {
+            return Err(Fault::because(Code::ContentInvalid, "contracts"));
+        }
+        contracts.push(contract);
+    }
+    let content = Content { hash, version, chapters, forms, pressures, contracts };
     campaign_valid(&content)?;
+    contracts_valid(&content, &copy_keys)?;
     Ok(content)
+}
+
+fn contracts_valid(content: &Content, copy_keys: &BTreeSet<String>) -> Result<(), Fault> {
+    if content.contracts.is_empty() {
+        return Err(Fault::because(Code::ContentInvalid, "contracts"));
+    }
+    let ids: Vec<&str> = content.contracts.iter().map(|held| held.id.as_str()).collect();
+    for (index, contract) in content.contracts.iter().enumerate() {
+        if usize::from(contract.order) != index + 1 {
+            return Err(Fault::because(Code::ContentInvalid, "order"));
+        }
+        for key in [
+            contract.title_key.as_str(),
+            contract.brief_key.as_str(),
+            contract.success_key.as_str(),
+            contract.failure_key.as_str(),
+        ]
+        .into_iter()
+        .chain(contract.guidance_keys.iter().map(String::as_str))
+        {
+            if !copy_keys.contains(key) {
+                return Err(Fault::because(Code::ContentInvalid, "copy_key"));
+            }
+        }
+        if contract
+            .prerequisites
+            .iter()
+            .any(|required| !ids[..index].contains(&required.as_str()))
+        {
+            return Err(Fault::because(Code::ContentInvalid, "prerequisites"));
+        }
+        let expected_next = ids.get(index + 1).copied();
+        if contract.unlocks.next_contract.as_deref() != expected_next {
+            return Err(Fault::because(Code::ContentInvalid, "next_contract"));
+        }
+        if let Some(next) = content.contracts.get(index + 1) {
+            if !next.prerequisites.iter().any(|required| required == &contract.id) {
+                return Err(Fault::because(Code::ContentInvalid, "prerequisites"));
+            }
+            if contract
+                .unlocks
+                .actions
+                .iter()
+                .any(|kind| !next.capabilities.actions.contains(kind))
+                || contract
+                    .unlocks
+                    .conditions
+                    .iter()
+                    .any(|kind| !next.capabilities.conditions.contains(kind))
+                || contract
+                    .unlocks
+                    .hardware
+                    .iter()
+                    .any(|kind| !next.capabilities.hardware.contains(kind))
+            {
+                return Err(Fault::because(Code::ContentInvalid, "unlocks"));
+            }
+        }
+
+        let (field, _) = contract.establish(content)?;
+        if field.ports.len() > usize::from(contract.limits.max_components)
+            || field.routes.len() > usize::from(contract.limits.max_routes)
+        {
+            return Err(Fault::because(Code::ContentInvalid, "limits"));
+        }
+        let hardware = &contract.capabilities.hardware;
+        let opening_hardware_mismatch = hardware.iter().any(|held| held == "mobile_component")
+            && field.forms.is_empty()
+            || hardware.iter().any(|held| held == "route_actuator") && field.routes.is_empty()
+            || hardware.iter().any(|held| held == "finite_reserve")
+                && !field.forms.iter().any(|held| held.reserve > 0);
+        if opening_hardware_mismatch {
+            return Err(Fault::because(Code::ContentInvalid, "hardware"));
+        }
+        for criterion in &contract.qualification.criteria {
+            let addressed = match criterion.source {
+                CriterionSource::Field => true,
+                CriterionSource::Component(id) => field.ports.iter().any(|held| held.node == id),
+                CriterionSource::Route(id) => field.routes.iter().any(|held| held.route == id),
+            };
+            if !addressed
+                || criterion.metric == CriterionMetric::HandsOffSteps
+                    && criterion.threshold > i64::from(contract.qualification.duration_steps)
+            {
+                return Err(Fault::because(Code::ContentInvalid, "criteria"));
+            }
+        }
+        contract.function_criterion().map_err(invalid)?;
+    }
+    Ok(())
 }
 
 /// What a campaign is held to, beyond what each of its chapters is.
@@ -962,6 +2217,23 @@ fn read_abilities(value: &Json) -> Result<Vec<Ability>, Fault> {
                 Ability::LinkedForms {
                     offsets,
                     separation: read::int(entry, "separation", 0, STORED_BOUND - 1)
+                        .map_err(invalid)?,
+                }
+            }
+            2 => {
+                read::exact_keys(
+                    entry,
+                    "abilities",
+                    &["blanks", "capacity", "deploy_cost", "kind", "upkeep_rate"],
+                )
+                .map_err(invalid)?;
+                Ability::Junction {
+                    blanks: read::int(entry, "blanks", 1, 8).map_err(invalid)? as u8,
+                    deploy_cost: read::int(entry, "deploy_cost", 0, field::NODE_CHARGE_CAP)
+                        .map_err(invalid)?,
+                    capacity: read::int(entry, "capacity", 1, field::NODE_CHARGE_CAP)
+                        .map_err(invalid)?,
+                    upkeep_rate: read::int(entry, "upkeep_rate", 0, STORED_BOUND - 1)
                         .map_err(invalid)?,
                 }
             }
@@ -1192,6 +2464,7 @@ fn read_chapter(value: &Json) -> Result<Chapter, Fault> {
                 .map_err(invalid)?,
             strength: read::int(entry, "strength", 0, field::CURRENT_STRENGTH_CAP)
                 .map_err(invalid)?,
+            duty: FRAC_ONE,
             period: read::int(entry, "period", 1, i64::from(u16::MAX)).map_err(invalid)? as u16,
             phase: 0,
             bright: read::flag(entry, "bright").map_err(invalid)?,
@@ -1604,6 +2877,12 @@ fn read_condition(value: &Json, placed: &Placements<'_>) -> Result<Condition, Fa
                 steps: steps(value)?,
             })
         }
+        "stored_charge" => {
+            read::exact_keys(value, "condition", &["amount", "kind"]).map_err(invalid)?;
+            Ok(Condition::StoredCharge {
+                amount: read::int(value, "amount", 1, field::NODE_CHARGE_CAP).map_err(invalid)?,
+            })
+        }
         "pulse_released" => {
             read::exact_keys(value, "condition", &["count", "kind"]).map_err(invalid)?;
             Ok(Condition::PulseReleased {
@@ -1693,6 +2972,7 @@ fn linked_placements(
                 }
             }
             Ability::Trail { .. } => {}
+            Ability::Junction { .. } => {}
         }
     }
     Ok(placed)
@@ -1785,6 +3065,17 @@ pub fn establish(
             Some(TrailState { period: *period, delay: *delay, radius: *radius, magnitude: *magnitude })
         }
         Ability::LinkedForms { .. } => None,
+        Ability::Junction { .. } => None,
+    });
+
+    let junction = form.abilities.iter().find_map(|ability| match ability {
+        Ability::Junction { blanks, deploy_cost, capacity, upkeep_rate } => Some(JunctionState {
+            blanks: *blanks,
+            deploy_cost: *deploy_cost,
+            capacity: *capacity,
+            upkeep_rate: *upkeep_rate,
+        }),
+        _ => None,
     });
 
     // The run's stored reserve stands with the Form the chapter opened control
@@ -1812,6 +3103,7 @@ pub fn establish(
             route_capacity: form.route_capacity,
             link: None,
             trail,
+            junction: if held.controlled { junction } else { None },
         })
         .collect();
 
@@ -1852,6 +3144,7 @@ pub fn establish(
             route_capacity: form.route_capacity,
             link: Some(link),
             trail,
+            junction: None,
         });
         next_node += 1;
     }
@@ -1897,11 +3190,34 @@ pub fn establish(
 
     let next_node_id = ports.iter().map(|port| port.node).max().unwrap_or(0) + 1;
     let next_route_id = routes.iter().map(|route| route.route).max().unwrap_or(0) + 1;
+    let materials: Vec<MaterialState> = ports
+        .iter()
+        .filter(|port| port.kind != NodeKind::Form)
+        .take(12)
+        .enumerate()
+        .map(|(place, port)| MaterialState {
+            material: place as u32 + 1,
+            kind: match place % 3 {
+                0 => MaterialKind::JunctionBlank,
+                1 => MaterialKind::BoundaryBlank,
+                _ => MaterialKind::Conductor,
+            },
+            amount: 1,
+            layer: port.layer,
+            pos: port.pos,
+            claimed: false,
+        })
+        .collect();
+    let route_controls = routes
+        .iter()
+        .map(|route| crate::policy::RouteControlState::opening(route.route, route.tail, route.capacity))
+        .collect();
 
     let field = FieldState {
         step: 0,
         next_node_id,
         next_route_id,
+        next_signal_id: 1,
         assembly_ordinal: 0,
         prev_assembly_step: None,
         wheel_accum: 0,
@@ -1909,8 +3225,18 @@ pub fn establish(
         layers,
         ports,
         routes,
+        route_runtime: Vec::new(),
+        route_controls,
+        route_clamps: Vec::new(),
+        leak_breach: None,
         forms,
         currents,
+        materials,
+        signals: Vec::new(),
+        policy_runtime: Vec::new(),
+        supply_decoys: Vec::new(),
+        current_delays: Vec::new(),
+        route_scramble: None,
         physical_compartment: chapter.physical_compartment.clone(),
         boundaries: BoundaryState {
             drawn: Vec::new(),
@@ -2018,7 +3344,10 @@ pub fn advance_objectives(
         .condition
         .read_step(reading, &chapter.physical_compartment);
     let held = &mut progress.objective;
-    if read.met {
+    let before_progress = held.progress;
+    if let Some(absolute) = read.progress {
+        held.progress = absolute;
+    } else if read.met {
         held.progress = (held.progress + objective.condition.share()).min(FRAC_ONE);
     } else if !objective.condition.cumulative() {
         held.progress = 0;
@@ -2031,7 +3360,8 @@ pub fn advance_objectives(
     } else {
         ObjectiveStage::Active
     };
-    if stage != held.state {
+    let state_changed = stage != held.state;
+    if state_changed {
         held.state = stage;
         cues.push(Cue {
             kind: if stage == ObjectiveStage::FailedRecoverable { CUE_COLLAPSE } else { CUE_RECOVERY },
@@ -2042,6 +3372,12 @@ pub fn advance_objectives(
     }
 
     if held.progress < FRAC_ONE {
+        // Progress is player-facing state. Report it in bounded 1/64 steps so
+        // the shell can show movement without turning the event stream into a
+        // second render-frame channel.
+        if !state_changed && before_progress / 1024 != held.progress / 1024 {
+            outcome.changed.push((held.clone(), Some(held.id.clone())));
+        }
         return outcome;
     }
 

@@ -15,7 +15,7 @@ use field_game_core::pressure::{
     self, advance_pressures, Pressure, PressureContent, PressureState, Schedule, Stage, StageRow,
     Staged, Target, TargetKind, ACTIVE_CAP,
 };
-use field_game_core::state::AUTOSAVE_STEPS;
+use field_game_core::state::{GeneratorSpec, RegimeSpec, ScenarioSpec, AUTOSAVE_STEPS};
 use field_game_core::Session;
 
 mod support;
@@ -37,6 +37,16 @@ const SPENT_AT: u32 = CRISIS_UNTIL + 90;
 /// 360, crisis 180, resolution 120.
 const DRIFT_START: u32 = 25_333;
 const DRIFT_SPENT_AT: u32 = DRIFT_START + 150 + 360 + 180 + 120;
+
+fn scenario(schedule: Schedule) -> ScenarioSpec {
+    ScenarioSpec::commissioning(
+        support::content_hash(),
+        schedule,
+        RegimeSpec::named("open_field").expect("the fixture regime is implemented"),
+        GeneratorSpec::empty(),
+        Vec::new(),
+    )
+}
 
 fn opened(key: &str) -> Session {
     let mut session = Session::new(&support::worker_init()).expect("versions agree");
@@ -819,7 +829,8 @@ fn a_drawing_noise_pressure_spreads_the_confidence_ranges() {
     let state = field_game_core::state::RunState {
         run_id: "00aa00aa00aa00aa".to_string(),
         rng: stream,
-        spec: field_game_core::state::GeneratorSpec::new(support::content_hash(), schedule),
+        scenario: scenario(schedule),
+        criterion: None,
         branch_nonce: 0,
         progress: Progress::opening(),
         now,
@@ -1084,6 +1095,7 @@ fn flood_lowers_the_targeted_threshold_for_decay_and_the_throttle() {
         pressures: &staged.pressures,
         objective_ordinal: 0,
         forecast: &[],
+        medium: field_game_core::field::MediumMotion::default(),
     });
     let sections = snapshot[20] as usize;
     let mut overloaded = None;
@@ -1115,6 +1127,7 @@ fn interference_redirects_a_share_of_every_same_layer_emission_to_its_target() {
         path: vec![Vec2::units(400, 500), Vec2::units(700, 500)],
         width: 100 * ONE_UNIT,
         strength: 64 * ONE_UNIT,
+        duty: 65_536,
         period: 30,
         phase: 0,
         bright: false,
@@ -1187,10 +1200,8 @@ fn run_with(
     let state = field_game_core::state::RunState {
         run_id: "00bb00bb00bb00bb".to_string(),
         rng: field_game_core::rng::trajectory_stream("00bb00bb00bb00bb", 0),
-        spec: field_game_core::state::GeneratorSpec::new(
-            support::content_hash(),
-            Schedule::of(vec![held]).expect("one table per pressure"),
-        ),
+        scenario: scenario(Schedule::of(vec![held]).expect("one table per pressure")),
+        criterion: None,
         branch_nonce: 0,
         progress: Progress::opening(),
         now: field.clone(),
@@ -1416,6 +1427,7 @@ fn drift_moves_the_targeted_layers_current_paths_at_every_stage_entry() {
         path: vec![Vec2::units(1000, 500), Vec2::units(1200, 500)],
         width: 150 * ONE_UNIT,
         strength: 8 * ONE_UNIT,
+        duty: 65_536,
         period: 30,
         phase: 0,
         bright: false,
@@ -1483,6 +1495,7 @@ fn a_seat_taken_at_the_opening_boundary_fires_its_stage_entry_one_shots() {
         path: vec![Vec2::units(1000, 500), Vec2::units(1200, 500)],
         width: 150 * ONE_UNIT,
         strength: 8 * ONE_UNIT,
+        duty: 65_536,
         period: 30,
         phase: 0,
         bright: false,
@@ -1490,10 +1503,16 @@ fn a_seat_taken_at_the_opening_boundary_fires_its_stage_entry_one_shots() {
     }];
     field_game_core::field::validate(&field).expect("still valid");
 
-    let mut run = field_game_core::run::Run::start(
+    let mut run = field_game_core::run::Run::start_with_scenario(
         "00dd00dd00dd00dd",
         "thread",
-        &support::content_hash(),
+        scenario(
+            Schedule::of(vec![
+                table(Pressure::Flood, TargetKind::None, 36_000, FRAC_ONE),
+                table(Pressure::Drift, TargetKind::Layer, 36_000, 32_768),
+            ])
+            .expect("one table per pressure"),
+        ),
     )
     .expect("a run opens");
     run.establish_field(
@@ -1506,13 +1525,6 @@ fn a_seat_taken_at_the_opening_boundary_fires_its_stage_entry_one_shots() {
         },
     )
     .expect("the Field is establishable");
-    run.set_schedule(
-        Schedule::of(vec![
-            table(Pressure::Flood, TargetKind::None, 36_000, FRAC_ONE),
-            table(Pressure::Drift, TargetKind::Layer, 36_000, 32_768),
-        ])
-        .expect("one table per pressure"),
-    );
     let chapter = field_game_core::content::Chapter {
         id: "the_pull".to_string(),
         title_key: "chapter.the_pull".to_string(),
@@ -1607,10 +1619,8 @@ fn run_with_table(
     let state = field_game_core::state::RunState {
         run_id: "00ee00ee00ee00ee".to_string(),
         rng: field_game_core::rng::trajectory_stream("00ee00ee00ee00ee", 0),
-        spec: field_game_core::state::GeneratorSpec::new(
-            support::content_hash(),
-            Schedule::of(vec![content]).expect("one table per pressure"),
-        ),
+        scenario: scenario(Schedule::of(vec![content]).expect("one table per pressure")),
+        criterion: None,
         branch_nonce: 0,
         progress: Progress::opening(),
         now: field.clone(),
@@ -1709,15 +1719,6 @@ fn a_noise_seating_on_a_saturating_route_replays_byte_exact_through_its_lifecycl
         "thread",
     )
     .expect("the run restores");
-    imported.set_schedule(
-        Schedule::of(vec![staged_table(
-            Pressure::Noise,
-            TargetKind::Layer,
-            3,
-            [20_000, 30_000, 50_000, 10_000],
-        )])
-        .expect("one table per pressure"),
-    );
     let drive = |run: &mut field_game_core::run::Run, from: u32| -> String {
         let mut seq = from;
         for _ in 0..10 {
@@ -1762,15 +1763,6 @@ fn a_noise_seating_on_a_saturating_route_replays_byte_exact_through_its_lifecycl
         "thread",
     )
     .expect("the run restores");
-    retried.set_schedule(
-        Schedule::of(vec![staged_table(
-            Pressure::Noise,
-            TargetKind::Layer,
-            3,
-            [20_000, 30_000, 50_000, 10_000],
-        )])
-        .expect("one table per pressure"),
-    );
     let retried_on = drive(&mut retried, 1);
     assert_eq!(
         normalize(&retried_on, "4"),

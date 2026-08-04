@@ -1,21 +1,17 @@
 /**
- * Steering: every device, into one normalized control.
+ * Steering: keyboard input into one normalized control.
  *
  * `docs/field-framework/ARCHITECTURE.md` locks the shape of this mapping and
- * two of its numbers. The pointer is read relative to the canvas middle; the
- * normalization is `magnitude = min(1, r / 320)` with r in CSS px; keyboard
+ * two of its numbers. The normalization is `magnitude = min(1, r / 320)` with
+ * r in CSS px; keyboard
  * steering uses unit axes, whose diagonal components the same section writes as
  * ±23170 in Q1.15; each component crosses clamped to [−32767, 32767] with the
  * value −32768 never sent; and the vector's own magnitude is at most 32767
- * raw. Mouse, trackpad, and keyboard all produce that same normalized form.
+ * raw. WASD and the arrow keys both produce that same normalized form.
  *
- * They produce it here, and they produce it through one function. A device
- * names an offset in CSS px from the Form's place on the surface, and
- * `steerFrom` turns any such offset into the control. The pointer's offset is
- * where the cursor stands; a held key's offset is the saturation radius, walked
- * out along its own axis over a few frames. That is why the two paths cannot
- * drift apart: there is one path, and the devices differ only in what offset
- * they name.
+ * A held key names an offset from the Form's place on the surface, and
+ * `steerFrom` turns that offset into the control. The offset walks out to the
+ * saturation radius over a few frames and returns on release.
  *
  * Three of the seven reference-feel numbers are here — the rest radius, and the
  * two ramp spans. The other four are the spring the core integrates them
@@ -39,12 +35,10 @@ export const SATURATION_RADIUS_PX = 320;
 export const STEER_UNIT = 32_767;
 
 /**
- * The radius inside which the cursor asks for nothing, in CSS px: a fortieth
- * of the saturation radius, and about a millimetre of desk.
+ * The radius inside which an input offset asks for nothing, in CSS px: a
+ * fortieth of the saturation radius.
  *
- * A cursor parked on the Form is a cursor asking to stop, and without this the
- * last pixel or two of pointer noise would ask for a slow drift in a direction
- * the player never chose and cannot see the source of. It is small enough that
+ * It is small enough that
  * the step at its edge — a fortieth of the speed range — is below what the
  * surface shows, and the spring smooths even that.
  */
@@ -189,10 +183,8 @@ export interface Middle {
 
 export interface SteeringOptions {
   /**
-   * Where the Form stands on the surface. The locked rule reads the pointer
-   * relative to the canvas middle, and the canvas is the whole viewport — the
-   * shell's own stylesheet gives it 100vw by 100vh — so the viewport's middle
-   * is the canvas's. A caller with a smaller surface names it instead.
+   * Kept for compatibility with callers that supplied the old pointer center.
+   * Pointer position no longer contributes to steering.
    */
   middle?: () => Middle;
   /** Where the listeners are attached. Replaced in tests. */
@@ -206,8 +198,8 @@ export interface Steering {
    */
   sample: () => SteerPair;
   /**
-   * Clears every held input: the cursor's offset, the keys, and the ramp
-   * between them. The locked focus-loss rule calls this before the shell sends
+   * Clears every held key and the ramp between them. The locked focus-loss
+   * rule calls this before the shell sends
    * its one neutral frame, beside the same call on the Pulse source, which
    * lets a held Pulse go without emitting one.
    */
@@ -219,47 +211,18 @@ export interface Steering {
 }
 
 /**
- * Opens a steering source over the pointer and the keyboard.
- *
- * No pointer lock is taken and no cursor is hidden or replaced: the pointer is
- * read where it stands, which is what makes its distance from the Form a speed
- * the player can see.
+ * Opens keyboard steering. The pointer remains entirely available for Field
+ * inspection and shell controls; moving or parking it never moves the Form.
  */
 export function openSteering(options: SteeringOptions = {}): Steering {
   const viewport = typeof window === 'undefined' ? null : window;
   const target = options.target ?? viewport;
-  const middle =
-    options.middle ??
-    (() => (viewport ? { x: viewport.innerWidth / 2, y: viewport.innerHeight / 2 } : { x: 0, y: 0 }));
-
-  /** Where the cursor stands relative to the surface's middle, in CSS px. */
-  let pointer: Middle | null = null;
   /** Which direction keys are held, by their `KeyboardEvent.code`. */
   const keys = new Set<string>();
   /** The direction the keys last named, which a released ramp walks back on. */
   let heading: Middle = { x: 0, y: 0 };
   /** How far the keyboard's own offset has ramped, over the span. */
   let ramp = 0;
-
-  const onPointerMove = (event: Event): void => {
-    const at = event as PointerEvent;
-    const from = middle();
-    pointer = { x: at.clientX - from.x, y: at.clientY - from.y };
-  };
-
-  // A cursor that has left the window sends no more moves, so the offset it
-  // left behind would steer for as long as it stayed away. The keys are not
-  // cleared with it: the window still has focus and still receives their
-  // release, so none of them can be left held, and clearing them would stop a
-  // player who is steering with the keyboard and happened to brush the edge.
-  // This is the whole of what a cursor leaving names — the locked focus-loss
-  // rule (ARCHITECTURE.md, Runtime topology and timing, lines 151 to 155)
-  // names window blur and `visibilitychange` alone, and those two do clear
-  // everything and send the neutral frame; this adds a device concern to them
-  // rather than a third trigger for them.
-  const onPointerLeave = (): void => {
-    pointer = null;
-  };
 
   const onKeyDown = (event: Event): void => {
     const key = event as KeyboardEvent;
@@ -275,20 +238,15 @@ export function openSteering(options: SteeringOptions = {}): Steering {
   };
 
   if (target) {
-    target.addEventListener('pointermove', onPointerMove, { passive: true });
     target.addEventListener('keydown', onKeyDown);
     target.addEventListener('keyup', onKeyUp);
-  }
-  if (typeof document !== 'undefined') {
-    document.addEventListener('pointerleave', onPointerLeave);
   }
 
   /**
    * The offset the keyboard names, in CSS px, at the ramp it stands at.
    *
    * A held direction walks the offset out along its own axis to the saturation
-   * radius, so a key reaches exactly what a cursor held at that radius reaches,
-   * over the rise. A released one keeps its heading while the ramp walks back:
+   * radius over the rise. A released one keeps its heading while the ramp walks back:
    * the offset decays rather than snapping, and the spring on the other side of
    * the boundary carries the rest of the way to rest.
    */
@@ -318,15 +276,9 @@ export function openSteering(options: SteeringOptions = {}): Steering {
   return {
     sample() {
       const keyboard = keyed();
-      const cursor = pointer ?? { x: 0, y: 0 };
-      // The two offsets add, and the normalization holds the sum to the same
-      // saturation radius. Either device alone therefore reads exactly as it
-      // would alone, and both at once read as one gesture rather than as a
-      // contest between them.
-      return steerFrom(cursor.x + keyboard.x, cursor.y + keyboard.y);
+      return steerFrom(keyboard.x, keyboard.y);
     },
     clear() {
-      pointer = null;
       keys.clear();
       heading = { x: 0, y: 0 };
       ramp = 0;
@@ -334,12 +286,8 @@ export function openSteering(options: SteeringOptions = {}): Steering {
     held: () => keys.size,
     close() {
       if (target) {
-        target.removeEventListener('pointermove', onPointerMove);
         target.removeEventListener('keydown', onKeyDown);
         target.removeEventListener('keyup', onKeyUp);
-      }
-      if (typeof document !== 'undefined') {
-        document.removeEventListener('pointerleave', onPointerLeave);
       }
     },
   };

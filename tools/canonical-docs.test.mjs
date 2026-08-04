@@ -129,7 +129,8 @@ test('continuous execution, milestone continuity, and static Mac delivery are ca
   assert.match(loop, /Never write a test first/i);
   assert.match(loop, /GitHub `main` is canonical/i);
   assert.match(milestones, /^## Active$/m);
-  assert.match(milestones, /M-002 — Causal compartment and passive View split V2/);
+  assert.match(milestones, /### M-003 — Frozen ScenarioSpec and embodied state split/);
+  assert.match(milestones, /\| M-002 \| Physical Compartment is causal and paid/);
   assert.match(milestones, /\| M-001 \| Reproducible remote-to-laptop static build baseline/);
   assert.match(milestones, /30765055465/);
   assert.match(platform, /Tauri 2 as a thin static host/i);

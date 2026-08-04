@@ -112,7 +112,7 @@ fn script() -> Vec<Phase> {
         play("cross to the relief Port", Act::Toward(3220, 2340), 220),
         play("charge", Act::Charge(3220, 2340), FULL_CHARGE_STEPS as u32),
         play("release", Act::Release, 1),
-        play("carry the pattern", Act::Toward(2700, 2100), 7500),
+        play("carry the pattern", Act::Toward(2700, 2100), 26_000),
     ]
 }
 
@@ -586,6 +586,10 @@ fn the_opening_sequences_conditions_span_the_step_counts_they_name() {
 
     let mut spans = Vec::new();
     for objective in chapter.objectives.iter().take(opening) {
+        if let field_game_core::content::Condition::StoredCharge { amount } = &objective.condition {
+            assert_eq!(*amount, 256 * ONE_UNIT, "the resource lesson asks for 256 CU");
+            continue;
+        }
         let target = objective.condition.target();
         let span = field_game_core::content::effective_steps(&objective.condition);
         // The span never overshoots the authored target and never falls more
@@ -601,8 +605,9 @@ fn the_opening_sequences_conditions_span_the_step_counts_they_name() {
             spans.push((objective.id.clone(), target, span));
         }
     }
-    // The three that carry authored duration, and what they come to in steps.
-    assert_eq!(spans.len(), 3, "three of the six ask for time: {spans:?}");
+    // The two that carry authored duration, and what they come to in steps.
+    // Stored Charge is an absolute resource threshold, not a hold timer.
+    assert_eq!(spans.len(), 2, "two of the six ask for time: {spans:?}");
     let total: i64 = spans.iter().map(|(_, _, span)| span).sum();
     println!("\nauthored duration, by objective");
     for (id, target, span) in &spans {
@@ -610,7 +615,7 @@ fn the_opening_sequences_conditions_span_the_step_counts_they_name() {
     }
     println!("  {:<36} {:>14} {total:>11}", "in all", "");
     assert!(
-        total > 9_000 && total < 14_000,
+        total > 4_300 && total < 4_500,
         "the authored duration comes to {total} steps, outside the band the pacing was set in",
     );
 }
@@ -812,7 +817,7 @@ fn the_worst_run_the_opening_layer_admits_still_carries_on() {
     assert!(opening > 0, "a Form opens holding Charge");
 
     let mut seq = 1u32;
-    let mut send = |session: &mut Session, seq: &mut u32, steps: u16, depth: i8, aim: (i64, i64)| {
+    let send = |session: &mut Session, seq: &mut u32, steps: u16, depth: i8, aim: (i64, i64)| {
         let form = session
             .run()
             .expect("a run")

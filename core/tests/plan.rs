@@ -24,8 +24,8 @@ use field_game_core::plan::{
     self, PlanCommand, PlanQueue, Projection, RouteEnd, CONNECTED_ROUTE_CAPACITY, PLAN_QUEUE_DEPTH,
 };
 use field_game_core::state::{
-    FieldState, GeneratorSpec, InputConfig, Progress, RunState, Surround, Trace, ViewDeclaration,
-    IMPULSE_CAP, OPENING_IMPULSE,
+    FieldState, InputConfig, Progress, RunState, Surround, Trace, ViewDeclaration, IMPULSE_CAP,
+    OPENING_IMPULSE,
 };
 use field_game_core::Session;
 
@@ -99,6 +99,7 @@ fn linked_field() -> FieldState {
         route_capacity: 32 * ONE_UNIT,
         link: None,
         trail: None,
+        junction: None,
     }];
     field.physical_compartment = PhysicalCompartment {
         members: vec![2, 3],
@@ -137,7 +138,8 @@ fn state_with(impulse: u8) -> RunState {
     RunState {
         run_id: KEY.to_string(),
         rng: field_game_core::rng::trajectory_stream(KEY, 0),
-        spec: GeneratorSpec::new(NO_CONTENT.to_string(), Default::default()),
+        scenario: field_game_core::state::ScenarioSpec::legacy(NO_CONTENT.to_string()),
+        criterion: None,
         branch_nonce: 0,
         progress,
         trace: Trace::opening(field.clone()),

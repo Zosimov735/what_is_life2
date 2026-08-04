@@ -14,11 +14,10 @@
 //! payloads cross on demand through command responses and `review_ready`
 //! events, never here.
 //!
-//! One of the ten section kinds stands on state a later goal owns — the
-//! camera — so this encoder writes the nine that stand on state the run
-//! already holds: Forms, Ports, Routes, currents, the active observation
-//! View's bitset, the staged pressures, the cues the step raised, the Still
-//! Mode overlay, and the flat point array the currents' paths index into.
+//! The section table is append-only. Alongside the original Field sections it
+//! now carries embodied Renewal state, local signals, the derived Pulse
+//! preview with exact Port targets, and conserving Wake caches; the camera kind
+//! remains renderer-owned.
 //! Physical-compartment membership and its queued preview ride as independent
 //! Port flags; the View never supplies either of them.
 //!
@@ -43,7 +42,7 @@ use crate::state::{FieldState, Fx, InputConfig, Progress};
 pub const MAGIC: &[u8; 4] = b"FGF1";
 
 /// The snapshot format's own version, beside the protocol's.
-pub const FRAME_VERSION: u16 = 2;
+pub const FRAME_VERSION: u16 = 3;
 
 /// The header's width, in bytes. Every offset inside it is frozen.
 pub const HEADER_BYTES: usize = 32;
@@ -54,8 +53,7 @@ pub const SECTION_ENTRY_BYTES: usize = 8;
 /// The widest snapshot the timing contract allows to cross the boundary.
 pub const FRAME_BUFFER_CAP: usize = 32 * 1024;
 
-/// The locked section kinds. Only the nine written here are named as values;
-/// the camera's arrives with the goal that owns its state.
+/// The append-only section kinds. The camera's arrives with renderer-owned state.
 const KIND_FORMS: u8 = 1;
 const KIND_PORTS: u8 = 2;
 const KIND_ROUTES: u8 = 3;
@@ -65,6 +63,15 @@ const KIND_PRESSURES: u8 = 6;
 const KIND_CUES: u8 = 7;
 const KIND_OVERLAY: u8 = 9;
 const KIND_CURRENT_PATH: u8 = 10;
+const KIND_MATERIALS: u8 = 11;
+const KIND_LOCAL_SIGNALS: u8 = 12;
+const KIND_PULSE_PREVIEW: u8 = 13;
+const KIND_WAKE_CACHES: u8 = 14;
+const KIND_MEDIUM_MOTION: u8 = 15;
+const KIND_PULSE_OPEN_PORTS: u8 = 16;
+const KIND_POLICY_RUNTIME: u8 = 17;
+const KIND_ROUTE_CONTROLS: u8 = 18;
+const KIND_ROUTE_RUNTIME: u8 = 19;
 
 /// The record widths the document locks, in bytes.
 const FORM_RECORD: usize = 24;
@@ -76,6 +83,15 @@ const PRESSURE_RECORD: usize = 12;
 const CUE_RECORD: usize = 8;
 const OVERLAY_RECORD: usize = 8;
 const PATH_RECORD: usize = 4;
+const MATERIAL_RECORD: usize = 16;
+const LOCAL_SIGNAL_RECORD: usize = 20;
+const PULSE_PREVIEW_RECORD: usize = 32;
+const WAKE_CACHE_RECORD: usize = 20;
+const MEDIUM_MOTION_RECORD: usize = 16;
+const PULSE_OPEN_PORT_RECORD: usize = 4;
+const POLICY_RUNTIME_RECORD: usize = 16;
+const ROUTE_CONTROL_RECORD: usize = 20;
+const ROUTE_RUNTIME_RECORD: usize = 16;
 
 /// The most path points one current carries into a frame.
 pub const PATH_POINTS_CAP: usize = 32;
@@ -92,6 +108,15 @@ const ROUTE_CUT_QUEUED: u8 = 1;
 const ROUTE_OVERLOADED: u8 = 2;
 const ROUTE_MOVE_QUEUED: u8 = 3;
 const ROUTE_PROPOSED: u8 = 4;
+
+/// Persistent intervention flags share the status byte above the low-nibble
+/// standing/preview state. This keeps overload and queue information intact
+/// while allowing Clamp and Scramble to coexist on one Route.
+const ROUTE_CLAMPED: u8 = 1 << 4;
+const ROUTE_SCRAMBLED: u8 = 1 << 5;
+/// Persistent local-policy actuator flags occupy the remaining status bits.
+const ROUTE_AUTOMATION_DISABLED: u8 = 1 << 6;
+const ROUTE_AUTOMATION_LIMITED: u8 = 1 << 7;
 
 /// A current's path as the frame carries it: at most `PATH_POINTS_CAP` points,
 /// both endpoints kept and the interior taken on an even stride.
@@ -176,6 +201,7 @@ pub struct Snapshot<'a> {
     /// The standing View's baseline `q_I` envelope, one low and high per step
     /// of its window, and empty when the window has no step to replay.
     pub forecast: &'a [(Fx, Fx)],
+    pub medium: crate::field::MediumMotion,
 }
 
 /// Encodes one snapshot.
@@ -191,6 +217,7 @@ pub fn encode(snapshot: &Snapshot<'_>) -> Vec<u8> {
     let paths: Vec<Vec<Vec2>> =
         field.currents.iter().map(|current| decimated(&current.path)).collect();
     let points: usize = paths.iter().map(Vec::len).sum();
+    let pulse_preview = crate::field::pulse_preview(field, snapshot.pressures);
     // The queue's proposals, resolved once: the section table counts them and
     // the section body writes them, and reading the queue twice for one frame
     // would be reading it twice for one answer.
@@ -213,6 +240,19 @@ pub fn encode(snapshot: &Snapshot<'_>) -> Vec<u8> {
         (KIND_CUES, snapshot.cues.len(), CUE_RECORD),
         (KIND_OVERLAY, envelope, OVERLAY_RECORD),
         (KIND_CURRENT_PATH, points, PATH_RECORD),
+        (KIND_MATERIALS, field.materials.len(), MATERIAL_RECORD),
+        (KIND_LOCAL_SIGNALS, field.signals.len(), LOCAL_SIGNAL_RECORD),
+        (KIND_PULSE_PREVIEW, usize::from(pulse_preview.is_some()), PULSE_PREVIEW_RECORD),
+        (KIND_WAKE_CACHES, field.pending.len(), WAKE_CACHE_RECORD),
+        (KIND_MEDIUM_MOTION, usize::from(snapshot.medium.drag > 0), MEDIUM_MOTION_RECORD),
+        (
+            KIND_PULSE_OPEN_PORTS,
+            pulse_preview.as_ref().map_or(0, |preview| preview.opened_port_ids.len()),
+            PULSE_OPEN_PORT_RECORD,
+        ),
+        (KIND_POLICY_RUNTIME, field.policy_runtime.len(), POLICY_RUNTIME_RECORD),
+        (KIND_ROUTE_CONTROLS, field.route_controls.len(), ROUTE_CONTROL_RECORD),
+        (KIND_ROUTE_RUNTIME, field.routes.len(), ROUTE_RUNTIME_RECORD),
     ];
     // A section with nothing in it is left out, with the one exception the
     // document states as a mode rather than as a count: the overlay is present
@@ -277,6 +317,19 @@ pub fn encode(snapshot: &Snapshot<'_>) -> Vec<u8> {
             KIND_OVERLAY => overlay(snapshot),
             KIND_CURRENT_PATH => path_points(&paths),
             KIND_VIEW => view_bitset(field, snapshot.view_inside),
+            KIND_MATERIALS => materials(snapshot),
+            KIND_LOCAL_SIGNALS => local_signals(snapshot),
+            KIND_PULSE_PREVIEW => pulse_preview
+                .as_ref()
+                .map_or_else(Vec::new, pulse_preview_record),
+            KIND_WAKE_CACHES => wake_caches(snapshot),
+            KIND_MEDIUM_MOTION => medium_motion(snapshot.medium),
+            KIND_PULSE_OPEN_PORTS => pulse_preview
+                .as_ref()
+                .map_or_else(Vec::new, pulse_open_port_records),
+            KIND_POLICY_RUNTIME => policy_runtime(snapshot),
+            KIND_ROUTE_CONTROLS => route_controls(snapshot),
+            KIND_ROUTE_RUNTIME => route_runtime(snapshot),
             _ => Vec::new(),
         };
         debug_assert_eq!(body.len(), count * width, "a section is its record width times its count");
@@ -431,20 +484,246 @@ fn ports(snapshot: &Snapshot<'_>, members: &PhysicalMembership) -> Vec<u8> {
         if members.proposed[place] {
             flags |= 1 << 4;
         }
+        // A Decoy is read at the receiving Component as well as along the
+        // diverted Current. A Breach is material-wide, but its consequence is
+        // localized to exposed compartment members where leakage occurs.
+        if field.supply_decoys.iter().any(|decoy| decoy.receiver == port.node) {
+            flags |= 1 << 5;
+        }
+        if field.leak_breach.is_some() && members.shell[place] {
+            flags |= 1 << 6;
+        }
         out.push(flags);
         out.extend_from_slice(&q0_16(port.q, NODE_CHARGE_CAP).to_le_bytes());
         // Position in units times 16, which is the raw value shifted down 12.
         out.extend_from_slice(&((port.pos.x >> 12) as u16).to_le_bytes());
         out.extend_from_slice(&((port.pos.y >> 12) as u16).to_le_bytes());
-        // The Charge held in reserve, as a fraction of this Node's threshold,
+        // The isolated Vault reserve as a fraction of its own finite capacity,
         // drawn at the one Node the run's reserve stands at: the controlled
-        // Form's.
+        // Form's. It is not normalized against the Form Node's separate
+        // operating threshold.
         let held = if carrying == Some(port.node) { reserve } else { 0 };
-        out.extend_from_slice(&q0_16(held, port.capacity).to_le_bytes());
+        out.extend_from_slice(&q0_16(held, crate::field::VAULT_RESERVE_CAPACITY).to_le_bytes());
         // The layer the Node stands on, so the renderer places it on its own
         // plane. A Form-kind Node carries the layer of the Form it mirrors.
         out.push(port.layer);
         out.push(0);
+    }
+    out
+}
+
+fn materials(snapshot: &Snapshot<'_>) -> Vec<u8> {
+    let mut out = Vec::with_capacity(snapshot.field.materials.len() * MATERIAL_RECORD);
+    for material in &snapshot.field.materials {
+        out.extend_from_slice(&material.material.to_le_bytes());
+        out.push(match material.kind {
+            crate::field::MaterialKind::JunctionBlank => 0,
+            crate::field::MaterialKind::BoundaryBlank => 1,
+            crate::field::MaterialKind::Conductor => 2,
+        });
+        out.push(material.layer);
+        out.extend_from_slice(&material.amount.to_le_bytes());
+        out.extend_from_slice(&((material.pos.x >> 12) as u16).to_le_bytes());
+        out.extend_from_slice(&((material.pos.y >> 12) as u16).to_le_bytes());
+        out.push(u8::from(material.claimed));
+        out.extend_from_slice(&[0, 0, 0]);
+    }
+    out
+}
+
+fn local_signals(snapshot: &Snapshot<'_>) -> Vec<u8> {
+    let mut out = Vec::with_capacity(snapshot.field.signals.len() * LOCAL_SIGNAL_RECORD);
+    for signal in &snapshot.field.signals {
+        out.extend_from_slice(&signal.signal.to_le_bytes());
+        out.extend_from_slice(&signal.source.to_le_bytes());
+        out.extend_from_slice(&signal.target.to_le_bytes());
+        out.extend_from_slice(&((signal.pos.x >> 12) as u16).to_le_bytes());
+        out.extend_from_slice(&((signal.pos.y >> 12) as u16).to_le_bytes());
+        out.push(signal.layer);
+        out.push(q0_8(signal.strength, 8 * crate::fx::ONE_UNIT));
+        out.extend_from_slice(
+            &(signal.expires_step.saturating_sub(snapshot.field.step).min(u32::from(u16::MAX)) as u16)
+                .to_le_bytes(),
+        );
+    }
+    out
+}
+
+fn pulse_preview_record(preview: &crate::field::PulsePreview) -> Vec<u8> {
+    let mut out = Vec::with_capacity(PULSE_PREVIEW_RECORD);
+    out.extend_from_slice(&(preview.radius.clamp(0, i64::from(u32::MAX)) as u32).to_le_bytes());
+    out.extend_from_slice(&(preview.gathered.clamp(0, i64::from(u32::MAX)) as u32).to_le_bytes());
+    out.extend_from_slice(
+        &(preview.reserve_released.clamp(0, i64::from(u32::MAX)) as u32).to_le_bytes(),
+    );
+    out.extend_from_slice(&preview.opened_ports.to_le_bytes());
+    out.extend_from_slice(&preview.displaced_pressures.to_le_bytes());
+    out.extend_from_slice(
+        &(preview.diversion_before.clamp(0, i64::from(u32::MAX)) as u32).to_le_bytes(),
+    );
+    out.extend_from_slice(
+        &(preview.diversion_after.clamp(0, i64::from(u32::MAX)) as u32).to_le_bytes(),
+    );
+    out.extend_from_slice(
+        &(preview.actuation_cost.clamp(0, i64::from(u32::MAX)) as u32).to_le_bytes(),
+    );
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out
+}
+
+fn pulse_open_port_records(preview: &crate::field::PulsePreview) -> Vec<u8> {
+    let mut out = Vec::with_capacity(preview.opened_port_ids.len() * PULSE_OPEN_PORT_RECORD);
+    for node in &preview.opened_port_ids {
+        out.extend_from_slice(&node.to_le_bytes());
+    }
+    out
+}
+
+fn wake_caches(snapshot: &Snapshot<'_>) -> Vec<u8> {
+    let mut out = Vec::with_capacity(snapshot.field.pending.len() * WAKE_CACHE_RECORD);
+    for (place, cache) in snapshot.field.pending.iter().enumerate() {
+        let radius = snapshot
+            .field
+            .forms
+            .iter()
+            .find(|form| form.id == cache.form)
+            .and_then(|form| form.trail)
+            .map_or(0, |trail| trail.radius);
+        out.extend_from_slice(&(place.min(usize::from(u16::MAX)) as u16).to_le_bytes());
+        out.push(cache.form);
+        out.push(cache.layer);
+        out.extend_from_slice(&((cache.pos.x >> 12).clamp(0, i64::from(u16::MAX)) as u16).to_le_bytes());
+        out.extend_from_slice(&((cache.pos.y >> 12).clamp(0, i64::from(u16::MAX)) as u16).to_le_bytes());
+        out.extend_from_slice(&(cache.magnitude.clamp(0, i64::from(u32::MAX)) as u32).to_le_bytes());
+        out.extend_from_slice(&cache.due.saturating_sub(snapshot.field.step).to_le_bytes());
+        out.extend_from_slice(&(radius.clamp(0, i64::from(u32::MAX)) as u32).to_le_bytes());
+    }
+    out
+}
+
+fn medium_motion(medium: crate::field::MediumMotion) -> Vec<u8> {
+    let mut out = Vec::with_capacity(MEDIUM_MOTION_RECORD);
+    out.extend_from_slice(&one_way(medium.velocity.x).to_le_bytes());
+    out.extend_from_slice(&one_way(medium.velocity.y).to_le_bytes());
+    out.extend_from_slice(&(medium.drag.clamp(0, i64::from(u16::MAX)) as u16).to_le_bytes());
+    out.extend_from_slice(
+        &(medium.collision_response.clamp(0, i64::from(u16::MAX)) as u16).to_le_bytes(),
+    );
+    out.extend_from_slice(&one_way(medium.collision_radius).to_le_bytes());
+    out
+}
+
+fn local_action_ordinal(action: Option<&crate::policy::LocalAction>) -> u8 {
+    match action {
+        None => 0,
+        Some(crate::policy::LocalAction::Hold) => 1,
+        Some(crate::policy::LocalAction::SeekSupply { .. }) => 2,
+        Some(crate::policy::LocalAction::SeekPort { .. }) => 3,
+        Some(crate::policy::LocalAction::SeekSignal { .. }) => 4,
+        Some(crate::policy::LocalAction::ChangeDepth { .. }) => 5,
+        Some(crate::policy::LocalAction::Couple { .. }) => 6,
+        Some(crate::policy::LocalAction::SetInterface { .. }) => 7,
+        Some(crate::policy::LocalAction::SetRoute { .. }) => 8,
+        Some(crate::policy::LocalAction::EmitSignal { .. }) => 9,
+        Some(crate::policy::LocalAction::UseAbility) => 10,
+    }
+}
+
+fn local_action_radius(action: Option<&crate::policy::LocalAction>) -> u32 {
+    let radius = match action {
+        Some(crate::policy::LocalAction::SeekSupply { radius })
+        | Some(crate::policy::LocalAction::SeekPort { radius })
+        | Some(crate::policy::LocalAction::SeekSignal { radius })
+        | Some(crate::policy::LocalAction::Couple { radius }) => *radius,
+        _ => 0,
+    };
+    radius.clamp(0, i64::from(u32::MAX)) as u32
+}
+
+fn policy_outcome_ordinal(outcome: crate::policy::PolicyOutcome) -> u8 {
+    match outcome {
+        crate::policy::PolicyOutcome::Idle => 0,
+        crate::policy::PolicyOutcome::Held => 1,
+        crate::policy::PolicyOutcome::Applied => 2,
+        crate::policy::PolicyOutcome::NoTarget => 3,
+        crate::policy::PolicyOutcome::TargetUnavailable => 4,
+        crate::policy::PolicyOutcome::WrongLayer => 5,
+        crate::policy::PolicyOutcome::OutOfRange => 6,
+        crate::policy::PolicyOutcome::NoEffect => 7,
+        crate::policy::PolicyOutcome::Cooldown => 8,
+        crate::policy::PolicyOutcome::CapacityReached => 9,
+        crate::policy::PolicyOutcome::Unavailable => 10,
+    }
+}
+
+fn policy_runtime(snapshot: &Snapshot<'_>) -> Vec<u8> {
+    let mut out = Vec::with_capacity(snapshot.field.policy_runtime.len() * POLICY_RUNTIME_RECORD);
+    for runtime in &snapshot.field.policy_runtime {
+        let (target_kind, target) = match runtime.target {
+            crate::policy::PolicyTarget::None => (0, 0),
+            crate::policy::PolicyTarget::Node(id) => (1, id),
+            crate::policy::PolicyTarget::Route(id) => (2, id),
+            crate::policy::PolicyTarget::Current(id) => (3, u32::from(id)),
+            crate::policy::PolicyTarget::Signal(id) => (4, id),
+        };
+        out.extend_from_slice(&runtime.address.to_le_bytes());
+        out.extend_from_slice(&target.to_le_bytes());
+        out.extend_from_slice(&local_action_radius(runtime.active_action.as_ref()).to_le_bytes());
+        out.push(local_action_ordinal(runtime.active_action.as_ref()));
+        out.push(policy_outcome_ordinal(runtime.outcome));
+        out.push(target_kind);
+        out.push(if runtime.active_rule < 0 {
+            u8::MAX
+        } else {
+            runtime.active_rule as u8
+        });
+    }
+    out
+}
+
+fn route_controls(snapshot: &Snapshot<'_>) -> Vec<u8> {
+    let mut out = Vec::with_capacity(snapshot.field.route_controls.len() * ROUTE_CONTROL_RECORD);
+    for control in &snapshot.field.route_controls {
+        let capacity = snapshot
+            .field
+            .routes
+            .iter()
+            .find(|route| route.route == control.route)
+            .map_or(0, |route| route.capacity);
+        out.extend_from_slice(&control.route.to_le_bytes());
+        out.extend_from_slice(
+            &(capacity.clamp(0, i64::from(u32::MAX)) as u32).to_le_bytes(),
+        );
+        out.extend_from_slice(
+            &(control.capacity_limit.clamp(0, i64::from(u32::MAX)) as u32).to_le_bytes(),
+        );
+        out.extend_from_slice(&control.controller.to_le_bytes());
+        out.extend_from_slice(&control.allocation_weight.to_le_bytes());
+        out.push(u8::from(control.enabled));
+        out.push(0);
+    }
+    out
+}
+
+fn route_runtime(snapshot: &Snapshot<'_>) -> Vec<u8> {
+    let mut out = Vec::with_capacity(snapshot.field.routes.len() * ROUTE_RUNTIME_RECORD);
+    for route in &snapshot.field.routes {
+        let runtime = snapshot
+            .field
+            .route_runtime
+            .iter()
+            .find(|runtime| runtime.route == route.route)
+            .copied()
+            .unwrap_or_else(|| crate::field::RouteTransferRuntime::standing(route.route));
+        out.extend_from_slice(&route.route.to_le_bytes());
+        out.extend_from_slice(
+            &(runtime.requested.clamp(0, i64::from(u32::MAX)) as u32).to_le_bytes(),
+        );
+        out.extend_from_slice(
+            &(runtime.accepted.clamp(0, i64::from(u32::MAX)) as u32).to_le_bytes(),
+        );
+        out.push(runtime.outcome.ordinal());
+        out.extend_from_slice(&[0, 0, 0]);
     }
     out
 }
@@ -504,7 +783,7 @@ fn routes(snapshot: &Snapshot<'_>, proposed: &[(u32, u32, u32)]) -> Vec<u8> {
                 held.q > press.threshold(held.node, held.capacity)
             })
             .unwrap_or(false);
-        out.push(if queued.contains(&route.route) {
+        let mut status = if queued.contains(&route.route) {
             ROUTE_CUT_QUEUED
         } else if moved.contains(&route.route) {
             ROUTE_MOVE_QUEUED
@@ -512,7 +791,30 @@ fn routes(snapshot: &Snapshot<'_>, proposed: &[(u32, u32, u32)]) -> Vec<u8> {
             ROUTE_OVERLOADED
         } else {
             ROUTE_STANDING
-        });
+        };
+        if field.route_clamps.iter().any(|clamp| clamp.route == route.route) {
+            status |= ROUTE_CLAMPED;
+        }
+        if field
+            .route_scramble
+            .as_ref()
+            .is_some_and(|scramble| scramble.routes.binary_search(&route.route).is_ok())
+        {
+            status |= ROUTE_SCRAMBLED;
+        }
+        if let Some(control) = field
+            .route_controls
+            .iter()
+            .find(|control| control.route == route.route)
+        {
+            if !control.enabled {
+                status |= ROUTE_AUTOMATION_DISABLED;
+            }
+            if control.capacity_limit < route.capacity {
+                status |= ROUTE_AUTOMATION_LIMITED;
+            }
+        }
+        out.push(status);
         let age = field.step.saturating_sub(route.formed_step);
         out.extend_from_slice(&(age.min(u32::from(u16::MAX)) as u16).to_le_bytes());
     }
@@ -541,6 +843,15 @@ fn currents(snapshot: &Snapshot<'_>, paths: &[Vec<Vec2>]) -> Vec<u8> {
         }
         if current.bright {
             flags |= 1 << 1;
+        }
+        if snapshot.field.supply_decoys.iter().any(|decoy| decoy.current == current.id) {
+            flags |= 1 << 2;
+        }
+        if snapshot.field.current_delays.iter().any(|delay| delay.current == current.id) {
+            flags |= 1 << 3;
+        }
+        if crate::field::current_emitting(current) {
+            flags |= 1 << 4;
         }
         out.push(flags);
         out.extend_from_slice(&current.phase.to_le_bytes());

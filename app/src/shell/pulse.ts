@@ -1,21 +1,17 @@
 /**
- * The Pulse: press and hold, then release — from a device to the frame the
- * worker reads.
+ * Coupling: hold E to extend the Form's reach, then release to emit.
  *
  * `docs/field-framework/ARCHITECTURE.md` freezes the two fields this source
  * fills. `InputFrame` carries `pulse_held` and `pulse_release`, one frame per
  * rendered frame, and `ControlState` records both with every step the trace
  * holds. `pulse_held` is a level — the control is held at the moment the frame
  * is taken — and `pulse_release` is an edge — the control was let go of since
- * the previous frame. The `InputConfig` defaults bind the Pulse to `ShiftLeft`,
- * and `docs/field-framework/SPEC.md` names the two devices: holding the primary
- * button focuses the Form's pull and releasing it emits a Pulse, with Shift
- * charging a Pulse and releasing Shift emitting it.
+ * the previous frame. The input is deliberately keyboard-only during active
+ * play: pointer movement and clicks remain available for inspection and chrome,
+ * while E is the one explicit world action.
  *
  * They reach the frame through one source, for the same reason steering does:
- * a device names a hold, and the hold is one control however many devices are
- * on it. The frame a press produces is therefore the same frame whichever
- * device pressed, which is what the parity test reads.
+ * a key names a hold, and the edge is consumed once by the next sampled frame.
  *
  * Nothing here reads a clock and nothing here decides what a Pulse does. The
  * edge is consumed exactly once, by the one frame that carries it, so a
@@ -37,23 +33,10 @@ export type PulsePair = {
 };
 
 /**
- * The keys the Pulse is bound to: the locked `InputConfig` default `ShiftLeft`,
- * and the other Shift beside it. SPEC.md names the fallback as Shift rather
- * than as one of them, and a player pressing the right-hand Shift is pressing
- * Shift — the same reason the arrow keys stand beside WASD in steering. A
- * remapping surface reads the configured binding instead, which the goal that
- * owns accessibility adds once `InputConfig` crosses to the shell.
+ * E is a deliberate action key rather than a movement modifier. Shift is not a
+ * hidden alias: one visible verb has one default key.
  */
-export const PULSE_BINDINGS: readonly string[] = ['ShiftLeft', 'ShiftRight'];
-
-/**
- * The primary pointer button. Right-click is not used at all, so no other
- * button holds the Pulse and no other button releases it.
- */
-const PRIMARY_BUTTON = 0;
-
-/** What the pointer's own hold is called among the holders. */
-const POINTER_HOLDER = 'pointer';
+export const PULSE_BINDINGS: readonly string[] = ['KeyE'];
 
 export interface PulseOptions {
   /** Where the listeners are attached. Replaced in tests. */
@@ -84,9 +67,7 @@ export interface Pulse {
 }
 
 /**
- * Opens a Pulse source over the pointer and the keyboard.
- *
- * No pointer lock is taken and no button beyond the primary one is read.
+ * Opens the keyboard coupling source. Pointer input is inspection-only.
  */
 export function openPulse(options: PulseOptions = {}): Pulse {
   const viewport = typeof window === 'undefined' ? null : window;
@@ -97,34 +78,18 @@ export function openPulse(options: PulseOptions = {}): Pulse {
   /** Whether the last of them let go since the previous frame. */
   let released = false;
 
-  /** Takes a hold. Two devices on it at once is one hold, not two. */
+  /** Takes the keyboard hold. */
   function hold(holder: string): void {
     holders.add(holder);
   }
 
   /**
-   * Lets one hold go. The edge is raised when the last holder lets go, so
-   * pressing Shift while the button is held and letting one of them go carries
-   * on charging rather than emitting.
+   * Lets the hold go and raises one release edge.
    */
   function letGo(holder: string): void {
     if (!holders.delete(holder)) return;
     if (holders.size === 0) released = true;
   }
-
-  const onPointerDown = (event: Event): void => {
-    const at = event as PointerEvent;
-    if (at.button !== PRIMARY_BUTTON) return;
-    hold(POINTER_HOLDER);
-  };
-
-  const onPointerUp = (event: Event): void => {
-    const at = event as PointerEvent;
-    // `button` on a release names the button that changed, so a secondary
-    // button coming up while the primary is held releases nothing.
-    if (at.type === 'pointerup' && at.button !== PRIMARY_BUTTON) return;
-    letGo(POINTER_HOLDER);
-  };
 
   const onKeyDown = (event: Event): void => {
     const key = event as KeyboardEvent;
@@ -140,9 +105,6 @@ export function openPulse(options: PulseOptions = {}): Pulse {
   };
 
   if (target) {
-    target.addEventListener('pointerdown', onPointerDown, { passive: true });
-    target.addEventListener('pointerup', onPointerUp, { passive: true });
-    target.addEventListener('pointercancel', onPointerUp, { passive: true });
     target.addEventListener('keydown', onKeyDown);
     target.addEventListener('keyup', onKeyUp);
   }
@@ -163,9 +125,6 @@ export function openPulse(options: PulseOptions = {}): Pulse {
     held: () => holders.size,
     close() {
       if (!target) return;
-      target.removeEventListener('pointerdown', onPointerDown);
-      target.removeEventListener('pointerup', onPointerUp);
-      target.removeEventListener('pointercancel', onPointerUp);
       target.removeEventListener('keydown', onKeyDown);
       target.removeEventListener('keyup', onKeyUp);
     },

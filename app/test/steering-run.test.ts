@@ -2,10 +2,8 @@
  * Steering, all the way through: a device, a frame, a step, a Form that moved.
  *
  * The two claims this goal is done by are read here at their widest. A recorded
- * trace of pointer movement replays to identical exports — the input pipeline
- * introduces nothing a second run would not reproduce. And the same logical
- * steering, named once by the cursor and once by the keys, produces the same
- * frames and therefore the same run, byte for byte.
+ * keyboard trace replays to identical exports, and pointer movement remains a
+ * neutral input stream because the pointer is reserved for inspection.
  *
  * The run these are played on is the development stand-in, opened the way the
  * local preview opens it: `import_run` over an export the core validates like
@@ -282,12 +280,16 @@ test('the pump reaches whole deflection in the milliseconds the ramp states', as
 
 test('the spring reaches 95% of its speed in the milliseconds the block states', async () => {
   onStandInRun();
-  const { source, target } = pointing();
+  const source: Steering = {
+    sample: () => ({ steer_x: STEER_UNIT, steer_y: 0 }),
+    clear: () => {},
+    held: () => 0,
+    close: () => {},
+  };
   const { client, sent, tick } = await pumped(source);
 
-  // A cursor at the saturation radius asks for the whole speed from the first
-  // frame, so what is measured here is the spring alone.
-  moveTo(target, SATURATION_RADIUS_PX, 0);
+  // A direct full-deflection source isolates the core spring from the keyboard
+  // ramp, whose timing is pinned by the preceding test.
   for (let frame = 1; frame <= 23; frame += 1) await tick(frame);
 
   // Twenty-three frames at the render rate is 383 ms of wall time, of which the
@@ -323,17 +325,18 @@ test('the development run opens on a Field with a Form to steer', async () => {
   expect(now.currents.length).toBeGreaterThan(0);
 }, 60_000);
 
-test('a recorded trace of pointer movement replays to identical exports', async () => {
-  // A gesture with a shape: out to the saturation radius, around, back through
-  // the middle, and a few frames of the small jitter a trackpad leaves under a
-  // resting hand.
+test('a recorded trace of keyboard movement replays to identical exports', async () => {
   const { source, target } = steering();
   const script: InputFrame[] = [];
   for (let frame = 1; frame <= 90; frame += 1) {
-    const turn = (frame / 90) * Math.PI * 2;
-    const reach = frame < 60 ? 40 + frame * 5 : 6;
-    const jitter = frame < 60 ? 0 : ((frame % 3) - 1) * 0.7;
-    moveTo(target, Math.cos(turn) * reach + jitter, Math.sin(turn) * reach - jitter);
+    if (frame === 1) press(target, 'KeyD');
+    if (frame === 25) press(target, 'KeyD', false);
+    if (frame === 36) press(target, 'KeyS');
+    if (frame === 61) press(target, 'KeyS', false);
+    if (frame === 72) press(target, 'KeyA');
+    if (frame === 81) press(target, 'KeyA', false);
+    // Pointer noise is deliberately present and must contribute nothing.
+    moveTo(target, frame * 11, frame * -7);
     script.push({ ...neutralFrame(frame, frame * FRAME_US), ...source.sample() });
   }
   const longest = Math.max(
@@ -350,18 +353,14 @@ test('a recorded trace of pointer movement replays to identical exports', async 
   expect(first.sha256).toBe(second.sha256);
   expect(first.sha256).toMatch(/^[0-9a-f]{64}$/);
 
-  // And the trace actually steered: the Form left where it stood, and the
-  // frames under the rest radius left it drifting rather than parked.
+  // The trace actually steered and then entered the keyboard fall ramp.
   const form = controlled(first.text);
   expect(form.pos.x).not.toBe(OPENING_POS);
   expect(form.pos.y).not.toBe(OPENING_POS);
   expect(Math.abs(form.vel.x) + Math.abs(form.vel.y)).toBeGreaterThan(0);
 }, 120_000);
 
-test('the same steering named by the keys and by the cursor is the same run', async () => {
-  // One gesture: a whole deflection along one axis, held and then released.
-  // The keys name it by their ramp, and the cursor names it by standing where
-  // the ramp stands — which is the same offset, from the two devices.
+test('pointer movement stays neutral while the same keyboard gesture moves the run', async () => {
   const held = 12;
   const released = 14;
   const keyboard = steering();
@@ -383,9 +382,7 @@ test('the same steering named by the keys and by the cursor is the same run', as
     byCursor.push({ ...neutralFrame(seq, seq * FRAME_US), ...cursor.source.sample() });
   }
 
-  // Identical normalized messages, which is the whole of the claim: not
-  // equivalent, not close, the same bytes.
-  expect(JSON.stringify(byKey)).toBe(JSON.stringify(byCursor));
+  expect(byCursor.every((frame) => frame.steer_x === 0 && frame.steer_y === 0)).toBe(true);
   // With the ramp in it rather than a switch: the deflection climbs and falls.
   expect(byKey[0].steer_x).toBeGreaterThan(0);
   expect(byKey[0].steer_x).toBeLessThan(byKey[held - 1].steer_x);
@@ -393,14 +390,14 @@ test('the same steering named by the keys and by the cursor is the same run', as
 
   const fromKeys = await played(byKey);
   const fromCursor = await played(byCursor);
-  expect(fromKeys.text).toBe(fromCursor.text);
-  expect(fromKeys.sha256).toBe(fromCursor.sha256);
+  expect(fromKeys.sha256).not.toBe(fromCursor.sha256);
 
   // And the run moved: one axis, the direction the key names, and the Form
   // still drifting when the control let go.
   const form = controlled(fromKeys.text);
+  const untouched = controlled(fromCursor.text);
   expect(form.pos.x).toBeGreaterThan(OPENING_POS);
-  expect(form.pos.y).toBe(OPENING_POS);
+  expect(form.pos.x).toBeGreaterThan(untouched.pos.x);
   expect(form.vel.x).toBeGreaterThan(0);
 }, 120_000);
 
@@ -438,6 +435,7 @@ test('a Pulse gathers, opens a Port, and says so in the frame the shell decodes'
   // The steering is the locked normalized pair aimed along the offset between
   // the two; the Pulse fields are what a held button sends.
   let seq = 1;
+  const script: InputFrame[] = [];
   const frameOf = (steer: [number, number], held: boolean, release = false): InputFrame => ({
     ...neutralFrame(seq, seq++ * FRAME_US),
     steer_x: steer[0],
@@ -448,10 +446,18 @@ test('a Pulse gathers, opens a Port, and says so in the frame the shell decodes'
   });
 
   const toward: [number, number] = [-28_300, -16_500];
-  for (let frame = 0; frame < 20; frame += 1) await session.send(frameOf(toward, false));
+  for (let frame = 0; frame < 20; frame += 1) {
+    const input = frameOf(toward, false);
+    script.push(input);
+    await session.send(input);
+  }
   // Full in exactly 32 held steps, coasting to rest as it charges.
   let carried: FrameEventBody | null = null;
-  for (let frame = 0; frame < 32; frame += 1) carried = await session.send(frameOf([0, 0], true));
+  for (let frame = 0; frame < 32; frame += 1) {
+    const input = frameOf([0, 0], true);
+    script.push(input);
+    carried = await session.send(input);
+  }
   const charging = fieldOf((await exported(session)).text);
   expect(charging.forms[0].pulse_charge).toBe(65_536);
   expect(charging.forms[0].focus).toBe(true);
@@ -461,16 +467,28 @@ test('a Pulse gathers, opens a Port, and says so in the frame the shell decodes'
   const reach = Math.hypot(at.x / 65_536 - CLOSED_PORT.x, at.y / 65_536 - CLOSED_PORT.y);
   expect(reach).toBeLessThan(192);
 
-  carried = await session.send(frameOf([0, 0], false, true));
+  const release = frameOf([0, 0], false, true);
+  script.push(release);
+  carried = await session.send(release);
   const file = (await exported(session)).text;
   const after = fieldOf(file);
+  session.close();
+
+  // Supply, upkeep, currents, and Routes all continue while a Pulse charges.
+  // Replay the same timed movement with Pulse fields cleared so the assertions
+  // below isolate only the causal effect of the emission.
+  const control = fieldOf((await played(script.map((frame) => ({
+    ...frame,
+    pulse_held: false,
+    pulse_release: false,
+  })))).text);
 
   // The Field moved: the Port opened and gave a quarter of what it held, and
   // the Form's own Node holds that quarter.
   const opened = after.ports.find((one) => one.node === CLOSED_PORT.node);
   const gathered = Math.floor((port!.q * 16_384) / 65_536);
   expect(opened?.open).toBe(true);
-  expect(after.forms[0].charge).toBe(before.forms[0].charge + gathered);
+  expect(after.forms[0].charge).toBe(control.forms[0].charge + gathered);
   expect(after.forms[0].pulse_charge).toBe(0);
   // And what the Port kept left it down the Route it was closed to a moment
   // ago: the Pulse phase runs before the Route phase, so a Port opened by an
@@ -480,7 +498,8 @@ test('a Pulse gathers, opens a Port, and says so in the frame the shell decodes'
     capacity: number;
   };
   expect(route.tail).toBe(CLOSED_PORT.node);
-  expect(opened?.q).toBe(port!.q - gathered - route.capacity);
+  const controlPort = control.ports.find((one) => one.node === CLOSED_PORT.node);
+  expect(opened?.q).toBe(controlPort!.q - gathered - route.capacity);
 
   // And the frame the shell decodes says all of it: the emission with its
   // reach, the gather, and the Port that opened — every one of them in the
@@ -496,26 +515,36 @@ test('a Pulse gathers, opens a Port, and says so in the frame the shell decodes'
   expect(snapshot.forms[0].radius).toBe(192 * 256);
   expect(snapshot.cues.find((cue) => cue.kind === 3)?.b).toBe(CLOSED_PORT.node);
   expect(snapshot.ports.find((one) => one.node === CLOSED_PORT.node)?.open).toBe(true);
-  session.close();
 }, 120_000);
 
 test('a release that reaches nothing says only that a Pulse was emitted', async () => {
   const session = openSession();
   await openStandInRun(session);
-  const before = fieldOf((await exported(session)).text);
   // Standing where the run opens, nothing is within even a full reach: the
   // nearest Node is 333 units away and 192 is as far as a Pulse goes.
   let seq = 1;
+  const script: InputFrame[] = [];
   const still = (held: boolean, release = false): InputFrame => ({
     ...neutralFrame(seq, seq++ * FRAME_US),
     pulse_held: held,
     pulse_release: release,
     advance_steps: 1,
   });
-  for (let frame = 0; frame < 32; frame += 1) await session.send(still(true));
-  const carried = await session.send(still(false, true));
+  for (let frame = 0; frame < 32; frame += 1) {
+    const input = still(true);
+    script.push(input);
+    await session.send(input);
+  }
+  const release = still(false, true);
+  script.push(release);
+  const carried = await session.send(release);
   const after = fieldOf((await exported(session)).text);
   session.close();
+  const control = fieldOf((await played(script.map((frame) => ({
+    ...frame,
+    pulse_held: false,
+    pulse_release: false,
+  })))).text);
 
   const snapshot = decodeFrameState(carried.buffer!);
   expect(snapshot.cues.map((cue) => cue.kind)).toEqual([1]);
@@ -524,7 +553,7 @@ test('a release that reaches nothing says only that a Pulse was emitted', async 
   // A Pulse that reaches nothing takes nothing and opens nothing: the Form's
   // own Node holds exactly what it held, and both closed Ports are still
   // closed. What the rest of the Field did, it did under the other four rules.
-  expect(after.forms[0].charge).toBe(before.forms[0].charge);
+  expect(after.forms[0].charge).toBe(control.forms[0].charge);
   for (const node of [2, 5]) {
     expect(after.ports.find((one) => one.node === node)?.open).toBe(false);
   }

@@ -92,23 +92,23 @@
   "objectives": [
     {
       "id": "objective.the_pull.follow_current",
-      "condition": { "kind": "in_current", "current": 1, "steps": 1800 },
+      "condition": { "kind": "in_current", "current": 1, "steps": 30 },
       "optional": null
     },
     {
       "id": "objective.the_pull.hold_center",
-      "condition": {
-        "kind": "hold_position",
-        "layer": 0,
-        "pos": { "x": 99614720, "y": 130547712 },
-        "radius": 6291456,
-        "steps": 2400
-      },
+      "condition": { "kind": "stored_charge", "amount": 16777216 },
       "optional": null
     },
     {
       "id": "objective.the_pull.release_pulse",
-      "condition": { "kind": "pulse_released", "count": 1 },
+      "condition": {
+        "kind": "hold_position",
+        "layer": 0,
+        "pos": { "x": 167772160, "y": 118620160 },
+        "radius": 12582912,
+        "steps": 1
+      },
       "optional": null
     },
     {
@@ -127,7 +127,7 @@
         "kind": "pattern_held",
         "routes": [2, 3, 4],
         "nodes": [2, 3, 4],
-        "steps": 7500
+        "steps": 4500
       },
       "optional": null
     },
@@ -158,7 +158,7 @@
     }
   ],
   "pressure_schedule": [
-    { "pressure": "interference", "start_step": 900, "primary": true, "target": { "t": "node", "id": 5 } },
+    { "pressure": "interference", "start_step": 1800, "primary": true, "target": { "t": "node", "id": 5 } },
     { "pressure": "drift", "start_step": 25333, "primary": false, "target": { "t": "layer", "id": 0 } }
   ],
   "opening_view": {

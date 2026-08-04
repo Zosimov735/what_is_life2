@@ -551,8 +551,13 @@ impl Run {
         }
         assert!(
             self.ended() || self.objective() != id,
-            "{} moved past {id} inside its cap",
+            "{} moved past {id} inside its cap; step={} charge={} carried={} first_sample={:?} last_sample={:?}",
             self.driven.form,
+            self.step(),
+            self.charge(&EVERY_NODE),
+            self.carried(),
+            self.driven.samples.first(),
+            self.driven.samples.last(),
         );
     }
 }

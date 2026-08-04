@@ -36,7 +36,7 @@ fn the_hash_init_run_reports_is_the_digest_over_the_bytes_that_arrived() {
     );
     // And the run records it, which is what a restore compares against.
     let run = session.run().expect("a run is loaded");
-    assert_eq!(run.state().spec.content_hash(), support::content_hash());
+    assert_eq!(run.state().scenario.content_hash(), support::content_hash());
 }
 
 #[test]
@@ -57,8 +57,12 @@ fn a_digest_that_does_not_describe_the_bytes_beside_it_is_refused() {
 fn a_session_opened_without_content_answers_at_init_run() {
     // The document puts content validation at `init_run`, so a bundle that does
     // not read is held rather than refusing the session outright.
-    let mut session =
-        Session::new("{\"protocol\":2,\"save_version\":2}").expect("the versions agree");
+    let mut session = Session::new(&format!(
+        "{{\"protocol\":{},\"save_version\":{}}}",
+        field_game_core::PROTOCOL_VERSION,
+        field_game_core::SAVE_VERSION,
+    ))
+    .expect("the versions agree");
     let answer = opened(&mut session);
     assert!(answer.contains("\"code\":\"content_invalid\""), "{answer}");
 }
@@ -121,7 +125,7 @@ fn the_chapter_establishes_a_field_that_passes_every_locked_check() {
             .iter()
             .map(|ability| match ability {
                 content::Ability::LinkedForms { offsets, .. } => offsets.len(),
-                content::Ability::Trail { .. } => 0,
+                content::Ability::Trail { .. } | content::Ability::Junction { .. } => 0,
             })
             .sum();
         assert_eq!(established.forms.len(), 1 + linked);
@@ -328,8 +332,8 @@ fn a_physical_compartment_naming_an_unplaced_node_is_refused() {
 #[test]
 fn a_condition_naming_a_current_the_chapter_never_placed_is_refused() {
     let detail = refused(
-        "{ \"kind\": \"in_current\", \"current\": 1, \"steps\": 1800 }",
-        "{ \"kind\": \"in_current\", \"current\": 9, \"steps\": 1800 }",
+        "{ \"kind\": \"in_current\", \"current\": 1, \"steps\": 30 }",
+        "{ \"kind\": \"in_current\", \"current\": 9, \"steps\": 30 }",
     );
     assert_eq!(detail, "{\"reason\":\"current\"}", "the field is named");
 }
@@ -343,8 +347,8 @@ fn a_condition_naming_a_layer_the_chapter_never_placed_is_refused() {
 #[test]
 fn a_condition_holding_a_point_off_the_plane_is_refused() {
     let detail = refused(
-        "\"pos\": { \"x\": 99614720, \"y\": 130547712 },\n        \"radius\"",
-        "\"pos\": { \"x\": 999614720, \"y\": 130547712 },\n        \"radius\"",
+        "\"pos\": { \"x\": 167772160, \"y\": 118620160 },\n        \"radius\"",
+        "\"pos\": { \"x\": 999614720, \"y\": 118620160 },\n        \"radius\"",
     );
     assert_eq!(detail, "{\"reason\":\"pos\"}");
 }

@@ -1,0 +1,73 @@
+{
+  "id": "transfer",
+  "order": 2,
+  "title_key": "contract.transfer.title",
+  "brief_key": "contract.transfer.brief",
+  "success_key": "contract.transfer.success",
+  "failure_key": "contract.transfer.failure",
+  "guidance_keys": ["contract.transfer.guide.open", "contract.transfer.guide.route", "contract.transfer.guide.sustain"],
+  "opening": { "kind": "legacy_chapter", "chapter": "the_edge", "component_ids": [2, 3, 4, 5], "current_duties": [], "current_ids": [1], "form": "relay", "regime": "open_field", "route_ids": [2, 3, 4] },
+  "prerequisites": ["intake"],
+  "capabilities": {
+    "actions": ["hold", "seek_port", "couple", "set_interface", "set_route"],
+    "conditions": ["always", "charge_below", "operating_margin_below", "target_in_range", "route_flow_below", "route_flow_above", "timer_elapsed"],
+    "hardware": ["mobile_component", "local_sensor", "coupler", "interface_actuator", "route_actuator"]
+  },
+  "unlocks": {
+    "actions": ["seek_supply", "use_ability"],
+    "conditions": ["charge_above", "supply"],
+    "hardware": ["finite_reserve"],
+    "next_contract": "buffer"
+  },
+  "limits": { "max_components": 8, "max_routes": 6, "max_rules_per_component": 6 },
+  "commissioning": { "expected_minutes": 10, "maximum_wall_wait_seconds": 15 },
+  "qualification": {
+    "trial_count": 4,
+    "duration_steps": 480,
+    "failure_grace_steps": 30,
+    "criteria": [
+      {
+        "id": "receiver_charge_floor",
+        "source": { "kind": "component", "id": 5 },
+        "metric": "stored_charge",
+        "comparison": "at_least",
+        "threshold": 12582912,
+        "aggregation": "minimum",
+        "window_steps": 120
+      },
+      {
+        "id": "transfer_flow_floor",
+        "source": { "kind": "route", "id": 4 },
+        "metric": "accepted_flow",
+        "comparison": "at_least",
+        "threshold": 262144,
+        "aggregation": "minimum",
+        "window_steps": 120
+      },
+      {
+        "id": "leakage_ceiling",
+        "source": { "kind": "field", "id": null },
+        "metric": "leakage_ratio",
+        "comparison": "at_most",
+        "threshold": 8192,
+        "aggregation": "maximum",
+        "window_steps": 120
+      },
+      {
+        "id": "hands_off_service",
+        "source": { "kind": "field", "id": null },
+        "metric": "hands_off_steps",
+        "comparison": "at_least",
+        "threshold": 240,
+        "aggregation": "final",
+        "window_steps": 240
+      }
+    ]
+  },
+  "grade_bands": {
+    "throughput": [32768, 49152, 58982, 65536],
+    "resilience": [16384, 32768, 49152, 65536],
+    "economy": [24576, 40960, 55705, 65536],
+    "complexity": [65536, 49152, 32768, 16384]
+  }
+}

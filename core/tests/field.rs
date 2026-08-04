@@ -126,6 +126,7 @@ fn form(id: u8, node: u32, on_layer: u8, pos: Vec2, charge_units: i64) -> FormSt
         route_capacity: 32 * ONE_UNIT,
         link: None,
         trail: None,
+        junction: None,
     }
 }
 
@@ -136,6 +137,7 @@ fn current(id: u16, on_layer: u8, period: u16) -> CurrentState {
         path: vec![Vec2::units(0, 0), Vec2::units(1024, 1024)],
         width: 64 * ONE_UNIT,
         strength: 2 * ONE_UNIT,
+        duty: 65_536,
         period,
         phase: 0,
         bright: id == 1,
@@ -1152,6 +1154,7 @@ fn at_every_cap() -> FieldState {
                     radius: field::TRAIL_RADIUS_CAP,
                     magnitude: field::TRAIL_MAGNITUDE_CAP,
                 }),
+                junction: None,
             }
         })
         .collect();
@@ -1163,6 +1166,7 @@ fn at_every_cap() -> FieldState {
             path: (0..64).map(|point| Vec2::units(point * 64, point * 63)).collect(),
             width: STORED_BOUND - 1,
             strength: CURRENT_STRENGTH_CAP,
+            duty: 65_536,
             period: 1,
             phase: 0,
             bright: index == 0,
@@ -2194,10 +2198,8 @@ fn the_densest_step_and_a_full_trajectory_stay_inside_the_locked_caps() {
     let state = RunState {
         run_id: KEY.to_string(),
         rng: trajectory_stream(KEY, 0),
-        spec: field_game_core::state::GeneratorSpec::new(
-            support::content_hash(),
-            Default::default(),
-        ),
+        scenario: field_game_core::state::ScenarioSpec::legacy(support::content_hash()),
+        criterion: None,
         branch_nonce: 0,
         progress: Progress::opening(),
         now: field,

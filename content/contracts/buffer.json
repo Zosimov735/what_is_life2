@@ -1,0 +1,100 @@
+{
+  "id": "buffer",
+  "order": 3,
+  "title_key": "contract.buffer.title",
+  "brief_key": "contract.buffer.brief",
+  "success_key": "contract.buffer.success",
+  "failure_key": "contract.buffer.failure",
+  "guidance_keys": ["contract.buffer.guide.fill", "contract.buffer.guide.bridge", "contract.buffer.guide.recover"],
+  "opening": { "kind": "legacy_chapter", "chapter": "the_loop", "component_ids": [2, 3, 4, 5], "current_duties": [{ "current": 1, "duty": 32768 }], "current_ids": [1], "form": "vault", "regime": "periodic_transport", "route_ids": [1, 2, 3] },
+  "prerequisites": ["transfer"],
+  "capabilities": {
+    "actions": ["hold", "seek_supply", "seek_port", "couple", "set_interface", "set_route", "use_ability"],
+    "conditions": ["always", "charge_below", "charge_above", "operating_margin_below", "supply", "target_in_range", "route_flow_below", "route_flow_above", "timer_elapsed"],
+    "hardware": ["mobile_component", "local_sensor", "coupler", "interface_actuator", "route_actuator", "finite_reserve"]
+  },
+  "unlocks": {
+    "actions": [],
+    "conditions": [],
+    "hardware": [],
+    "next_contract": null
+  },
+  "limits": { "max_components": 9, "max_routes": 7, "max_rules_per_component": 8 },
+  "commissioning": { "expected_minutes": 12, "maximum_wall_wait_seconds": 18 },
+  "qualification": {
+    "trial_count": 5,
+    "duration_steps": 600,
+    "failure_grace_steps": 45,
+    "criteria": [
+      {
+        "id": "buffer_charge_floor",
+        "source": { "kind": "component", "id": 2 },
+        "metric": "stored_charge",
+        "comparison": "at_least",
+        "threshold": 1048576,
+        "aggregation": "minimum",
+        "window_steps": 150
+      },
+      {
+        "id": "receiver_charge_floor",
+        "source": { "kind": "component", "id": 4 },
+        "metric": "stored_charge",
+        "comparison": "at_least",
+        "threshold": 2097152,
+        "aggregation": "minimum",
+        "window_steps": 150
+      },
+      {
+        "id": "input_flow_floor",
+        "source": { "kind": "route", "id": 1 },
+        "metric": "accepted_flow",
+        "comparison": "at_least",
+        "threshold": 131072,
+        "aggregation": "minimum",
+        "window_steps": 150
+      },
+      {
+        "id": "buffer_flow_floor",
+        "source": { "kind": "route", "id": 2 },
+        "metric": "accepted_flow",
+        "comparison": "at_least",
+        "threshold": 131072,
+        "aggregation": "minimum",
+        "window_steps": 150
+      },
+      {
+        "id": "service_flow_floor",
+        "source": { "kind": "route", "id": 3 },
+        "metric": "accepted_flow",
+        "comparison": "at_least",
+        "threshold": 131072,
+        "aggregation": "minimum",
+        "window_steps": 150
+      },
+      {
+        "id": "leakage_ceiling",
+        "source": { "kind": "field", "id": null },
+        "metric": "leakage_ratio",
+        "comparison": "at_most",
+        "threshold": 6144,
+        "aggregation": "maximum",
+        "window_steps": 150
+      },
+      {
+        "id": "hands_off_service",
+        "source": { "kind": "field", "id": null },
+        "metric": "hands_off_steps",
+        "comparison": "at_least",
+        "threshold": 300,
+        "aggregation": "final",
+        "window_steps": 300
+      }
+    ]
+  },
+  "grade_bands": {
+    "throughput": [32768, 49152, 58982, 65536],
+    "resilience": [16384, 32768, 49152, 65536],
+    "economy": [24576, 40960, 55705, 65536],
+    "complexity": [65536, 49152, 32768, 16384]
+  }
+}

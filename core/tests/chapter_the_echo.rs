@@ -1156,7 +1156,7 @@ fn a_trail_left_before_a_break_comes_due_inside_it() {
             content::Ability::Trail { delay, period, magnitude, .. } => {
                 Some((*delay, *period, *magnitude))
             }
-            content::Ability::LinkedForms { .. } => None,
+            content::Ability::LinkedForms { .. } | content::Ability::Junction { .. } => None,
         })
         .expect("Wake authors a Trail");
     println!(

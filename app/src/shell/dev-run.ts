@@ -21,8 +21,8 @@
  * authored balance, and it is replaced outright by the goal that authors
  * content.
  *
- * Reach it by opening the local preview with the marker `field_run` in the
- * query string, which the worker client reads. The other marker,
+ * Reach it by opening the local preview with the diagnostic marker
+ * `field_stand_in` in the query string, which the worker client reads. The other marker,
  * `field_fixture`, does something different and cannot be combined with it: it
  * replaces the snapshots the renderer reads with a scripted stand-in, so the
  * core is not in the loop at all.

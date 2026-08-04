@@ -1,65 +1,68 @@
 # What Is Life 2 — Product Outline
 
 Status: current product contract  
-Date: 2026-08-02
+Date: 2026-08-03
 
 ## The promise
 
-The player pilots a luminous commissioning chassis through an unfamiliar
-physical regime, activates and connects Components into a generator, declares
-a measurable function, predicts how the system will respond, and then removes
-their own hand from the controls to see whether the organization holds.
+The player designs a physical transport generator, authors the local policies
+that operate it, and evaluates its function across unfamiliar regimes after
+editing and rescue are locked.
 
-The fantasy is not “embody a literal real-world object” or “protect the glowing
-center.” It is:
+The core proposition is:
 
 > Build something whose behavior you understand well enough to trust when you
-> are no longer steering it.
+> are no longer editing it.
 
 The game earns mystery from the Field's visual world, not from ambiguous
 controls. Every important reading has a quantity, unit, causal rule, and visible
 failure condition.
 
+This is a mechanistic automation and engineering game. It does not use a fable,
+character, mascot, quest, moral, or narrative campaign to explain why the
+player should care. Engagement comes from authoring a machine, seeing its local
+rules become physical behavior, diagnosing precise failures, improving measured
+tradeoffs, and evaluating robustness within declared suites without rescue
+controls.
+
 ## The player role
 
-The player is simultaneously:
-
-- a pilot during commissioning;
-- a systems builder in Still Mode;
-- an experimentalist at the Observe and Intervention benches;
-- a forecaster during Divergence Replay;
-- a validator during Ensemble and Holdout trials;
-- an archivist who carries successful generators between regimes.
+The player is a systems designer during Design, an operator and diagnostician
+during Commission, an experimentalist at the analysis benches, a validator
+during qualification, and an archivist who carries successful generators
+between regimes.
 
 These are different modes of engagement with one causal system. They are not
 separate minigames with unrelated currencies.
 
 ## The central loop
 
-1. **Enter a regime.** Choose a destination in the Atlas and read its actual
-   physical conditions and function contract.
-2. **Choose a Form.** Select the steerable commissioning chassis whose measured
-   movement, storage, reach, and ability fit the regime.
-3. **Commission.** Pilot through finite Supply, activate Components, create
-   Directed Routes, and establish the required function.
-4. **Measure.** Move a passive View, choose an instrument, and inspect literal
+1. **Select a contract.** Read its function, criteria, physical regime,
+   construction limits, available policy primitives, and exact unlock receipt.
+2. **Inspect the opening hardware.** Compare mobile and stationary Component
+   profiles whose measured storage, reach, sensing, actuation, and interfaces
+   fit the contract.
+3. **Design.** While paused, assemble Directed Routes and ordered local policies.
+4. **Commission.** Run the Field, inspect operation, pause on failure, and revise.
+5. **Measure.** Move a passive View, choose an instrument, and inspect literal
    readings without altering the system.
-5. **Predict.** State what should happen under a declared disturbance or change.
-6. **Intervene.** Apply one typed, bounded causal edit or run it on a clone.
-7. **Diagnose.** Use Divergence Replay to find the first material departure from
+6. **Predict.** State what should happen under a declared disturbance or change.
+7. **Intervene.** Apply one typed, bounded causal edit or run it on a clone.
+8. **Diagnose.** Use Divergence Replay to find the first material departure from
    baseline.
-8. **Release control.** Freeze the generator specification and run Ensemble and
-   Holdout trials with direct rescue disabled.
-9. **Archive or revise.** Preserve the evidence, failed branches, and successful
-   design; then carry the same generator into a new regime.
+9. **Qualify.** Freeze the generator and assembly, then run accelerated trials
+   with editing and rescue disabled.
+10. **Archive or revise.** Preserve the exact result and failed branches, issue
+    progression only from a complete retained pass, and carry qualified
+    generators into comparison or transplant work.
 
 ## What makes it fun
 
-### Spatial mastery
+### Automation that is visible
 
-The Form is responsive and pleasurable to steer. Supply, failing Components,
-physical compartments, moving hazards, and construction reach turn the Field into a
-readable space rather than a dashboard with animated wallpaper.
+The player sees mobile Components acquire Supply, service Ports, switch Routes,
+emit signals, and recover from local failure according to authored rules. The
+operating machine, not direct piloting, is the reward.
 
 ### Systems with visible consequences
 
@@ -69,10 +72,10 @@ through an actual ledger. The player can point to why a result occurred.
 
 ### Constrained invention
 
-Still Mode offers a small number of meaningful edits. Reach, capacity, material,
-upkeep, and intervention limits force tradeoffs. A successful design feels
-owned because it was assembled under pressure, not selected from a solution
-menu.
+Topology, local sensing, rule order, reach, capacity, material, upkeep, and
+intervention limits force tradeoffs. Contracts admit multiple valid designs;
+the player owns a result because its behavior follows their organization rather
+than a selected solution preset.
 
 ### Prediction and reveal
 
@@ -82,9 +85,9 @@ question: where did the altered run first stop behaving like the baseline?
 
 ### The trust transition
 
-Commissioning lets the player rescue the system. Validation does not. The
-moment direct control is removed converts skilled piloting into a scientific
-claim about the generator. That transition supplies the game's emotional arc.
+Commissioning allows revision. Qualification does not. Freezing local feedback
+and withdrawing the editor converts an iterative design into a retained result
+about one declared suite. That transition supplies the game's dramatic arc.
 
 ### Beautiful physical variation
 
@@ -93,15 +96,16 @@ Crowding, transport variability, Supply schedule, medium motion, dissipation,
 compartment materials, and disturbance families produce visibly and
 mechanically different challenges.
 
-## Product structure beyond an eight-chapter campaign
+## Product structure
 
-The existing eight chapters remain useful as legacy authored scenarios and
-regression content. They are not the target product shell.
+The contract ladder is the target progression. Existing chapters are legacy
+import and regression material; their serial objectives are not a second
+primary game mode.
 
 The target structure is an Atlas with several ways to play:
 
-- **Expeditions:** authored regime contracts with a beginning, escalation, and
-  Holdout gate.
+- **Contracts:** authored automation problems with commissioning and
+  qualification phases.
 - **Open Field:** choose a regime, function contract, Form, and intervention
   limits; build freely.
 - **Bench studies:** load an archived generator and run observation,
@@ -116,14 +120,12 @@ The target structure is an Atlas with several ways to play:
 - **Archive challenges:** transplant a frozen generator into regimes it was not
   tuned for and explain why it continues or fails.
 
-Progression unlocks new regimes, instruments, intervention types, and complete
-chassis abilities. It should not rely on invisible percentage upgrades that
-weaken the legibility of the simulation.
+Progression unlocks policy primitives, hardware, regimes, instruments, and
+intervention types. It does not use invisible percentage upgrades.
 
 ## The game objects
 
-- **Form:** the bright steerable commissioning chassis and one Component of the
-  generator.
+- **Form:** a programmable mobile Component hardware profile in the generator.
 - **Generator specification:** the frozen local rules, topology constraints,
   Component types, and declared inputs that can be copied into a trial.
 - **Embodied generator state:** current positions, inventories, operating
@@ -151,9 +153,9 @@ they never replace the physical contract.
 
 ### Form selection
 
-The selected object is visibly the one the player will steer. The comparison
-panel shows the same measured fields for every chassis and distinguishes
-implemented abilities from proposed ones.
+This becomes the hardware catalog. The comparison panel shows the same measured
+fields for every mobile Component and distinguishes sensors, actuators, and
+implemented abilities from unavailable policy actions.
 
 ### Active Field
 
@@ -161,11 +163,11 @@ Most of the screen is the simulated space. The HUD shows only readings required
 by the active contract: Route throughput, lowest operating margin, leakage,
 grace time, Supply schedule, or another literal criterion.
 
-### Still Mode
+### Design workspace
 
-The Field pauses cleanly. The player queues structural changes, sees exact
-targets and costs, then commits or undoes. A passive View remains a visibly
-separate tool.
+The Field pauses immediately. The player queues structural changes, authors
+ordered local policies, previews sensors and actuators, sees exact targets and
+costs, then commits or undoes. A passive View remains a visibly separate tool.
 
 ### Observe Bench
 
@@ -222,19 +224,14 @@ the design, not caveats hidden after the fact.
 
 ## First vertical slice
 
-The first complete Number 2 slice contains:
+The first complete automation slice contains:
 
-1. one Atlas destination with explicit regime data;
-2. three fully implemented Forms with measured comparison fields;
-3. one three-Component circulation contract;
-4. separate physical-compartment and passive-View controls;
-5. one moving Supply-path disturbance;
-6. one typed Route intervention;
-7. one Divergence Replay;
-8. a twelve-seed Ensemble summary;
-9. a hands-off Holdout gate;
-10. an Archive record containing the specification, seeds, controls, and
-    evidence.
+1. Intake, Transfer, and Buffer contracts;
+2. programmable mobile Components with ordered condition-action policies;
+3. Design, Commission, and accelerated Qualify authority states;
+4. separate pass criteria and four-axis engineering grades;
+5. exact policy, Route-control, and failure inspection;
+6. reusable generator and assembly blueprints.
 
 That slice proves the complete loop before expanding the Atlas or adding Life
 Cycle claims.

@@ -26,6 +26,11 @@
 import generated from '../build/content.json';
 
 import manifestText from '../../content/manifest.json?raw';
+import contractManifestText from '../../content/contracts/manifest.json?raw';
+import intake from '../../content/contracts/intake.json?raw';
+import transfer from '../../content/contracts/transfer.json?raw';
+import buffer from '../../content/contracts/buffer.json?raw';
+import copyCatalogText from '../../content/copy/catalog.json?raw';
 
 import thePull from '../../content/chapters/the_pull.json?raw';
 import theEdge from '../../content/chapters/the_edge.json?raw';
@@ -53,6 +58,11 @@ import chorus from '../../content/forms/chorus.json?raw';
 
 /** The bundle the core is opened with. */
 export interface ContentBundle {
+  /** The automation-contract files in their own manifest order. */
+  contract_files: string[];
+  contract_manifest: string;
+  /** Player copy resolved by authored contract keys. */
+  copy_catalog: string;
   /** The digest the build computed and embedded. */
   hash: string;
   /** The manifest, as its own bytes. */
@@ -67,6 +77,11 @@ interface Manifest {
   chapters: string[];
   forms: string[];
   pressures: string[];
+}
+
+interface ContractManifest {
+  contract_version: number;
+  contracts: string[];
 }
 
 /** The eight chapters, in the closed set's own order. */
@@ -102,6 +117,8 @@ const PRESSURES: Record<string, string> = {
   drift,
 };
 
+const CONTRACTS: Record<string, string> = { intake, transfer, buffer };
+
 /** The manifest text exactly as it sits on disk, which is what is hashed. */
 export const MANIFEST_TEXT = manifestText;
 
@@ -130,5 +147,20 @@ export function contentBundle(): ContentBundle {
       files.push(text);
     }
   }
-  return { hash: CONTENT_HASH, manifest: manifestText, files };
+  const contractManifest = JSON.parse(contractManifestText) as ContractManifest;
+  const contractFiles = contractManifest.contracts.map((id) => {
+    const text = CONTRACTS[id];
+    if (text === undefined) {
+      throw new Error(`field_game content: the contract manifest lists ${id}, which is not bundled`);
+    }
+    return text;
+  });
+  return {
+    contract_files: contractFiles,
+    contract_manifest: contractManifestText,
+    copy_catalog: copyCatalogText,
+    files,
+    hash: CONTENT_HASH,
+    manifest: manifestText,
+  };
 }

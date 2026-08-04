@@ -1,6 +1,6 @@
 //! The bounded queue of proposed changes, and the transaction around it.
 //!
-//! The V2 paid-plan union has four
+//! The V2 paid-plan union has twelve
 //! variants, the payload of each, the preconditions each is validated against,
 //! the cost of one entry, the queue depth of 6 entries, the conflict rules, and
 //! the caps rule: a locked cap that would be crossed is the `capacity` error,
@@ -22,8 +22,11 @@
 //! from the first.
 
 use crate::fault::{Code, Fault};
-use crate::field::{self, RouteState, ROUTES_PER_RUN};
-use crate::fx::ONE_UNIT;
+use crate::field::{
+    self, CurrentDelay, NodeKind, PortState, RouteClamp, RouteScramble, RouteState, SupplyDecoy, NODES_PER_RUN,
+    ROUTES_PER_RUN,
+};
+use crate::fx::{fixed_mul, ONE_UNIT};
 use crate::json::{Json, Obj};
 use crate::read;
 use crate::state::{FieldState, Fx};
@@ -71,6 +74,14 @@ pub enum PlanCommand {
     Redirect { route: u32, end: RouteEnd, to: u32 },
     Cut { route: u32 },
     ReshapeCompartment { members: Vec<u32> },
+    DeployJunction,
+    LimitRoute { route: u32, retained_fraction: Fx, duration: u16 },
+    RaiseLeak { delta: Fx, duration: u16 },
+    DivertSupply { current: u16, receiver: u32, capture_fraction: Fx, duration: u16 },
+    ReplaceComponent { node: u32, transfer_mask: u8 },
+    Transplant { regime: String },
+    DelaySupply { current: u16, duration: u16 },
+    ScrambleRoutes { routes: Vec<u32>, probability: Fx, duration: u16 },
 }
 
 impl PlanCommand {
@@ -120,6 +131,73 @@ impl PlanCommand {
                 }
                 Ok(PlanCommand::ReshapeCompartment { members })
             }
+            "deploy_junction" => {
+                read::exact_keys(value, "plan", &["op"])?;
+                Ok(PlanCommand::DeployJunction)
+            }
+            "limit_route" => {
+                read::exact_keys(
+                    value,
+                    "plan",
+                    &["duration", "op", "retained_fraction", "route"],
+                )?;
+                Ok(PlanCommand::LimitRoute {
+                    route: node_id(value, "route")?,
+                    retained_fraction: read::int(value, "retained_fraction", 1, 65_535)?,
+                    duration: read::int(value, "duration", 1, 1_800)? as u16,
+                })
+            }
+            "raise_leak" => {
+                read::exact_keys(value, "plan", &["delta", "duration", "op"])?;
+                Ok(PlanCommand::RaiseLeak {
+                    delta: read::int(value, "delta", 1, field::LEAK_FRAC_CAP)?,
+                    duration: read::int(value, "duration", 1, 1_800)? as u16,
+                })
+            }
+            "divert_supply" => {
+                read::exact_keys(
+                    value,
+                    "plan",
+                    &["capture_fraction", "current", "duration", "op", "receiver"],
+                )?;
+                Ok(PlanCommand::DivertSupply {
+                    current: read::int(value, "current", 1, i64::from(u16::MAX))? as u16,
+                    receiver: node_id(value, "receiver")?,
+                    capture_fraction: read::int(value, "capture_fraction", 1, 65_535)?,
+                    duration: read::int(value, "duration", 1, 1_800)? as u16,
+                })
+            }
+            "replace_component" => {
+                read::exact_keys(value, "plan", &["node", "op", "transfer_mask"])?;
+                Ok(PlanCommand::ReplaceComponent {
+                    node: node_id(value, "node")?,
+                    transfer_mask: read::int(value, "transfer_mask", 1, 127)? as u8,
+                })
+            }
+            "transplant" => {
+                read::exact_keys(value, "plan", &["op", "regime"])?;
+                let place = read::one_of(value, "regime", &crate::state::REGIME_IDS)?;
+                Ok(PlanCommand::Transplant { regime: crate::state::REGIME_IDS[place].to_string() })
+            }
+            "delay_supply" => {
+                read::exact_keys(value, "plan", &["current", "duration", "op"])?;
+                Ok(PlanCommand::DelaySupply {
+                    current: read::int(value, "current", 1, i64::from(u16::MAX))? as u16,
+                    duration: read::int(value, "duration", 1, 1_800)? as u16,
+                })
+            }
+            "scramble_routes" => {
+                read::exact_keys(value, "plan", &["duration", "op", "probability", "routes"])?;
+                let routes = read::ids(value, "routes", ROUTES_PER_RUN, i64::from(u32::MAX))?;
+                if routes.is_empty() {
+                    return Err(Fault::field("routes"));
+                }
+                Ok(PlanCommand::ScrambleRoutes {
+                    routes,
+                    probability: read::int(value, "probability", 1, 65_535)?,
+                    duration: read::int(value, "duration", 1, 1_800)? as u16,
+                })
+            }
             _ => Err(Fault::field("op")),
         }
     }
@@ -150,6 +228,48 @@ impl PlanCommand {
                     members.iter().map(|member| member.to_string()).collect();
                 object.raw("members", &format!("[{}]", written.join(",")));
                 object.text("op", "reshape_compartment");
+            }
+            PlanCommand::DeployJunction => {
+                object.text("op", "deploy_junction");
+            }
+            PlanCommand::LimitRoute { route, retained_fraction, duration } => {
+                object.int("duration", i64::from(*duration));
+                object.text("op", "limit_route");
+                object.int("retained_fraction", *retained_fraction);
+                object.int("route", i64::from(*route));
+            }
+            PlanCommand::RaiseLeak { delta, duration } => {
+                object.int("delta", *delta);
+                object.int("duration", i64::from(*duration));
+                object.text("op", "raise_leak");
+            }
+            PlanCommand::DivertSupply { current, receiver, capture_fraction, duration } => {
+                object.int("capture_fraction", *capture_fraction);
+                object.int("current", i64::from(*current));
+                object.int("duration", i64::from(*duration));
+                object.text("op", "divert_supply");
+                object.int("receiver", i64::from(*receiver));
+            }
+            PlanCommand::ReplaceComponent { node, transfer_mask } => {
+                object.int("node", i64::from(*node));
+                object.text("op", "replace_component");
+                object.int("transfer_mask", i64::from(*transfer_mask));
+            }
+            PlanCommand::Transplant { regime } => {
+                object.text("op", "transplant");
+                object.text("regime", regime);
+            }
+            PlanCommand::DelaySupply { current, duration } => {
+                object.int("current", i64::from(*current));
+                object.int("duration", i64::from(*duration));
+                object.text("op", "delay_supply");
+            }
+            PlanCommand::ScrambleRoutes { routes, probability, duration } => {
+                object.int("duration", i64::from(*duration));
+                object.text("op", "scramble_routes");
+                object.int("probability", *probability);
+                let written: Vec<String> = routes.iter().map(u32::to_string).collect();
+                object.raw("routes", &format!("[{}]", written.join(",")));
             }
         }
         object.end();
@@ -319,6 +439,121 @@ pub fn check(
             }
             Ok(())
         }
+        PlanCommand::DeployJunction => {
+            if projected.field.ports.len() >= NODES_PER_RUN {
+                return Err(Refusal::of(Code::Capacity, "nodes_per_run"));
+            }
+            let form = projected
+                .field
+                .forms
+                .iter()
+                .find(|form| form.controlled)
+                .ok_or_else(|| Refusal::invalid("form"))?;
+            let junction = form.junction.ok_or_else(|| Refusal::invalid("junction_ability"))?;
+            if junction.blanks == 0 {
+                return Err(Refusal::of(Code::Capacity, "junction_blanks"));
+            }
+            if form.charge < junction.deploy_cost {
+                return Err(Refusal::invalid("stored_resource"));
+            }
+            Ok(())
+        }
+        PlanCommand::LimitRoute { route, retained_fraction, duration } => {
+            let Some(held) = projected.route(*route) else {
+                return Err(Refusal::missing("route"));
+            };
+            if !(1..65_536).contains(retained_fraction) || !(1..=1_800).contains(duration) {
+                return Err(Refusal::invalid("route_limit"));
+            }
+            if projected.field.route_clamps.iter().any(|clamp| clamp.route == *route) {
+                return Err(Refusal::invalid("route_already_limited"));
+            }
+            if fixed_mul(held.capacity, *retained_fraction) >= held.capacity {
+                return Err(Refusal::invalid("route_limit"));
+            }
+            Ok(())
+        }
+        PlanCommand::RaiseLeak { delta, duration } => {
+            if !(1..=field::LEAK_FRAC_CAP).contains(delta) || !(1..=1_800).contains(duration) {
+                return Err(Refusal::invalid("leak_breach"));
+            }
+            if projected.field.leak_breach.is_some() {
+                return Err(Refusal::invalid("boundary_already_breached"));
+            }
+            let standing = projected
+                .field
+                .physical_compartment
+                .leak_per_exposed_contact_per_step;
+            if standing.saturating_add(*delta) > field::LEAK_FRAC_CAP {
+                return Err(Refusal::of(Code::Capacity, "leak_coefficient"));
+            }
+            Ok(())
+        }
+        PlanCommand::DivertSupply { current, receiver, capture_fraction, duration } => {
+            if !projected.field.currents.iter().any(|held| held.id == *current) {
+                return Err(Refusal::missing("current"));
+            }
+            if !projected.holds_node(*receiver) {
+                return Err(Refusal::missing("node"));
+            }
+            if !(1..65_536).contains(capture_fraction) || !(1..=1_800).contains(duration) {
+                return Err(Refusal::invalid("supply_decoy"));
+            }
+            if projected.field.supply_decoys.iter().any(|decoy| decoy.current == *current) {
+                return Err(Refusal::invalid("supply_already_diverted"));
+            }
+            Ok(())
+        }
+        PlanCommand::ReplaceComponent { node, transfer_mask } => {
+            let held = projected
+                .field
+                .ports
+                .iter()
+                .find(|port| port.node == *node)
+                .ok_or_else(|| Refusal::missing("node"))?;
+            if held.kind == NodeKind::Form {
+                return Err(Refusal::invalid("form_replacement"));
+            }
+            if !(1..=127).contains(transfer_mask) {
+                return Err(Refusal::invalid("transfer_mask"));
+            }
+            Ok(())
+        }
+        PlanCommand::Transplant { regime } => {
+            crate::state::RegimeSpec::named(regime)
+                .map(|_| ())
+                .map_err(|_| Refusal::invalid("regime"))
+        }
+        PlanCommand::DelaySupply { current, duration } => {
+            let held = projected
+                .field
+                .currents
+                .iter()
+                .find(|held| held.id == *current)
+                .ok_or_else(|| Refusal::missing("current"))?;
+            if !held.active || !(1..=1_800).contains(duration) {
+                return Err(Refusal::invalid("input_delay"));
+            }
+            if projected.field.current_delays.iter().any(|delay| delay.current == *current) {
+                return Err(Refusal::invalid("input_already_delayed"));
+            }
+            Ok(())
+        }
+        PlanCommand::ScrambleRoutes { routes, probability, duration } => {
+            if routes.is_empty() || !read::ascending(routes) {
+                return Err(Refusal::invalid("routes"));
+            }
+            if routes.iter().any(|route| projected.route(*route).is_none()) {
+                return Err(Refusal::missing("route"));
+            }
+            if !(1..65_536).contains(probability) || !(1..=1_800).contains(duration) {
+                return Err(Refusal::invalid("route_scramble"));
+            }
+            if projected.field.route_scramble.is_some() {
+                return Err(Refusal::invalid("network_already_scrambled"));
+            }
+            Ok(())
+        }
     }
 }
 
@@ -378,6 +613,16 @@ pub fn apply(
             if projected.field.routes.len() == before {
                 return Err(Refusal::missing("route"));
             }
+            projected.field.route_clamps.retain(|clamp| clamp.route != *route);
+            let clear_scramble = if let Some(scramble) = &mut projected.field.route_scramble {
+                scramble.routes.retain(|held| held != route);
+                scramble.routes.is_empty()
+            } else {
+                false
+            };
+            if clear_scramble {
+                projected.field.route_scramble = None;
+            }
             // `next_route_id` does not move: identifiers are never reused, so a
             // cut leaves no gap to fill.
             Ok(())
@@ -390,6 +635,227 @@ pub fn apply(
                 return Err(Refusal::invalid("members"));
             }
             projected.field.physical_compartment.members = taken;
+            Ok(())
+        }
+        PlanCommand::DeployJunction => {
+            let Some(form_place) = projected.field.forms.iter().position(|form| form.controlled)
+            else {
+                return Err(Refusal::invalid("form"));
+            };
+            let Some(mut junction) = projected.field.forms[form_place].junction else {
+                return Err(Refusal::invalid("junction_ability"));
+            };
+            if junction.blanks == 0 {
+                return Err(Refusal::of(Code::Capacity, "junction_blanks"));
+            }
+            let form_node = projected.field.forms[form_place].node;
+            let Some(port_place) = projected
+                .field
+                .ports
+                .iter()
+                .position(|port| port.node == form_node)
+            else {
+                return Err(Refusal::missing("node"));
+            };
+            if projected.field.ports[port_place].q < junction.deploy_cost {
+                return Err(Refusal::invalid("stored_resource"));
+            }
+            projected.field.ports[port_place].q -= junction.deploy_cost;
+            projected.field.forms[form_place].charge -= junction.deploy_cost;
+            junction.blanks -= 1;
+            projected.field.forms[form_place].junction = Some(junction);
+
+            let node = projected.field.next_node_id;
+            projected.field.next_node_id += 1;
+            let layer = projected.field.forms[form_place].layer;
+            let pos = projected.field.forms[form_place].pos;
+            projected.field.ports.push(PortState {
+                node,
+                layer,
+                pos,
+                kind: NodeKind::Module,
+                q: 0,
+                open: true,
+                upkeep_rate: junction.upkeep_rate,
+                capacity: junction.capacity,
+            });
+            let Some(layer_state) = projected.field.layers.iter_mut().find(|held| held.layer == layer)
+            else {
+                return Err(Refusal::missing("layer"));
+            };
+            layer_state.port_ids.push(node);
+            Ok(())
+        }
+        PlanCommand::LimitRoute { route, retained_fraction, duration } => {
+            let Some(held) = projected.field.routes.iter_mut().find(|held| held.route == *route)
+            else {
+                return Err(Refusal::missing("route"));
+            };
+            let original_capacity = held.capacity;
+            held.capacity = fixed_mul(original_capacity, *retained_fraction);
+            held.flow = held.flow.min(held.capacity);
+            projected.field.route_clamps.push(RouteClamp {
+                route: *route,
+                original_capacity,
+                until_step: projected
+                    .field
+                    .step
+                    .saturating_add(u32::from(*duration))
+                    .saturating_add(1),
+            });
+            projected.field.route_clamps.sort_by_key(|clamp| clamp.route);
+            Ok(())
+        }
+        PlanCommand::RaiseLeak { delta, duration } => {
+            let standing = projected
+                .field
+                .physical_compartment
+                .leak_per_exposed_contact_per_step;
+            projected.field.physical_compartment.leak_per_exposed_contact_per_step =
+                standing.saturating_add(*delta);
+            projected.field.leak_breach = Some(field::LeakBreach {
+                original_coefficient: standing,
+                until_step: projected
+                    .field
+                    .step
+                    .saturating_add(u32::from(*duration))
+                    .saturating_add(1),
+            });
+            Ok(())
+        }
+        PlanCommand::DivertSupply { current, receiver, capture_fraction, duration } => {
+            projected.field.supply_decoys.push(SupplyDecoy {
+                current: *current,
+                receiver: *receiver,
+                capture_fraction: *capture_fraction,
+                until_step: projected
+                    .field
+                    .step
+                    .saturating_add(u32::from(*duration))
+                    .saturating_add(1),
+            });
+            projected.field.supply_decoys.sort_by_key(|decoy| decoy.current);
+            Ok(())
+        }
+        PlanCommand::ReplaceComponent { node, transfer_mask } => {
+            let place = projected
+                .field
+                .ports
+                .iter()
+                .position(|port| port.node == *node)
+                .ok_or_else(|| Refusal::missing("node"))?;
+            let old = projected.field.ports.remove(place);
+            let anchor = projected
+                .field
+                .forms
+                .iter()
+                .find(|form| form.controlled)
+                .map(|form| (form.layer, form.pos))
+                .unwrap_or((old.layer, old.pos));
+            let replacement = projected.field.next_node_id;
+            projected.field.next_node_id = projected.field.next_node_id.saturating_add(1);
+            let transfer = *transfer_mask;
+            let layer = if transfer & 0b000_0010 != 0 { old.layer } else { anchor.0 };
+            let pos = if transfer & 0b000_0010 != 0 { old.pos } else { anchor.1 };
+            projected.field.ports.push(PortState {
+                node: replacement,
+                layer,
+                pos,
+                kind: if transfer & 0b000_0001 != 0 { old.kind } else { NodeKind::Module },
+                q: if transfer & 0b001_0000 != 0 { old.q } else { 0 },
+                open: if transfer & 0b000_0100 != 0 { old.open } else { true },
+                upkeep_rate: if transfer & 0b000_1000 != 0 { old.upkeep_rate } else { ONE_UNIT },
+                capacity: if transfer & 0b000_1000 != 0 { old.capacity } else { 64 * ONE_UNIT },
+            });
+            for layer_state in &mut projected.field.layers {
+                layer_state.port_ids.retain(|held| *held != *node);
+                if layer_state.layer == layer {
+                    layer_state.port_ids.push(replacement);
+                }
+            }
+            if transfer & 0b010_0000 != 0 {
+                for route in &mut projected.field.routes {
+                    if route.tail == *node {
+                        route.tail = replacement;
+                    }
+                    if route.head == *node {
+                        route.head = replacement;
+                    }
+                }
+            } else {
+                let removed: Vec<u32> = projected
+                    .field
+                    .routes
+                    .iter()
+                    .filter(|route| route.tail == *node || route.head == *node)
+                    .map(|route| route.route)
+                    .collect();
+                projected
+                    .field
+                    .routes
+                    .retain(|route| route.tail != *node && route.head != *node);
+                projected
+                    .field
+                    .route_clamps
+                    .retain(|clamp| !removed.contains(&clamp.route));
+                let clear_scramble = if let Some(scramble) = &mut projected.field.route_scramble {
+                    scramble.routes.retain(|route| !removed.contains(route));
+                    scramble.routes.is_empty()
+                } else {
+                    false
+                };
+                if clear_scramble {
+                    projected.field.route_scramble = None;
+                }
+            }
+            let inherited_member = transfer & 0b100_0000 != 0
+                && projected.field.physical_compartment.members.binary_search(node).is_ok();
+            projected.field.physical_compartment.members.retain(|held| *held != *node);
+            if inherited_member {
+                projected.field.physical_compartment.members.push(replacement);
+                projected.field.physical_compartment.members.sort_unstable();
+            }
+            projected.field.signals.retain(|signal| signal.source != *node && signal.target != *node);
+            projected.field.supply_decoys.retain(|decoy| decoy.receiver != *node);
+            Ok(())
+        }
+        PlanCommand::Transplant { regime } => {
+            let destination = crate::state::RegimeSpec::named(regime)
+                .map_err(|_| Refusal::invalid("regime"))?;
+            destination.apply(&mut projected.field);
+            Ok(())
+        }
+        PlanCommand::DelaySupply { current, duration } => {
+            let held = projected
+                .field
+                .currents
+                .iter_mut()
+                .find(|held| held.id == *current)
+                .ok_or_else(|| Refusal::missing("current"))?;
+            let original_active = held.active;
+            held.active = false;
+            projected.field.current_delays.push(CurrentDelay {
+                current: *current,
+                original_active,
+                until_step: projected
+                    .field
+                    .step
+                    .saturating_add(u32::from(*duration))
+                    .saturating_add(1),
+            });
+            projected.field.current_delays.sort_by_key(|delay| delay.current);
+            Ok(())
+        }
+        PlanCommand::ScrambleRoutes { routes, probability, duration } => {
+            projected.field.route_scramble = Some(RouteScramble {
+                routes: routes.clone(),
+                probability: *probability,
+                until_step: projected
+                    .field
+                    .step
+                    .saturating_add(u32::from(*duration))
+                    .saturating_add(1),
+            });
             Ok(())
         }
     }
@@ -537,6 +1003,14 @@ impl PlanQueue {
                 }
                 PlanCommand::Cut { route } => (Some(*route), None, true),
                 PlanCommand::ReshapeCompartment { .. } => (None, None, false),
+                PlanCommand::DeployJunction => (None, None, false),
+                PlanCommand::LimitRoute { route, .. } => (Some(*route), None, false),
+                PlanCommand::RaiseLeak { .. } => (None, None, false),
+                PlanCommand::DivertSupply { .. } => (None, None, false),
+                PlanCommand::ReplaceComponent { .. } => (None, None, false),
+                PlanCommand::Transplant { .. } => (None, None, false),
+                PlanCommand::DelaySupply { .. } => (None, None, false),
+                PlanCommand::ScrambleRoutes { .. } => (None, None, false),
             };
             self.entries[place].route = route;
             self.entries[place].pair = pair;

@@ -1,0 +1,1171 @@
+/* Number 2 Field shell.
+   The Field remains the visual ground; every instrument is an edge rail over it. */
+
+.field-stage,
+.field-still-shell,
+.pressure-line,
+.criterion-line,
+.campaign-rail,
+.pulse-preview {
+  --field-ink: #f0ece5;
+  --field-muted: #969b99;
+  --field-rule: rgba(232, 228, 221, 0.2);
+  --field-glass: rgba(5, 7, 8, 0.82);
+  --field-glass-quiet: rgba(5, 7, 8, 0.66);
+  --field-view: #c7a9ff;
+  --field-physical: #e1d7c7;
+  --field-causal: #f2b15c;
+  --field-ready: #83d9ba;
+  --field-undo: #9bbce8;
+  --field-danger: #dc8068;
+  color-scheme: dark;
+}
+
+.campaign-rail {
+  position: fixed;
+  z-index: 13;
+  top: 0.9rem;
+  left: 50%;
+  box-sizing: border-box;
+  width: min(24rem, calc(100vw - 2rem));
+  transform: translateX(-50%);
+  border-top: 1px solid rgba(232, 228, 221, 0.28);
+  border-bottom: 1px solid rgba(232, 228, 221, 0.12);
+  padding: 0.42rem 0.62rem 0.5rem;
+  background: linear-gradient(90deg, transparent, rgba(5, 7, 8, 0.78) 12%, rgba(5, 7, 8, 0.78) 88%, transparent);
+  color: var(--field-ink);
+  filter: drop-shadow(0 0.8rem 1.8rem rgba(0, 0, 0, 0.3));
+  pointer-events: none;
+}
+
+.campaign-rail header,
+.campaign-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+
+.campaign-rail header span,
+.campaign-meta {
+  color: var(--field-muted);
+  font-size: 0.48rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.campaign-rail header strong {
+  overflow: hidden;
+  color: var(--field-ink);
+  font-size: 0.64rem;
+  font-weight: 540;
+  letter-spacing: 0.08em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.campaign-rail time {
+  color: #a9e4df;
+  font: 500 0.56rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.campaign-meta {
+  margin-top: 0.28rem;
+}
+
+.campaign-meta b {
+  color: var(--field-ink);
+  font-weight: 600;
+}
+
+.campaign-progress {
+  position: relative;
+  height: 3px;
+  margin-top: 0.34rem;
+  overflow: hidden;
+  background: rgba(232, 228, 221, 0.12);
+}
+
+.campaign-progress span,
+.campaign-progress i {
+  position: absolute;
+  inset: 0;
+  display: block;
+  transform-origin: left center;
+  transition: transform 120ms linear;
+}
+
+.campaign-progress span {
+  background: rgba(143, 214, 230, 0.38);
+}
+
+.campaign-progress i {
+  height: 1px;
+  top: 1px;
+  background: #8ee4c5;
+  box-shadow: 0 0 0.55rem rgba(142, 228, 197, 0.72);
+}
+
+.pulse-preview {
+  position: fixed;
+  z-index: 13;
+  bottom: 7.8rem;
+  left: 50%;
+  box-sizing: border-box;
+  width: min(42rem, calc(100vw - 2rem));
+  transform: translateX(-50%);
+  border-top: 1px solid rgba(143, 214, 230, 0.38);
+  border-bottom: 1px solid rgba(143, 214, 230, 0.16);
+  padding: 0.42rem 0.7rem 0.36rem;
+  background: linear-gradient(90deg, transparent, rgba(5, 9, 10, 0.82) 12%, rgba(5, 9, 10, 0.82) 88%, transparent);
+  filter: drop-shadow(0 0.8rem 1.6rem rgba(0, 0, 0, 0.35));
+  pointer-events: none;
+}
+
+.pulse-preview header {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0;
+}
+
+.pulse-preview header span {
+  color: var(--field-muted);
+  font-size: 0.49rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.pulse-preview header strong {
+  color: var(--field-ink);
+  font: 500 0.56rem/1.25 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.pulse-preview .pulse-key {
+  display: grid;
+  width: 1.35rem;
+  height: 1.35rem;
+  place-items: center;
+  border: 1px solid rgba(143, 214, 230, 0.62);
+  color: #dffaff;
+  font-size: 0.62rem;
+}
+
+.pulse-effects {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  min-height: 1rem;
+  margin-top: 0.24rem;
+  color: #d9e2df;
+  font-size: 0.52rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pulse-effects b {
+  color: #8ee4c5;
+  font-weight: 600;
+}
+
+.pulse-empty {
+  color: #8f9795;
+}
+
+.pulse-preview[data-connected='true'] {
+  border-top-color: rgba(142, 228, 197, 0.82);
+}
+
+.pulse-preview > p {
+  margin: 0.18rem 0 0;
+  color: rgba(225, 232, 227, 0.52);
+  font-size: 0.46rem;
+  letter-spacing: 0.11em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+/* The run's frozen contract is the pressure register's opposing edge rail. */
+.criterion-line {
+  position: fixed;
+  z-index: 12;
+  top: 0.9rem;
+  right: 1rem;
+  box-sizing: border-box;
+  width: min(30rem, calc(100vw - 2rem));
+  border: 0;
+  border-right: 2px solid var(--field-causal);
+  padding: 0.42rem 0.58rem 0.48rem;
+  background: var(--field-glass-quiet);
+  color: var(--field-ink);
+  box-shadow: 0 0.8rem 2rem rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(10px) saturate(0.8);
+  pointer-events: none;
+}
+
+.criterion-line[data-status='passed'] {
+  border-right-color: var(--field-ready);
+}
+
+.criterion-line[data-status='failed'] {
+  border-right-color: var(--field-danger);
+}
+
+.criterion-line header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.35rem;
+}
+
+.criterion-line header span,
+.criterion-line dt {
+  color: var(--field-muted);
+  font-size: 0.49rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.criterion-line header strong {
+  color: var(--field-ink);
+  font-size: 0.58rem;
+  font-weight: 520;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.criterion-line dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.45rem;
+  margin: 0;
+}
+
+.criterion-line dl > div {
+  min-width: 0;
+  border-top: 1px solid var(--field-rule);
+  padding-top: 0.3rem;
+}
+
+.criterion-line dl > div[data-met='true'] {
+  border-top-color: var(--field-ready);
+}
+
+.criterion-line dd {
+  margin: 0.14rem 0 0;
+  overflow: hidden;
+  color: var(--field-ink);
+  font-size: 0.55rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.field-stage {
+  min-width: 0;
+  min-height: 100svh;
+}
+
+.field-stage[data-inspecting] .field {
+  filter: contrast(1.12) saturate(1.04);
+}
+
+.field-engineering-transition {
+  position: fixed;
+  z-index: 14;
+  top: 4rem;
+  left: 1rem;
+  display: grid;
+  gap: 0.14rem;
+  box-sizing: border-box;
+  width: min(21rem, calc(100vw - 2rem));
+  border-block: 1px solid var(--field-rule);
+  border-left: 2px solid var(--field-causal);
+  padding: 0.48rem 0.62rem;
+  background: var(--field-glass-quiet);
+  box-shadow: 0 0.8rem 2rem rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(10px) saturate(0.8);
+  pointer-events: none;
+}
+
+.field-engineering-transition[data-status='committed'] {
+  border-left-color: var(--field-ready);
+}
+
+.field-engineering-transition span {
+  overflow-wrap: anywhere;
+  color: var(--field-ink);
+  font-size: 0.56rem;
+  font-weight: 620;
+  line-height: 1.25;
+}
+
+.field-engineering-transition strong {
+  color: var(--field-muted);
+  font-size: 0.46rem;
+  font-weight: 500;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+
+.field-inspection {
+  box-sizing: border-box;
+  width: min(17rem, calc(100vw - 2rem));
+  border: 0;
+  border-left: 2px solid var(--field-ready);
+  padding: 0.68rem 0.78rem 0.72rem;
+  background: var(--field-glass);
+  box-shadow:
+    0 1.2rem 2.8rem rgba(0, 0, 0, 0.42),
+    inset 0 1px rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(12px) saturate(0.8);
+}
+
+.field-inspection[data-target='route'] {
+  border-left-color: var(--field-causal);
+}
+
+.field-inspection[data-target='compartment'] {
+  border-left-color: var(--field-physical);
+}
+
+.field-inspection[data-target='view'] {
+  border-left-color: var(--field-view);
+}
+
+.field-inspection[data-target='current'] {
+  border-left-color: #8fd6e6;
+}
+
+.field-inspection[data-target='material'] {
+  border-left-color: #e0ca82;
+}
+
+.field-inspection header {
+  gap: 0.75rem;
+  border-color: var(--field-rule);
+}
+
+.field-inspection header span,
+.field-inspection dt {
+  color: var(--field-muted);
+}
+
+.field-inspection header strong,
+.field-inspection dd {
+  color: var(--field-ink);
+}
+
+/* Pressure is a reading, not a banner. It occupies one compact instrument row. */
+.pressure-line {
+  position: fixed;
+  z-index: 12;
+  top: 0.9rem;
+  left: 1rem;
+  right: auto;
+  bottom: auto;
+  display: block;
+  box-sizing: border-box;
+  width: min(27rem, calc(100vw - 2rem));
+  padding: 0;
+  background: transparent;
+  color: var(--field-ink);
+  pointer-events: auto;
+}
+
+.pressure-summary {
+  display: grid;
+  grid-template-columns: minmax(0, auto) auto minmax(3rem, 1fr) auto auto;
+  align-items: center;
+  gap: 0.48rem;
+  min-height: 2rem;
+  border-left: 2px solid #8fd6e6;
+  padding: 0.34rem 0.42rem 0.34rem 0.62rem;
+  background: var(--field-glass-quiet);
+  box-shadow: 0 0.8rem 2rem rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(10px) saturate(0.8);
+}
+
+.pressure-line[data-stage='pressure'] .pressure-summary {
+  border-left-color: var(--field-causal);
+}
+
+.pressure-line[data-stage='crisis'] .pressure-summary {
+  border-left-color: var(--field-danger);
+}
+
+.pressure-line[data-stage='resolution'] .pressure-summary {
+  border-left-color: var(--field-ready);
+}
+
+.pressure-name {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--field-ink);
+  font-size: 0.59rem;
+  letter-spacing: 0.1em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.pressure-stage,
+.pressure-target {
+  color: var(--field-muted);
+  font-size: 0.49rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.pressure-level,
+.tray-budget-meter {
+  display: block;
+  width: 100%;
+  height: 2px;
+  border: 0;
+  border-radius: 0;
+  background: rgba(232, 228, 221, 0.12);
+  accent-color: var(--field-causal);
+}
+
+.pressure-level::-webkit-meter-bar,
+.tray-budget-meter::-webkit-meter-bar {
+  height: 2px;
+  border: 0;
+  border-radius: 0;
+  background: rgba(232, 228, 221, 0.12);
+}
+
+.pressure-level::-webkit-meter-optimum-value,
+.tray-budget-meter::-webkit-meter-optimum-value {
+  background: currentColor;
+}
+
+.pressure-line[data-stage='signal'] .pressure-level {
+  color: #8fd6e6;
+}
+
+.pressure-line[data-stage='pressure'] .pressure-level {
+  color: var(--field-causal);
+}
+
+.pressure-line[data-stage='crisis'] .pressure-level {
+  color: var(--field-danger);
+}
+
+.pressure-line[data-stage='resolution'] .pressure-level {
+  color: var(--field-ready);
+}
+
+.pressure-summary .objective-why {
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid rgba(232, 228, 221, 0.32);
+  border-radius: 0;
+  padding: 0.18rem 0;
+  background: transparent;
+  color: #c9c4bc;
+  font: inherit;
+  font-size: 0.51rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.pressure-detail {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  box-sizing: border-box;
+  width: 100%;
+  border: 0;
+  border-left: 1px solid var(--field-rule);
+  padding: 0.7rem 0.75rem;
+  background: var(--field-glass);
+  box-shadow: 0 1.2rem 2.8rem rgba(0, 0, 0, 0.36);
+  backdrop-filter: blur(12px);
+}
+
+.pressure-detail .objective-detail {
+  margin-top: 0;
+  color: #c9c4bd;
+  font-size: 0.61rem;
+  line-height: 1.6;
+}
+
+.pressure-detail dl {
+  margin-bottom: 0;
+}
+
+/* Still Mode is spatial: free observation left, causal matter right, edits below. */
+.field-still-shell.tray {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  display: block;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: none;
+  overflow: visible;
+  padding: 0;
+  background: transparent;
+  backdrop-filter: none;
+  pointer-events: none;
+}
+
+.field-still-shell .tray-name {
+  position: fixed;
+  top: 0.85rem;
+  left: 50%;
+  width: auto;
+  margin: 0;
+  color: rgba(240, 236, 229, 0.72);
+  font-size: 0.56rem;
+  line-height: 1.2;
+  letter-spacing: 0.28em;
+  text-align: center;
+  text-transform: uppercase;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.field-still-shell .tray-name::before,
+.field-still-shell .tray-name::after {
+  margin: 0 0.65rem;
+  color: rgba(232, 228, 221, 0.38);
+}
+
+.field-still-shell .tray-tools {
+  position: fixed;
+  top: 2.25rem;
+  left: 50%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  box-sizing: border-box;
+  width: min(28rem, calc(100vw - 46rem));
+  min-width: 20rem;
+  margin: 0;
+  padding: 0;
+  background: rgba(232, 228, 221, 0.12);
+  transform: translateX(-50%);
+  pointer-events: auto;
+}
+
+.field-still-shell .tray-tool {
+  display: grid;
+  align-content: center;
+  gap: 0.14rem;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 2.45rem;
+  border: 0;
+  border-bottom: 1px solid rgba(232, 228, 221, 0.18);
+  border-radius: 0;
+  padding: 0.38rem 0.55rem;
+  background: rgba(5, 7, 8, 0.78);
+  color: #bdb8b1;
+  font: inherit;
+  font-size: 0.56rem;
+  letter-spacing: 0.1em;
+  text-align: left;
+  text-transform: uppercase;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+}
+
+.field-still-shell .tray-tool small {
+  overflow: hidden;
+  color: #7f8584;
+  font-size: 0.46rem;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.field-still-shell .tray-tool[data-tool='view'][aria-pressed='true'] {
+  border-bottom-color: var(--field-view);
+  box-shadow: inset 0 -2px var(--field-view);
+  color: #eadfff;
+}
+
+.field-still-shell .tray-tool[data-tool='compartment'][aria-pressed='true'] {
+  border-bottom-color: var(--field-causal);
+  box-shadow: inset 0 -2px var(--field-causal);
+  color: #f3e7d5;
+}
+
+.field-still-shell .tray-physical-panel,
+.field-still-shell .tray-view-panel {
+  position: fixed;
+  top: 5.35rem;
+  display: block;
+  box-sizing: border-box;
+  width: min(20rem, 25vw);
+  max-height: calc(100svh - 13rem);
+  margin: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--field-glass-quiet);
+  box-shadow: 0 1.5rem 3rem rgba(0, 0, 0, 0.22);
+  opacity: 0.48;
+  scrollbar-width: thin;
+  pointer-events: auto;
+  backdrop-filter: blur(10px) saturate(0.75);
+}
+
+.field-still-shell .tray-physical-panel {
+  right: 1rem;
+  left: auto;
+  gap: 0;
+  padding: 0.75rem 0.78rem 0.82rem;
+  border: 0;
+  border-right: 1px solid rgba(225, 215, 199, 0.42);
+}
+
+.field-still-shell .tray-view-panel {
+  right: auto;
+  left: 1rem;
+  padding: 0.75rem 0.78rem 0.82rem;
+  border: 0;
+  border-left: 1px solid rgba(199, 169, 255, 0.5);
+}
+
+.field-still-shell .tray-physical-panel[data-active='true'],
+.field-still-shell .tray-view-panel[data-active='true'] {
+  opacity: 1;
+}
+
+.field-still-shell .tray-physical-panel[data-active='true'] {
+  border-right-color: var(--field-causal);
+}
+
+.field-still-shell .tray-view-panel[data-active='true'] {
+  border-left-color: var(--field-view);
+}
+
+.field-still-shell .tray-panel-kicker {
+  margin: 0 0 0.65rem;
+  color: #b3aaa0;
+  font-size: 0.51rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.field-still-shell .tray-view-panel .tray-panel-kicker {
+  color: #d3c1f2;
+}
+
+.field-still-shell .tray-physical-panel .tray-panel-kicker {
+  color: #e3c79e;
+}
+
+.field-still-shell .tray-physical-readings,
+.field-still-shell .tray-view-readings,
+.field-still-shell .tray-junction-spec {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.field-still-shell .tray-reading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 0.7rem;
+  min-height: 0;
+  margin: 0;
+  border-bottom: 1px dotted rgba(232, 228, 221, 0.1);
+  padding: 0.25rem 0;
+  color: #a7a29c;
+  font-size: 0.54rem;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+
+.field-still-shell .tray-term {
+  min-width: 0;
+  white-space: normal;
+}
+
+.field-still-shell .tray-value {
+  color: var(--field-ink);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.field-still-shell .tray-value-unit {
+  justify-content: flex-end;
+}
+
+.field-still-shell .tray-proposed-reading {
+  border-bottom-color: rgba(131, 217, 186, 0.32);
+  color: var(--field-ready);
+}
+
+.field-still-shell .tray-junction {
+  margin-top: 0.75rem;
+}
+
+.field-still-shell .tray-open-lab,
+.field-still-shell .tray-deploy-junction,
+.field-still-shell .tray-clear-view {
+  pointer-events: auto;
+}
+
+.field-still-shell .tray-open-lab {
+  width: 100%;
+  margin-top: 0.7rem;
+  border: 1px solid rgba(225, 215, 199, 0.3);
+  border-radius: 0;
+  background: rgba(12, 13, 14, 0.6);
+}
+
+.field-still-shell .tray-candidates {
+  display: grid;
+  gap: 0.12rem;
+  margin: 0.3rem 0 0.5rem;
+  padding: 0;
+}
+
+.field-still-shell .tray-tier {
+  margin: 0.45rem 0 0.1rem;
+}
+
+.field-still-shell .tray-candidate {
+  padding: 0.12rem 0;
+}
+
+.field-still-shell .tray-candidate-select {
+  width: 100%;
+  min-height: 1.65rem;
+  padding: 0.22rem 0;
+  pointer-events: auto;
+}
+
+.field-still-shell .tray-candidate[data-focused='true'] {
+  border-left: 1px solid var(--field-view);
+  padding-left: 0.45rem;
+}
+
+.field-still-shell .tray-values {
+  padding-left: 0.65rem;
+}
+
+.field-still-shell .tray-value-row {
+  grid-template-columns: minmax(6.5rem, 1fr) minmax(4rem, 1fr);
+}
+
+/* The operation dock reads left to right: undo state, queued sequence, commit state. */
+.field-still-shell .tray-operation-dock {
+  position: fixed;
+  right: auto;
+  bottom: max(0.85rem, env(safe-area-inset-bottom));
+  left: 50%;
+  display: grid;
+  gap: 0.45rem;
+  box-sizing: border-box;
+  width: min(39rem, calc(100vw - 44rem));
+  min-width: 24rem;
+  margin: 0;
+  padding: 0.55rem 0.72rem 0.6rem;
+  border: 0;
+  border-top: 1px solid rgba(242, 177, 92, 0.36);
+  border-right: 2px solid rgba(232, 228, 221, 0.14);
+  border-left: 2px solid rgba(232, 228, 221, 0.14);
+  background: var(--field-glass);
+  box-shadow: 0 -1.2rem 2.8rem rgba(0, 0, 0, 0.28);
+  transform: translateX(-50%);
+  pointer-events: none;
+  backdrop-filter: blur(12px) saturate(0.78);
+}
+
+.field-still-shell .tray-operation-dock[data-can-undo='true'] {
+  border-left-color: var(--field-undo);
+}
+
+.field-still-shell .tray-operation-dock[data-can-commit='true'] {
+  border-right-color: var(--field-ready);
+}
+
+.field-still-shell .tray-operation-dock[data-conflicted='true'] {
+  border-top-color: var(--field-danger);
+  border-right-color: var(--field-danger);
+}
+
+.field-still-shell[data-mode='ramp_in'] .tray-operation-dock,
+.field-still-shell[data-mode='ramp_out'] .tray-operation-dock {
+  opacity: 0.62;
+}
+
+.field-still-shell .tray-operation-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 0.8rem;
+}
+
+.field-still-shell .tray-operation-summary .tray-reading {
+  border-bottom: 0;
+  padding: 0;
+}
+
+.field-still-shell .tray-operation-summary .tray-reading + .tray-reading {
+  border-left: 1px solid rgba(232, 228, 221, 0.12);
+  padding-left: 0.8rem;
+}
+
+.field-still-shell .tray-budget-meter {
+  grid-column: 1 / -1;
+  margin-top: 0.42rem;
+  color: var(--field-causal);
+}
+
+.field-still-shell .tray-operation-dock[data-can-commit='true'] .tray-budget-meter {
+  color: var(--field-ready);
+}
+
+.field-still-shell .tray-operation-dock[data-conflicted='true'] .tray-budget-meter {
+  color: var(--field-danger);
+}
+
+.field-still-shell .tray-queue {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0.3rem;
+  min-height: 1.55rem;
+  margin: 0;
+  padding: 0.3rem 0 0;
+  border-top: 1px solid rgba(232, 228, 221, 0.1);
+  list-style: none;
+}
+
+.field-still-shell .tray-queue:empty::before {
+  content: '';
+  align-self: center;
+  width: 100%;
+  height: 1px;
+  background: rgba(232, 228, 221, 0.08);
+}
+
+.field-still-shell .tray-entry {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.35rem;
+  box-sizing: border-box;
+  min-width: 2.8rem;
+  min-height: 1.35rem;
+  border: 1px solid rgba(242, 177, 92, 0.28);
+  border-left-width: 2px;
+  padding: 0.18rem 0.35rem;
+  color: #d8c7af;
+  font-size: 0.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.field-still-shell .tray-entry[data-op='connect'],
+.field-still-shell .tray-entry[data-op='redirect'],
+.field-still-shell .tray-entry[data-op='divert_supply'] {
+  border-left-color: #8fd6e6;
+}
+
+.field-still-shell .tray-entry[data-op='reshape_compartment'],
+.field-still-shell .tray-entry[data-op='deploy_junction'],
+.field-still-shell .tray-entry[data-op='replace_component'] {
+  border-left-color: var(--field-physical);
+}
+
+.field-still-shell .tray-entry[data-op='cut'],
+.field-still-shell .tray-entry[data-op='raise_leak'],
+.field-still-shell .tray-entry[data-op='scramble_routes'] {
+  border-left-color: var(--field-danger);
+}
+
+.field-still-shell .tray-entry[data-conflict='true'] {
+  border-color: var(--field-danger);
+  color: #f1b3a4;
+}
+
+.field-still-shell .tray-entry .tray-mark {
+  width: 0.28rem;
+  height: 0.28rem;
+  border: 0;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.72;
+}
+
+.field-still-shell .tray-entry-cost {
+  text-align: right;
+}
+
+.field-still-shell .tray-guidance {
+  position: fixed;
+  bottom: 6.2rem;
+  left: 50%;
+  max-width: min(38rem, calc(100vw - 44rem));
+  margin: 0;
+  color: rgba(217, 211, 204, 0.64);
+  font-size: 0.53rem;
+  line-height: 1.5;
+  letter-spacing: 0.18em;
+  text-align: center;
+  text-transform: uppercase;
+  transform: translateX(-50%);
+  white-space: normal;
+}
+
+.field-still-shell button:focus-visible,
+.pressure-line button:focus-visible {
+  outline: 1px solid var(--field-ink);
+  outline-offset: 2px;
+}
+
+@media (max-width: 72rem) {
+  .campaign-rail {
+    left: 1rem;
+    transform: none;
+  }
+
+  .pressure-line {
+    top: 5rem;
+  }
+
+  .field-still-shell .tray-tools {
+    width: min(24rem, calc(100vw - 38rem));
+    min-width: 18rem;
+  }
+
+  .field-still-shell .tray-physical-panel,
+  .field-still-shell .tray-view-panel {
+    width: min(18rem, 27vw);
+  }
+
+  .field-still-shell .tray-operation-dock {
+    width: min(34rem, calc(100vw - 38rem));
+    min-width: 21rem;
+  }
+
+  .field-still-shell .tray-guidance {
+    max-width: calc(100vw - 38rem);
+  }
+}
+
+@media (max-width: 56rem) {
+  .field-still-shell .tray-tools {
+    width: min(22rem, calc(100vw - 30rem));
+    min-width: 17rem;
+  }
+
+  .field-still-shell .tray-physical-panel,
+  .field-still-shell .tray-view-panel {
+    width: min(14rem, 28vw);
+  }
+
+  .field-still-shell .tray-operation-dock {
+    width: min(30rem, calc(100vw - 30rem));
+    min-width: 19rem;
+  }
+
+  .field-still-shell .tray-guidance {
+    display: none;
+  }
+}
+
+@media (max-width: 48rem) {
+  .campaign-rail {
+    top: max(0.55rem, env(safe-area-inset-top));
+    right: 0.6rem;
+    left: 0.6rem;
+    width: auto;
+  }
+
+  .pulse-preview {
+    right: auto;
+    bottom: calc(8.8rem + env(safe-area-inset-bottom));
+    left: 50%;
+    width: calc(100vw - 1.2rem);
+  }
+
+  .pulse-effects {
+    gap: 0.55rem;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+  .criterion-line {
+    top: 8rem;
+    left: 0.6rem;
+    right: 0.6rem;
+    width: auto;
+  }
+
+  .criterion-line dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pressure-line {
+    top: 4.85rem;
+    left: 0.6rem;
+    width: calc(100vw - 1.2rem);
+  }
+
+  .pressure-summary {
+    grid-template-columns: minmax(0, auto) auto minmax(2.5rem, 1fr) auto;
+  }
+
+  .pressure-target {
+    display: none;
+  }
+
+  .pressure-detail {
+    max-height: 38svh;
+    overflow: auto;
+  }
+
+  .field-still-shell.tray {
+    position: fixed;
+    inset: 0;
+    z-index: 8;
+    display: block;
+    overflow: visible;
+    padding: 0;
+    background: transparent;
+    backdrop-filter: none;
+    pointer-events: none;
+  }
+
+  .field-still-shell .tray-name {
+    position: fixed;
+    top: 3.55rem;
+    left: 50%;
+    width: auto;
+    font-size: 0.5rem;
+    line-height: 1.2;
+  }
+
+  .field-still-shell .tray-tools {
+    position: fixed;
+    top: auto;
+    right: 0.6rem;
+    bottom: calc(33svh + 6.05rem + env(safe-area-inset-bottom));
+    left: 0.6rem;
+    width: auto;
+    min-width: 0;
+    transform: none;
+  }
+
+  .field-still-shell .tray-tool {
+    min-height: 2.75rem;
+  }
+
+  .field-still-shell .tray-physical-panel,
+  .field-still-shell .tray-view-panel {
+    position: fixed;
+    top: auto;
+    right: 0.6rem;
+    bottom: calc(5.65rem + env(safe-area-inset-bottom));
+    left: 0.6rem;
+    display: block;
+    width: auto;
+    max-height: 33svh;
+    margin: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding: 0.72rem 0.75rem;
+    border: 0;
+    background: rgba(5, 7, 8, 0.9);
+    box-shadow: 0 -1rem 2.5rem rgba(0, 0, 0, 0.34);
+    opacity: 1;
+    backdrop-filter: blur(12px);
+  }
+
+  .field-still-shell .tray-physical-panel {
+    border-right: 1px solid var(--field-causal);
+  }
+
+  .field-still-shell .tray-view-panel {
+    border-left: 1px solid var(--field-view);
+  }
+
+  .field-still-shell[data-tool='view'] .tray-physical-panel,
+  .field-still-shell[data-tool='compartment'] .tray-view-panel {
+    display: none;
+  }
+
+  .field-still-shell .tray-operation-dock {
+    position: fixed;
+    right: 0.6rem;
+    bottom: max(0.45rem, env(safe-area-inset-bottom));
+    left: 0.6rem;
+    width: auto;
+    min-width: 0;
+    margin: 0;
+    transform: none;
+  }
+
+  .field-still-shell .tray-queue {
+    min-height: 1.4rem;
+    overflow-x: auto;
+  }
+
+  .field-still-shell .tray-entry {
+    flex: 0 0 auto;
+  }
+
+  .field-still-shell .tray-guidance {
+    display: none;
+  }
+
+  .field-inspection,
+  .field-inspection[data-align='right'] {
+    right: 0.6rem;
+    left: 0.6rem !important;
+    width: auto;
+    max-height: 42svh;
+    overflow: auto;
+    transform: translateY(-50%);
+  }
+}
+
+@media (max-width: 30rem) {
+  .field-still-shell .tray-name::before,
+  .field-still-shell .tray-name::after {
+    display: none;
+  }
+
+  .field-still-shell .tray-tool {
+    padding-inline: 0.42rem;
+  }
+
+  .field-still-shell .tray-operation-summary {
+    gap: 0 0.45rem;
+  }
+
+  .field-still-shell .tray-operation-summary .tray-reading + .tray-reading {
+    padding-left: 0.45rem;
+  }
+
+  .field-still-shell .tray-value-row {
+    grid-template-columns: minmax(5.7rem, 0.9fr) minmax(3.5rem, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .field-still-shell *,
+  .pressure-line *,
+  .field-inspection,
+  .field-engineering-transition {
+    scroll-behavior: auto;
+    transition: none !important;
+  }
+}

@@ -446,6 +446,7 @@ fn a_filled_envelope_encodes_at_the_locked_record_layout() {
         pressures: &[],
         objective_ordinal: 0,
         forecast: &envelope,
+        medium: field_game_core::field::MediumMotion::default(),
     });
 
     // The header raises the still-surface flag, and the section table names

@@ -14,6 +14,7 @@ pub mod measure;
 use field_game_core::fault::quoted;
 use field_game_core::json::hex_bytes;
 use field_game_core::sha256;
+use field_game_core::{PROTOCOL_VERSION, SAVE_VERSION};
 
 pub const MANIFEST: &str = include_str!("../../../content/manifest.json");
 pub const CHAPTER_THE_PULL: &str = include_str!("../../../content/chapters/the_pull.json");
@@ -65,7 +66,7 @@ pub fn fixture_files() -> Vec<String> {
 /// The init JSON a session opens on, over one file list of the caller's own.
 pub fn worker_init_of(listed: &[String]) -> String {
     format!(
-        "{{\"content\":{},\"protocol\":2,\"save_version\":2}}",
+        "{{\"content\":{},\"protocol\":{PROTOCOL_VERSION},\"save_version\":{SAVE_VERSION}}}",
         bundle_of(MANIFEST, listed),
     )
 }
@@ -143,12 +144,15 @@ pub fn bundle_of(manifest: &str, listed: &[String]) -> String {
 /// authored content it imported.
 pub fn worker_init() -> String {
     format!(
-        "{{\"content\":{},\"protocol\":2,\"save_version\":2}}",
+        "{{\"content\":{},\"protocol\":{PROTOCOL_VERSION},\"save_version\":{SAVE_VERSION}}}",
         bundle_with(&content_hash()),
     )
 }
 
 /// The same, under a digest that does not describe the bytes beside it.
 pub fn worker_init_with(hash: &str) -> String {
-    format!("{{\"content\":{},\"protocol\":2,\"save_version\":2}}", bundle_with(hash))
+    format!(
+        "{{\"content\":{},\"protocol\":{PROTOCOL_VERSION},\"save_version\":{SAVE_VERSION}}}",
+        bundle_with(hash),
+    )
 }

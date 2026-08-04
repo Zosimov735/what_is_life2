@@ -185,7 +185,7 @@ test('two sessions under the same run key and the same frames export the same by
   expect(field.physical_compartment.members).toEqual([2, 3, 4]);
   expect(field.physical_compartment.leak_per_exposed_contact_per_step).toBeGreaterThan(0);
   // The content hash is the digest the build embedded, and the run records it.
-  expect(exportedFile.payload.content_hash).toBe(CONTENT_HASH);
+  expect(exportedFile.payload.scenario_spec.content_hash).toBe(CONTENT_HASH);
 });
 
 test('a different run key exports different bytes', async () => {

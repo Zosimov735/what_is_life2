@@ -1729,9 +1729,35 @@ fn the_shared_campaign_script_carries_the_chapter_to_its_own_boundary() {
         }
         driver.phase_until(&mut session, phase, &stop);
     }
+    let stalled = session.run().expect("a run").state();
     assert!(
         stop(&session),
-        "the shared campaign script completes The Loop and carries the run past it",
+        "the shared campaign script completes The Loop and carries the run past it; \
+         objective={} progress={}/{} routes={:?} nodes={:?}",
+        stalled.progress.objective.id,
+        stalled.progress.objective.progress,
+        stalled.progress.objective.target.unwrap_or_default(),
+        stalled
+            .now
+            .routes
+            .iter()
+            .map(|route| {
+                (
+                    route.route,
+                    route.tail,
+                    route.head,
+                    route.flow / ONE_UNIT,
+                    route.capacity / ONE_UNIT,
+                )
+            })
+            .collect::<Vec<_>>(),
+        stalled
+            .now
+            .ports
+            .iter()
+            .filter(|port| [2, 4, 5, 6].contains(&port.node))
+            .map(|port| (port.node, port.q / ONE_UNIT, port.capacity / ONE_UNIT))
+            .collect::<Vec<_>>(),
     );
     // And it lets the optional test go, which is what keeps a driven campaign's
     // completed list the campaign's required objectives exactly.

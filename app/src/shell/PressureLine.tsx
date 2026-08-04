@@ -28,6 +28,11 @@ function explanationKey(pressure: PressureState): string {
   return `explanation.pressure_${pressure.pressure}`;
 }
 
+/** The authoritative rule family each member of the closed pressure set modifies. */
+function ruleKey(pressure: PressureState): string {
+  return `pressure.rule.${pressure.pressure}`;
+}
+
 /**
  * The one pressure the line names: the primary if one is active, else the
  * active one standing at the furthest stage, ties to the closed set's order.
@@ -54,19 +59,48 @@ export function PressureLine({ pressures }: PressureLineProps) {
   if (!shown) return null;
 
   return (
-    <div className="pressure-line" data-stage={shown.stage}>
-      <p className="pressure-name" role="status" aria-live="polite">
-        {copy(nameKey(shown))}
-      </p>
-      <button
-        type="button"
-        className="objective-why"
-        aria-expanded={explaining}
-        onClick={() => setExplaining((held) => !held)}
-      >
-        {copy('label.why')}
-      </button>
-      {explaining ? <p className="objective-detail">{copy(explanationKey(shown))}</p> : null}
+    <div
+      className="pressure-line"
+      data-stage={shown.stage}
+      data-pressure={shown.pressure}
+      data-expanded={explaining}
+    >
+      <div className="pressure-summary">
+        <p className="pressure-name" role="status" aria-live="polite">
+          {copy(nameKey(shown))}
+        </p>
+        <span className="pressure-stage">{shown.stage}</span>
+        <meter
+          className="pressure-level"
+          min={0}
+          max={65_536}
+          value={shown.level}
+          aria-label={copy('pressure.inspect.level')}
+        />
+        <span className="pressure-target">
+          {shown.target.t}{shown.target.id === null ? '' : ` ${shown.target.id}`}
+        </span>
+        <button
+          type="button"
+          className="objective-why"
+          aria-expanded={explaining}
+          onClick={() => setExplaining((held) => !held)}
+        >
+          {copy('label.why')}
+        </button>
+      </div>
+      {explaining ? (
+        <div className="pressure-detail">
+          <p className="objective-detail">{copy(explanationKey(shown))}</p>
+          <dl>
+            <div><dt>{copy('pressure.inspect.stage')}</dt><dd>{shown.stage}</dd></div>
+            <div><dt>{copy('pressure.inspect.level')}</dt><dd>{(shown.level * 100 / 65_536).toFixed(1)}%</dd></div>
+            <div><dt>{copy('pressure.inspect.target')}</dt><dd>{shown.target.t}{shown.target.id === null ? '' : ` ${shown.target.id}`}</dd></div>
+            <div><dt>{copy('pressure.inspect.onset')}</dt><dd>{shown.start_step}</dd></div>
+            <div><dt>{copy('pressure.inspect.modified_rule')}</dt><dd>{copy(ruleKey(shown))}</dd></div>
+          </dl>
+        </div>
+      ) : null}
     </div>
   );
 }

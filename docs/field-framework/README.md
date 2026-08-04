@@ -15,22 +15,25 @@ When documents overlap, read them in this order:
    distinctions.
 2. [Product outline](PRODUCT_OUTLINE.md) — what the game promises and why it is
    fun.
-3. [Atlas and mechanics contract](ATLAS_AND_MECHANICS.md) — regimes,
+3. [Automation and contract authority](AUTOMATION_AND_CONTRACTS.md) — the
+   primary loop, local-policy grammar, contract ladder, qualification, and
+   blueprint boundary.
+4. [Atlas and mechanics contract](ATLAS_AND_MECHANICS.md) — regimes,
    quantities, instruments, experiments, objectives, and validation.
-4. [Form and reality-of-play model](FORM_AND_PLAY_MODEL.md) — exact meaning of
+5. [Form and reality-of-play model](FORM_AND_PLAY_MODEL.md) — exact meaning of
    the steerable Form, resource flow, abilities, click targets, and causal
    model.
-5. [Number 2 mock-up pseudocode](NUMBER_2_MOCKUP_PSEUDOCODE.md) — visual and
+6. [Number 2 mock-up pseudocode](NUMBER_2_MOCKUP_PSEUDOCODE.md) — visual and
    implementation contract for every retained mock-up.
-6. [Platform and delivery](PLATFORM_AND_DELIVERY.md) — remote, static-web, and
+7. [Platform and delivery](PLATFORM_AND_DELIVERY.md) — remote, static-web, and
    macOS runtime and packaging boundaries.
-7. [Current codebase state](CODEBASE_STATE.md) — dated implementation truth and
+8. [Current codebase state](CODEBASE_STATE.md) — dated implementation truth and
    known mismatches.
-8. [Continuous development loop](DEVELOPMENT_LOOP.md) — binding milestone,
+9. [Continuous development loop](DEVELOPMENT_LOOP.md) — binding milestone,
    publication, and panel-review cycle.
-9. [Milestone ledger](MILESTONES.md) — the sole authority for the one active
+10. [Milestone ledger](MILESTONES.md) — the sole authority for the one active
    implementation milestone and its evidence.
-10. [Working rules](WORKING_RULES.md) — contributor process, including the
+11. [Working rules](WORKING_RULES.md) — contributor process, including the
    absolute no-TDD rule.
 
 If a visual label conflicts with a mechanics document, the visual composition
@@ -42,6 +45,9 @@ what exists today.
 
 - [Number 2 asset manifest](assets/number-2/README.md) and all 21 source
   mock-ups.
+- [Human playtest guide](PLAYTEST_GUIDE.md), including the eight-chapter clock,
+  objective-by-objective progression, the complete visual and sound dictionary,
+  controls, expected causal results, and high-risk bug-report areas.
 - [Scientific reference snapshot](references/README.md), including the attached
   CC-BY 4.0 bioRxiv preprint.
 - [Atlas prototype QA record](qa/ATLAS_PROTOTYPE_QA.md).

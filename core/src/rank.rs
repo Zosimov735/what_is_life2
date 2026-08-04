@@ -33,15 +33,15 @@
 //!   rounds to nearest with halves upward on `i128` intermediates. Identical
 //!   inputs therefore produce an identical record, byte for byte.
 //!
-//! One rule of version 1 draws: the Noise flow scale, at its locked drawing
-//! point in the step function. Every sample below names its stream as the
+//! Route Noise and bounded Supply variability draw from event-addressed child
+//! streams in the step function. Every sample below names its parent stream as the
 //! locked split of `sigma_V` — [`sample_stream`] is that split — and passes
 //! it through the replay boundary into the step function, which carries it
-//! beside the staged pressures as [`field::Staging`]. Where effective noise
-//! stands, each sample's replay re-draws the flow scales from its own stream
+//! beside the staged pressures as [`field::Staging`]. Where variability
+//! stands, each sample's replay re-draws its addressed values from its own stream
 //! — the locked forecast distortion, one rule seen through the replay
 //! carriage — so the eight samples of a procedure genuinely disagree and the
-//! confidence ranges are real spreads. Where no noise stands, nothing draws,
+//! confidence ranges are real spreads. Where no variability stands, nothing draws,
 //! every sample agrees, and the ranges are points, exactly as before.
 
 use crate::field::{self, StepCache, StepRecords};
@@ -350,6 +350,8 @@ pub(crate) struct Window<'a> {
     /// The authored tables the stage machine reads: content, identical for the
     /// live step and every replay of it.
     pub(crate) schedule: crate::pressure::Schedule,
+    pub(crate) medium: field::MediumMotion,
+    pub(crate) supply_jitter: Frac,
 }
 
 impl<'a> Window<'a> {
@@ -368,8 +370,10 @@ impl<'a> Window<'a> {
                 pointer_speed,
                 &mut field::Staging {
                     pressures: &mut scratch,
-                    schedule: state.spec.schedule(),
+                    schedule: state.scenario.pressure_schedule(),
                     stream: &mut stream,
+                    medium: state.scenario.regime().medium_motion(),
+                    supply_jitter: state.scenario.regime().supply_jitter(),
                 },
                 &cache,
             );
@@ -381,7 +385,9 @@ impl<'a> Window<'a> {
             pointer_speed,
             cache,
             pressures: state.pressures.clone(),
-            schedule: state.spec.schedule().clone(),
+            schedule: state.scenario.pressure_schedule().clone(),
+            medium: state.scenario.regime().medium_motion(),
+            supply_jitter: state.scenario.regime().supply_jitter(),
         }
     }
 
@@ -463,6 +469,8 @@ pub(crate) fn replay(
                 pressures: &mut scratch,
                 schedule: &window.schedule,
                 stream: &mut stream,
+                medium: window.medium,
+                supply_jitter: window.supply_jitter,
             },
             cache,
         );

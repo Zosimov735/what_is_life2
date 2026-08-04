@@ -26,7 +26,7 @@
  * fixture the core's own test pins, which the renderer tests also read.
  */
 
-import { decodeFrameState, type FrameState } from '../../../worker/src/frame-state';
+import { decodeFrameState, FRAME_VERSION, type FrameState } from '../../../worker/src/frame-state';
 import type { FramePair } from './worker-client';
 
 /** The locked header width, and the section table entry width. */
@@ -292,6 +292,26 @@ function pulseReachAt(step: number): number {
   return (PULSE_RADIUS_BASE + PULSE_RADIUS_PER_CHARGE * charge) >> 8;
 }
 
+/** The authoritative-looking aggregate preview the visual stand carries. */
+function pulsePreviewAt(step: number): {
+  radius: number;
+  gathered: number;
+  reserveReleased: number;
+  openedPorts: number;
+  displacedPressures: number;
+} | null {
+  const through = step % PULSE_PERIOD;
+  if (through >= PULSE_CHARGING) return null;
+  const connected = through >= 10;
+  return {
+    radius: pulseReachAt(step) << 8,
+    gathered: connected ? 32 * 65536 : 0,
+    reserveReleased: through >= 18 ? 8 * 65536 : 0,
+    openedPorts: through >= 16 ? 1 : 0,
+    displacedPressures: through >= 20 ? 1 : 0,
+  };
+}
+
 /**
  * The cues a step raises.
  *
@@ -352,6 +372,7 @@ function encode(step: number): ArrayBuffer {
   const cues = cuesAt(step);
   const pressures = pressuresAt(step);
   const forms = formsAt(step);
+  const pulsePreview = pulsePreviewAt(step);
   const currents = [
     {
       id: 1,
@@ -398,6 +419,7 @@ function encode(step: number): ArrayBuffer {
     { kind: 5, count: 1, width: 32 },
     { kind: 6, count: pressures.length, width: 12 },
     { kind: 7, count: cues.length, width: 8 },
+    { kind: 13, count: pulsePreview ? 1 : 0, width: 32 },
     { kind: 10, count: pathPoints.length, width: 4 },
   ].filter((section) => section.count > 0);
 
@@ -408,7 +430,7 @@ function encode(step: number): ArrayBuffer {
   const bytes = new Uint8Array(buffer);
 
   bytes.set([0x46, 0x47, 0x46, 0x31]);
-  view.setUint16(4, 2, true);
+  view.setUint16(4, FRAME_VERSION, true);
   view.setUint16(6, 0, true);
   view.setUint32(8, step, true);
   view.setUint16(12, 65535, true);
@@ -461,8 +483,9 @@ function encode(step: number): ArrayBuffer {
       node >= FORM_NODE_FIRST ? 3 : node === CLUSTER_FIRST + 1 ? 1 : node === CLUSTER_FIRST + 4 ? 2 : 0;
     view.setUint32(offset, node, true);
     bytes[offset + 4] = kind;
+    const open = node >= FORM_NODE_FIRST || kind !== 0 || index % 3 !== 1;
     bytes[offset + 5] =
-      1 |
+      (open ? 1 : 0) |
       (node === OUTLYING_FIRST + 2 ? 2 : 0) |
       (isMember(node) ? 4 : 0) |
       (isShell(node) ? 8 : 0);
@@ -492,7 +515,10 @@ function encode(step: number): ArrayBuffer {
   for (const current of currents) {
     view.setUint16(offset, current.id, true);
     bytes[offset + 2] = current.layer;
-    bytes[offset + 3] = (current.active ? 1 : 0) | (current.bright ? 2 : 0);
+    bytes[offset + 3] =
+      (current.active ? 1 : 0) |
+      (current.bright ? 2 : 0) |
+      (current.active ? 16 : 0);
     view.setUint16(offset + 4, step % 1024, true);
     view.setUint16(offset + 6, current.strength, true);
     view.setUint16(offset + 8, pathAt, true);
@@ -528,6 +554,21 @@ function encode(step: number): ArrayBuffer {
     view.setUint16(offset + 2, cue.a, true);
     view.setUint32(offset + 4, cue.b, true);
     offset += 8;
+  }
+
+  // Coupling preview. Its aggregate effects are the same shape the core emits;
+  // the renderer resolves those totals back onto the nearby visible targets.
+  if (pulsePreview) {
+    view.setUint32(offset, pulsePreview.radius, true);
+    view.setUint32(offset + 4, pulsePreview.gathered, true);
+    view.setUint32(offset + 8, pulsePreview.reserveReleased, true);
+    view.setUint16(offset + 12, pulsePreview.openedPorts, true);
+    view.setUint16(offset + 14, pulsePreview.displacedPressures, true);
+    view.setUint32(offset + 16, 0, true);
+    view.setUint32(offset + 20, 0, true);
+    view.setUint32(offset + 24, 0, true);
+    view.setUint32(offset + 28, 0, true);
+    offset += 32;
   }
 
   // The flat point array every current's path indexes into.

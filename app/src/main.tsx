@@ -3,6 +3,7 @@
 import { createRoot } from 'react-dom/client';
 import { App } from './shell/App';
 import './shell/shell.css';
+import './shell/visual-overhaul.css';
 
 const mount = document.getElementById('root');
 if (!mount) {

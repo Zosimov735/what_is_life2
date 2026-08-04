@@ -1,7 +1,7 @@
 /**
  * The worker protocol, as `docs/field-framework/ARCHITECTURE.md` locks it.
  *
- * The command set (10) and the event set (7) are closed for version 2: nothing
+ * The command set (32) and the event set (10) are closed for version 13: nothing
  * else crosses the boundary between the shell and the worker. Beside the
  * message layer — the envelopes, the closed name sets, and the error envelope —
  * this file re-declares the public core types one to one with the Rust core, in
@@ -10,13 +10,15 @@
  */
 
 /** The protocol version field. */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 13;
 
 /** The save version this build reads and writes. */
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 7;
 
-/** The ten commands the shell may send. */
+/** The thirty-two commands the shell may send. */
 export type CommandName =
+  | 'list_contracts'
+  | 'open_contract'
   | 'init_run'
   | 'input_frame'
   | 'queue_plan'
@@ -26,17 +28,1176 @@ export type CommandName =
   | 'restore_checkpoint'
   | 'recover_branch'
   | 'export_run'
-  | 'import_run';
+  | 'import_run'
+  | 'reopen_archive'
+  | 'run_analysis'
+  | 'sample_instrument'
+  | 'inspect_field'
+  | 'compile_scenario'
+  | 'run_scenario'
+  | 'sample_lens'
+  | 'renewal_trial'
+  | 'renewal_inventory'
+  | 'preview_design_patch'
+  | 'commit_design_patch'
+  | 'preview_commission_restart'
+  | 'preview_qualification_input'
+  | 'freeze_qualification_request'
+  | 'qualification_job'
+  | 'engineering_memory'
+  | 'restart_commission'
+  | 'return_commission'
+  | 'resume_commission'
+  | 'set_local_policy';
 
-/** The seven events the worker may raise unsolicited. */
+export type SupplySense = 'absent' | 'present' | 'emitting' | 'quiet';
+
+export type LocalCondition =
+  | { kind: 'always' }
+  | { kind: 'charge_below' | 'charge_above'; fraction: Frac }
+  | { kind: 'operating_margin_below'; amount: Fx }
+  | { kind: 'supply'; state: SupplySense; radius: Fx }
+  | { kind: 'target_in_range'; radius: Fx }
+  | { kind: 'route_flow_below' | 'route_flow_above'; route: number; flow: Fx }
+  | { kind: 'overloaded' }
+  | { kind: 'signal_present'; radius: Fx }
+  | { kind: 'timer_elapsed'; steps: number };
+
+export type LocalAction =
+  | { kind: 'hold' }
+  | { kind: 'seek_supply' | 'seek_port' | 'seek_signal' | 'couple'; radius: Fx }
+  | { kind: 'change_depth'; direction: -1 | 0 | 1 }
+  | { kind: 'set_interface'; open: boolean }
+  | {
+      kind: 'set_route';
+      route: number;
+      enabled: boolean;
+      capacity_limit: Fx;
+      allocation_weight: number;
+    }
+  | { kind: 'emit_signal'; strength: Fx }
+  | { kind: 'use_ability' };
+
+export interface PolicyRule {
+  enabled: boolean;
+  condition: LocalCondition;
+  action: LocalAction;
+}
+
+export interface ComponentPolicy {
+  address: number;
+  rules: PolicyRule[];
+  fallback: LocalAction;
+}
+
+export interface FrozenLocalPolicy {
+  version: 3;
+  components: ComponentPolicy[];
+}
+
+/** One committed chapter-opening Route actuator setting. */
+export interface RouteControlDefault {
+  route: number;
+  enabled: boolean;
+  capacity_limit: Fx;
+  allocation_weight: number;
+  controller: number;
+}
+
+export type PolicyOutcome =
+  | 'idle'
+  | 'held'
+  | 'applied'
+  | 'no_target'
+  | 'target_unavailable'
+  | 'wrong_layer'
+  | 'out_of_range'
+  | 'no_effect'
+  | 'cooldown'
+  | 'capacity_reached'
+  | 'unavailable';
+
+export type CriterionStatus = 'active' | 'failed' | 'passed';
+
+export type RunKind = 'automation_contract' | 'open_field' | 'legacy_campaign';
+export type AttemptBranchOperation =
+  | 'opening'
+  | 'design_commit'
+  | 'assembly_commit'
+  | 'restart'
+  | 'restart_assembly'
+  | 'revert_generator'
+  | 'full_contract_reset'
+  | 'clone_blueprint'
+  | 'rebranch'
+  | 'resume'
+  | 'migrated';
+
+export interface CanonicalAttemptRecord {
+  attempt_id: string;
+  content_hash: string;
+  contract_id: string;
+  opening_assembly_hash: string;
+  opening_generator_hash: string;
+  source: 'opened' | 'migrated';
+  version: 1;
+}
+
+export interface CanonicalAttemptBranchRecordV1 {
+  assembly_hash: string;
+  attempt_id: string;
+  branch_id: string;
+  branch_nonce: number;
+  generator_hash: string;
+  operation: AttemptBranchOperation;
+  parent_branch_id: string | null;
+  version: 1;
+}
+
+export interface CanonicalAttemptBranchRecordV2 extends Omit<CanonicalAttemptBranchRecordV1, 'version'> {
+  transition_receipt: EngineeringRunTransitionReceipt | null;
+  version: 2;
+}
+
+export type CanonicalAttemptBranchRecord =
+  | CanonicalAttemptBranchRecordV1
+  | CanonicalAttemptBranchRecordV2;
+
+export interface RunLineage {
+  assembly_template_exact: boolean;
+  assembly_template_hash: string | null;
+  attempt_branch: CanonicalAttemptBranchRecord | null;
+  attempt_id: string | null;
+  attempt_record: CanonicalAttemptRecord | null;
+  branch_id: string | null;
+  branch_nonce: number;
+  branch_operation: AttemptBranchOperation | null;
+  parent_branch_id: string | null;
+  run_kind: RunKind;
+}
+
+export type PolicyTargetKind = 'none' | 'node' | 'route' | 'current' | 'signal';
+
+export interface PolicyPreviewCandidate {
+  distance: Fx;
+  id: number | null;
+  kind: PolicyTargetKind;
+}
+
+export interface PolicyPreview {
+  action: LocalAction;
+  action_radius: Fx;
+  address: number;
+  candidates: PolicyPreviewCandidate[];
+  condition: LocalCondition | null;
+  rule: number;
+  sensor_radius: Fx;
+  target: number | null;
+  target_kind: PolicyTargetKind;
+}
+
+export interface DesignPreviewed extends Payload {
+  base_generator_hash: string;
+  preview: PolicyPreview;
+  snapshot_step: number;
+}
+
+export interface DesignCommitted extends Payload, RunLineage {
+  base_generator_hash: string;
+  canonical_diff: {
+    policy_changed: boolean;
+    route_defaults_changed: number[];
+  };
+  control: string;
+  generator_spec_hash: string;
+  local_policy: FrozenLocalPolicy;
+  route_defaults: RouteControlDefault[];
+  scenario_hash: string;
+}
+
+/** Read-only authoritative consequences of restarting the current Commission branch. */
+export interface CommissionRestartPreview extends Payload, RunLineage {
+  assembly_template: Payload;
+  assembly_template_exact: true;
+  assembly_template_hash: string;
+  branch_id: string;
+  boundary: 'contract_opening';
+  consequences: {
+    create_child_branch: true;
+    keep_generator: true;
+    restore_assembly: true;
+    retain_evidence: true;
+  };
+  content_hash: string;
+  contract_id: string;
+  current_embodied_state_hash: string;
+  current_step: number;
+  generator_spec: Payload;
+  generator_spec_hash: string;
+  predicted_branch_nonce: number;
+  predicted_operation: 'restart';
+  predicted_parent_branch_id: string;
+  preview_version: 1;
+  regime: string;
+  scenario_hash: string;
+}
+
+export type QualificationPreviewStatus = 'complete' | 'incomplete';
+
+export interface QualificationInput extends Payload, RunLineage {
+  assembly_template: Payload;
+  assembly_template_hash: string;
+  build: { package: string; version: string };
+  content_hash: string;
+  contract_id: string;
+  criterion_vector: {
+    criteria: ContractCriterion[];
+    failure_grace_steps: number;
+    version: 1;
+  };
+  criterion_vector_hash: string;
+  generator_spec: Payload;
+  generator_spec_hash: string;
+  grade_axes: Record<'throughput' | 'resilience' | 'economy' | 'complexity', {
+    bands: [Frac, Frac, Frac, Frac];
+    evidence: string;
+  }>;
+  missing_inputs: string[];
+  procedure: {
+    control_contract: 'hands_off';
+    early_resolution: 'none';
+    progress_interval_steps: number;
+    retention: 'criterion_windows_first_violation_terminal';
+    rng_algorithm: 'philox4x32_10_v1';
+    schedule: Payload;
+    schedule_hash: string;
+    seed_custody: 'request_hash_and_trial_address';
+    suite_version: 1;
+    trial_addresses: Array<{ trial: number }>;
+    trial_count: number;
+  };
+  prospective_receipt: ContractCapabilitySet & { next_contract: string | null };
+  protocol_version: number;
+  regime: RegimeId;
+  scenario_hash: string;
+  schema_version: 1;
+}
+
+/** Complete read-only input bundle that Q-01 can freeze without shell defaults. */
+export interface QualificationInputPreview extends Payload {
+  input: QualificationInput;
+  missing_inputs: string[];
+  preview_hash: string;
+  preview_version: 1;
+  status: QualificationPreviewStatus;
+}
+
+/** Immutable Q-01 authority stored in the V6 save and browser archive. */
+export interface CanonicalQualificationRequest {
+  input: QualificationInput;
+  request_id: string;
+  version: 1;
+}
+
+/** The accepted freeze response. Q-02 may consume only its request id. */
+export interface QualificationFrozen extends Payload, RunLineage {
+  content_hash: string;
+  contract_id: string;
+  embodied_state_hash: string;
+  generator_spec_hash: string;
+  input: QualificationInput;
+  qualification_request: CanonicalQualificationRequest;
+  qualification_request_id: string;
+  request_id: string;
+  scenario_hash: string;
+  status: 'frozen_pending_persistence';
+}
+
+export type QualificationJobStatus =
+  | 'queued'
+  | 'running'
+  | 'cancel_requested'
+  | 'canceled'
+  | 'completed'
+  | 'interrupted'
+  | 'invalid_execution';
+
+export interface QualificationJob extends Payload {
+  completed_trials: number[];
+  duration_steps: number;
+  job_id: string;
+  progress_interval_steps: number;
+  request_id: string;
+  status: QualificationJobStatus;
+  trial_count: number;
+  version: 3;
+}
+
+export interface QualificationTrialArtifact extends Payload {
+  artifact_id: string;
+  criterion_runtime: Payload | null;
+  duration_steps: number;
+  executed_steps: number;
+  first_failure_events: Payload[];
+  first_failure_events_truncated: boolean;
+  first_failure_payload: string | null;
+  first_failure_payload_hash: string | null;
+  first_failure_step: number | null;
+  grade_evidence: QualificationTrialGradeEvidence;
+  job_id: string;
+  request_id: string;
+  status: 'completed';
+  terminal_embodied_state_hash: string;
+  terminal_events: Payload[];
+  terminal_events_truncated: boolean;
+  terminal_payload: string;
+  terminal_payload_hash: string;
+  trial: number;
+  version: 3;
+}
+
+export interface QualificationTrialGradeEvidence extends Payload {
+  drain: number;
+  final_material_units: number;
+  initial_material_units: number;
+  interventions: number;
+  leakage: number;
+  materials: Array<{
+    final: number;
+    initial: number;
+    kind: 'boundary_blank' | 'conductor' | 'junction_blank';
+  }>;
+  moved: number;
+  overload: number;
+  renewal: number;
+  supply: number;
+  upkeep: number;
+  version: 1;
+}
+
+export interface QualificationProgress extends Payload {
+  artifact: QualificationTrialArtifact | null;
+  completed_trials: number[];
+  current_trial: number | null;
+  job_id: string;
+  request_id: string;
+  status: QualificationJobStatus;
+  trial_count: number;
+}
+
+export interface QualificationCriterionDecisionDefinition extends Payload {
+  aggregation: ContractCriterionAggregation;
+  artifact_id: string;
+  comparison: ContractCriterionComparison;
+  criterion_id: string;
+  job_id: string;
+  margin: number;
+  measured: number;
+  metric: ContractCriterionMetric;
+  passed: boolean;
+  request_id: string;
+  resolution_step: number;
+  source: ContractCriterion['source'];
+  status: 'passed' | 'failed';
+  threshold: number;
+  trial: number;
+  version: 1;
+  window_end_step: number;
+  window_start_step: number;
+  window_steps: number;
+}
+
+export interface QualificationCriterionDecision extends Payload {
+  decision_id: string;
+  definition: QualificationCriterionDecisionDefinition;
+}
+
+export interface QualificationFunctionDecisionDefinition extends Payload {
+  criterion_decision_ids: string[];
+  job_id: string;
+  passed: boolean;
+  request_id: string;
+  status: 'passed' | 'failed';
+  trial_count: number;
+  version: 1;
+}
+
+export interface QualificationFunctionDecision extends Payload {
+  definition: QualificationFunctionDecisionDefinition;
+  function_decision_id: string;
+}
+
+export interface QualificationResolution extends Payload {
+  criterion_decisions: QualificationCriterionDecision[];
+  function_decision: QualificationFunctionDecision;
+  job_id: string;
+  request_id: string;
+  status: 'resolved';
+  version: 1;
+}
+
+export type QualificationGradeAxis = 'throughput' | 'resilience' | 'economy' | 'complexity';
+
+export interface QualificationGradeDefinition extends Payload {
+  axis: QualificationGradeAxis;
+  band: 0 | 1 | 2 | 3 | 4;
+  band_definition_hash: string;
+  bands: [Frac, Frac, Frac, Frac];
+  evidence: Payload;
+  function_decision_id: string;
+  job_id: string;
+  request_id: string;
+  score: Frac;
+  status: 'available';
+  version: 1;
+}
+
+export interface QualificationGrade extends Payload {
+  definition: QualificationGradeDefinition;
+  grade_id: string;
+}
+
+export interface QualificationGrades extends Payload {
+  grades: QualificationGrade[];
+  job_id: string;
+  request_id: string;
+  status: 'graded';
+  version: 1;
+}
+
+export interface QualificationFailureTraceDefinition extends Payload {
+  artifact_id: string;
+  criterion_decision_id: string;
+  function_decision_id: string;
+  inference_algorithm: 'direct_records_only_v1';
+  inferred_contributors: Payload[];
+  job_id: string;
+  mechanism_events: Payload[];
+  payload_hash: string;
+  request_id: string;
+  resolution_step: number;
+  source: ContractCriterion['source'];
+  status: 'complete' | 'incomplete';
+  trace_keyframe_hash: string;
+  trace_start_step: number;
+  trace_steps: Payload[];
+  trial: number;
+  version: 1;
+  window_start_step: number;
+}
+
+export interface QualificationFailureTrace extends Payload {
+  definition: QualificationFailureTraceDefinition;
+  failure_trace_id: string;
+}
+
+export interface QualificationFailureTraceResult extends Payload {
+  failure_trace: QualificationFailureTrace | null;
+  job_id: string;
+  request_id: string;
+  status: 'traced' | 'not_applicable';
+  version: 1;
+}
+
+export interface QualificationResultDefinition extends Payload {
+  artifact_ids: string[];
+  assembly_template_hash: string;
+  build: { package: string; version: string };
+  content_hash: string;
+  contract_id: string;
+  criterion_decision_ids: string[];
+  execution_status: 'completed';
+  failure_trace_id: string | null;
+  function_decision_id: string;
+  generator_spec_hash: string;
+  grade_ids: string[];
+  job_id: string;
+  outcome: 'passed' | 'failed';
+  protocol_version: number;
+  request_id: string;
+  scenario_hash: string;
+  trial_count: number;
+  version: 1;
+}
+
+export interface QualificationResult extends Payload {
+  definition: QualificationResultDefinition;
+  result_id: string;
+}
+
+export interface QualificationCompleteMarkerDefinition extends Payload {
+  child_count: number;
+  result_id: string;
+  version: 1;
+}
+
+export interface QualificationCompleteMarker extends Payload {
+  definition: QualificationCompleteMarkerDefinition;
+  marker_id: string;
+}
+
+export interface QualificationResultGroup extends Payload {
+  complete_marker: QualificationCompleteMarker;
+  result: QualificationResult;
+  status: 'complete';
+  version: 1;
+}
+
+export interface QualificationUnlockReceiptDefinition extends Payload {
+  actions: LocalAction['kind'][];
+  conditions: LocalCondition['kind'][];
+  content_hash: string;
+  contract_id: string;
+  hardware: string[];
+  next_contract: string | null;
+  prerequisites: string[];
+  result_id: string;
+  version: 1;
+}
+
+export interface QualificationUnlockReceipt extends Payload {
+  definition: QualificationUnlockReceiptDefinition;
+  receipt_id: string;
+}
+
+export interface QualificationReceiptResult extends Payload {
+  receipt: QualificationUnlockReceipt;
+  status: 'derived';
+  version: 1;
+}
+
+export interface EngineeringRecordSource extends Payload {
+  attempt_id: string;
+  authority: 'committed_design' | 'qualification_result' | 'migrated_v1';
+  branch_id: string;
+  result_id: string | null;
+  version: 1;
+}
+
+export interface EngineeringDerivationEdge extends Payload {
+  operation: 'capture' | 'promote' | 'clone' | 'hypothesis_branch' | 'transplant' | 'assembly_adaptation';
+  source_id: string;
+  source_kind: 'attempt_branch' | 'blueprint' | 'qualification_request' | 'qualification_result' | 'legacy_blueprint';
+  version: 1;
+}
+
+export interface EngineeringEvidenceLink extends Payload {
+  availability: 'available' | 'unavailable';
+  evidence_id: string;
+  evidence_kind: 'qualification_request' | 'qualification_result' | 'failure_trace' | 'comparative_qualification';
+  role: 'source_qualification' | 'diagnostic' | 'comparison_source' | 'first_failure';
+  version: 1;
+}
+
+export interface EngineeringAssemblyRecordDefinitionV1 extends Payload {
+  assembly_template: Payload;
+  assembly_template_hash: string;
+  compatibility: {
+    contract_id: string;
+    regime: RegimeId;
+    run_kind: 'automation_contract';
+    version: 1;
+  };
+  migration: {
+    source: 'exact_runtime_opening';
+    source_version: 1;
+  };
+  version: 1;
+}
+
+export interface EngineeringAssemblyRecordDefinitionV2 extends Payload {
+  assembly_template: Payload;
+  assembly_template_hash: string;
+  compatibility: {
+    content_hash: string;
+    contract_id: string;
+    generator_record_id: string;
+    regime: RegimeId;
+    run_kind: 'automation_contract';
+    version: 2;
+  };
+  owned_fields: [
+    'component_opening_state',
+    'component_placement',
+    'current_phase',
+    'form_reserve',
+    'interface_state',
+    'material_placement_and_stock',
+    'physical_compartment',
+    'stored_charge',
+  ];
+  protocol_version: number;
+  source: EngineeringRecordSource;
+  version: 2;
+}
+
+export type EngineeringAssemblyRecordDefinition =
+  | EngineeringAssemblyRecordDefinitionV1
+  | EngineeringAssemblyRecordDefinitionV2;
+
+export interface EngineeringAssemblyRecord extends Payload {
+  assembly_record_id: string;
+  definition: EngineeringAssemblyRecordDefinition;
+}
+
+export interface EngineeringGeneratorRecordDefinitionV1 extends Payload {
+  generator_spec: Payload;
+  generator_spec_hash: string;
+  version: 1;
+}
+
+export interface EngineeringGeneratorRecordDefinitionV2 extends Payload {
+  content_hash: string;
+  contract_id: string;
+  generator_spec: Payload;
+  generator_spec_hash: string;
+  protocol_version: number;
+  source: EngineeringRecordSource;
+  version: 2;
+}
+
+export type EngineeringGeneratorRecordDefinition =
+  | EngineeringGeneratorRecordDefinitionV1
+  | EngineeringGeneratorRecordDefinitionV2;
+
+export interface EngineeringGeneratorRecord extends Payload {
+  definition: EngineeringGeneratorRecordDefinition;
+  generator_record_id: string;
+}
+
+export interface BlueprintRecordDefinitionV1 extends Payload {
+  assembly_record_id: string;
+  branch_id: string;
+  contract_id: string;
+  content_hash: string;
+  generator_record_id: string;
+  linked_result_ids: string[];
+  source_attempt_id: string;
+  version: 1;
+}
+
+export interface BlueprintRecordDefinitionV2 extends Payload {
+  assembly_record_id: string;
+  content_hash: string;
+  contract_id: string;
+  creation_reason: 'design_capture' | 'result_capture' | 'v1_promotion' | 'clone' | 'transplant';
+  derivation_edges: EngineeringDerivationEdge[];
+  evidence_links: EngineeringEvidenceLink[];
+  generator_record_id: string;
+  parent_blueprint_id: string | null;
+  protocol_version: number;
+  source_attempt_id: string;
+  source_branch_id: string;
+  version: 2;
+}
+
+export type BlueprintRecordDefinition = BlueprintRecordDefinitionV1 | BlueprintRecordDefinitionV2;
+
+export interface BlueprintRecord extends Payload {
+  blueprint_id: string;
+  definition: BlueprintRecordDefinition;
+}
+
+export interface EngineeringMemoryCaptureV1 extends Payload {
+  assembly_record: EngineeringAssemblyRecord;
+  blueprint: BlueprintRecord;
+  generator_record: EngineeringGeneratorRecord;
+  status: 'captured';
+  version: 1;
+}
+
+export interface EngineeringMemoryCaptureV2 extends Payload {
+  assembly_record: EngineeringAssemblyRecord;
+  blueprint: BlueprintRecord;
+  generator_record: EngineeringGeneratorRecord;
+  status: 'captured';
+  version: 2;
+}
+
+export type EngineeringMemoryCapture = EngineeringMemoryCaptureV1 | EngineeringMemoryCaptureV2;
+
+export type EngineeringCaptureSource =
+  | { kind: 'committed_design'; result_id: null }
+  | { kind: 'qualification_result'; result_id: string };
+
+export interface EngineeringAssemblyDraft extends Payload {
+  components: Array<{
+    layer: number;
+    node: number;
+    open: boolean;
+    pos: Vec2;
+    q: Fx;
+  }>;
+  currents: Array<{
+    active: boolean;
+    current: number;
+    phase: number;
+  }>;
+  forms: Array<{
+    junction_blanks: number | null;
+    node: number;
+    reserve: Fx;
+  }>;
+  materials: Array<{
+    amount: number;
+    layer: number;
+    material: number;
+    pos: Vec2;
+  }>;
+  physical_compartment: PhysicalCompartmentState;
+  version: 1;
+}
+
+export interface EngineeringAssemblyDiffChange extends Payload {
+  address: string;
+  after: Payload;
+  before: Payload;
+  kind: 'component' | 'current' | 'form' | 'material' | 'physical_compartment';
+  version: 1;
+}
+
+export interface EngineeringAssemblyDiff extends Payload {
+  definition: {
+    after_assembly_hash: string;
+    before_assembly_hash: string;
+    changes: EngineeringAssemblyDiffChange[];
+    version: 1;
+  };
+  diff_id: string;
+}
+
+export interface EngineeringAssemblyDraftResult extends Payload, RunLineage {
+  assembly_draft: EngineeringAssemblyDraft;
+  generator_spec_hash: string;
+  status: 'ready';
+  version: 1;
+}
+
+export interface EngineeringAssemblyWarning extends Payload {
+  address: string | null;
+  code: 'route_defaults_reapplied' | 'live_claims_cleared' | 'opening_state_normalized';
+  version: 1;
+}
+
+export interface EngineeringAssemblyCompatibility extends Payload {
+  assembly_owned_only: true;
+  generator_unchanged: true;
+  issues: [];
+  status: 'compatible';
+  version: 1;
+}
+
+export interface EngineeringAssemblyPreview extends Payload, RunLineage {
+  candidate_assembly_hash: string;
+  candidate_assembly_template: Payload;
+  candidate_draft: EngineeringAssemblyDraft;
+  compatibility: EngineeringAssemblyCompatibility;
+  diff: EngineeringAssemblyDiff;
+  generator_spec_hash: string;
+  preview_id: string;
+  status: 'accepted';
+  version: 1;
+  warnings: EngineeringAssemblyWarning[];
+}
+
+export interface EngineeringAssemblyCommitResult extends Payload, RunLineage {
+  assembly_record: EngineeringAssemblyRecord;
+  diff: EngineeringAssemblyDiff;
+  generator_record: EngineeringGeneratorRecord;
+  previous_assembly_hash: string;
+  previous_branch_id: string;
+  preview_id: string;
+  status: 'committed';
+  transition_receipt: EngineeringAssemblyCommitReceipt;
+  version: 1;
+}
+
+export type EngineeringIdentityKind =
+  | 'attempt'
+  | 'branch'
+  | 'generator'
+  | 'assembly'
+  | 'qualification_request'
+  | 'qualification_result'
+  | 'blueprint';
+
+export interface EngineeringIdentityDisposition extends Payload {
+  disposition: 'retained' | 'restored' | 'recreated' | 'detached';
+  identity: string;
+  kind: EngineeringIdentityKind;
+  version: 1;
+}
+
+export interface EngineeringAssemblyCommitReceipt extends Payload {
+  child_attempt_id: string;
+  child_branch_id: string;
+  identities: EngineeringIdentityDisposition[];
+  operation: 'assembly_commit';
+  operation_id: string;
+  parent_attempt_id: string;
+  parent_branch_id: string;
+  preview_id: string;
+  reconstruction_digest: string;
+  recovery_state: 'accepted_unpersisted' | 'persisted' | 'recovered';
+  version: 1;
+}
+
+export type EngineeringTransitionKind =
+  | 'restart_assembly'
+  | 'revert_generator'
+  | 'full_contract_reset';
+
+export type EngineeringTransitionSource =
+  | { kind: 'current_committed'; source_id: null; version: 1 }
+  | { kind: 'generator_record'; source_id: string; version: 1 }
+  | { kind: 'authored_contract_opening'; source_id: string; version: 1 };
+
+export interface EngineeringTransitionGuard extends Payload {
+  assembly_hash: string;
+  attempt_id: string;
+  branch_id: string;
+  branch_nonce: number;
+  content_hash: string;
+  contract_id: string;
+  embodied_hash: string;
+  generator_hash: string;
+  lifecycle: 'still';
+  run_kind: 'automation_contract';
+  scenario_hash: string;
+  version: 2;
+}
+
+export type EngineeringTransitionRegisterKind =
+  | 'live_positions'
+  | 'stored_charge'
+  | 'policy_timers'
+  | 'controller_state'
+  | 'event_window'
+  | 'provisional_criteria';
+
+export interface EngineeringTransitionRegisterConsequence extends Payload {
+  addresses: string[];
+  after_digest: string;
+  after_disposition: 'recreated';
+  before_digest: string;
+  before_disposition: 'detached';
+  kind: EngineeringTransitionRegisterKind;
+  version: 1;
+}
+
+export type EngineeringAssemblyCompatibilityFieldKind =
+  | 'component_position'
+  | 'component_layer'
+  | 'stored_charge'
+  | 'interface_state'
+  | 'form_reserve'
+  | 'junction_blanks'
+  | 'material_amount'
+  | 'material_position'
+  | 'material_layer'
+  | 'current_active'
+  | 'current_phase'
+  | 'physical_compartment_members'
+  | 'physical_compartment_leakage';
+
+export type EngineeringAssemblyCompatibilityDisposition =
+  | 'retained_unchanged'
+  | 'retained_by_address'
+  | 'adaptation_required'
+  | 'hard_refusal';
+
+export interface EngineeringAssemblyCompatibilityField extends Payload {
+  address: string;
+  after_digest: string;
+  before_digest: string;
+  disposition: EngineeringAssemblyCompatibilityDisposition;
+  field: EngineeringAssemblyCompatibilityFieldKind;
+  issue_code: EngineeringCompatibilityIssue['code'] | null;
+  version: 1;
+}
+
+export interface EngineeringRunTransitionPreviewDefinition extends Payload {
+  commit_allowed: boolean;
+  compatibility_fields: EngineeringAssemblyCompatibilityField[];
+  compatibility_issues: EngineeringCompatibilityIssue[];
+  current_regime_id: RegimeId;
+  guard: EngineeringTransitionGuard;
+  identities: EngineeringIdentityDisposition[];
+  operation: EngineeringTransitionKind;
+  reconstruction_digest: string;
+  registers: EngineeringTransitionRegisterConsequence[];
+  source: EngineeringTransitionSource;
+  target_assembly_draft: EngineeringAssemblyDraft;
+  target_assembly_hash: string;
+  target_generator_hash: string;
+  target_regime_id: RegimeId;
+  target_scenario_hash: string;
+  version: 3;
+}
+
+export interface EngineeringRunTransitionPreview extends Payload {
+  definition: EngineeringRunTransitionPreviewDefinition;
+  preview_id: string;
+}
+
+export interface EngineeringTransitionPreviewAccepted extends Payload {
+  preview: EngineeringRunTransitionPreview;
+  status: 'accepted';
+  version: 5;
+}
+
+export type EngineeringTransitionRefusalCode =
+  | 'wrong_run_kind'
+  | 'wrong_lifecycle'
+  | 'stale_contract'
+  | 'stale_attempt'
+  | 'stale_branch'
+  | 'stale_generator'
+  | 'stale_assembly'
+  | 'stale_preview'
+  | 'source_unavailable'
+  | 'source_corrupt'
+  | 'incompatible_assembly'
+  | 'reconstruction_failed'
+  | 'qualification_frozen'
+  | 'unsupported_operation';
+
+export interface EngineeringTransitionRefused extends Payload {
+  code: EngineeringTransitionRefusalCode;
+  field: string | null;
+  operation: EngineeringTransitionKind;
+  status: 'refused';
+  version: 1;
+}
+
+export interface EngineeringRunTransitionReceipt extends Payload {
+  after_assembly_hash: string;
+  after_generator_hash: string;
+  after_regime_id?: RegimeId;
+  after_scenario_hash?: string;
+  before_assembly_hash: string;
+  before_generator_hash: string;
+  before_regime_id?: RegimeId;
+  before_scenario_hash?: string;
+  child_attempt_id: string;
+  child_branch_id: string;
+  closure_reason: 'restart' | 'superseded';
+  compatibility_fields?: EngineeringAssemblyCompatibilityField[];
+  compatibility_issues: EngineeringCompatibilityIssue[];
+  detached_evidence_ids: string[];
+  identities: EngineeringIdentityDisposition[];
+  operation: EngineeringTransitionKind;
+  operation_id: string;
+  parent_attempt_id: string;
+  parent_branch_id: string;
+  preview_id: string;
+  reconstruction_digest: string;
+  registers: EngineeringTransitionRegisterConsequence[];
+  recovery_state:
+    | 'accepted_unpersisted'
+    | 'prior_retained'
+    | 'child_published'
+    | 'pointer_moved'
+    | 'persisted'
+    | 'recovered';
+  source: EngineeringTransitionSource;
+  version: 3 | 4 | 5;
+}
+
+export type EngineeringTransitionReceipt =
+  | EngineeringAssemblyCommitReceipt
+  | EngineeringRunTransitionReceipt;
+
+export interface EngineeringTransitionCommitResult extends Payload, RunLineage {
+  assembly_record: EngineeringAssemblyRecord;
+  generator_record: EngineeringGeneratorRecord;
+  preview_id: string;
+  regime: RegimeId;
+  scenario_hash: string;
+  status: 'committed';
+  transition_receipt: EngineeringRunTransitionReceipt;
+  version: 3 | 4 | 5;
+}
+
+export interface EngineeringTransitionRecoveryResult extends Payload, RunLineage {
+  regime: RegimeId;
+  scenario_hash: string;
+  status: 'recovered';
+  transition_receipt: EngineeringRunTransitionReceipt;
+  version: 3 | 4 | 5;
+}
+
+export interface EngineeringDiffRow extends Payload {
+  address: string;
+  after: Payload | null;
+  before: Payload | null;
+  kind: 'equal' | 'added' | 'removed' | 'changed' | 'unaligned' | 'unavailable';
+  section: 'generator_design' | 'initial_assembly' | 'observed_evidence';
+  version: 1;
+}
+
+export interface EngineeringDiffReport extends Payload {
+  definition: {
+    left_id: string;
+    left_kind: 'blueprint' | 'branch' | 'qualification_request' | 'qualification_result';
+    normalization_version: 1;
+    right_id: string;
+    right_kind: 'blueprint' | 'branch' | 'qualification_request' | 'qualification_result';
+    rows: EngineeringDiffRow[];
+    version: 1;
+  };
+  diff_id: string;
+}
+
+export interface EngineeringCompatibilityIssue extends Payload {
+  address: string | null;
+  code:
+    | 'missing_hardware'
+    | 'unsupported_action'
+    | 'unsupported_condition'
+    | 'invalid_address'
+    | 'invalid_route_ownership'
+    | 'missing_material'
+    | 'regime_incompatible_assembly'
+    | 'generator_edit_required';
+  disposition: 'hard_incompatibility' | 'assembly_adaptation' | 'generator_edit_required';
+  version: 1;
+}
+
+export interface EngineeringCompatibilityReport extends Payload {
+  compatibility_id: string;
+  definition: {
+    destination_contract_id: string;
+    destination_regime: RegimeId;
+    issues: EngineeringCompatibilityIssue[];
+    source_assembly_record_id: string;
+    source_generator_record_id: string;
+    unchanged_generator: boolean;
+    version: 1;
+  };
+}
+
+export interface EngineeringAssemblyAdaptationRecord extends Payload {
+  adaptation_id: string;
+  definition: {
+    compatibility_id: string;
+    destination_assembly_record_id: string;
+    destination_branch_id: string;
+    source_assembly_record_id: string;
+    unchanged_generator_record_id: string;
+    version: 1;
+  };
+}
+
+export interface ComparativeQualificationRecord extends Payload {
+  comparative_id: string;
+  definition: {
+    comparability: 'comparable' | 'qualified_with_uncontrolled_differences' | 'incomparable';
+    controlled_differences: string[];
+    destination_result_id: string;
+    first_divergence: string | null;
+    matched_identities: string[];
+    source_result_id: string;
+    uncontrolled_differences: string[];
+    version: 1;
+  };
+}
+
+export type ContractStatus = 'available' | 'locked' | 'completed';
+export type ContractCriterionMetric =
+  | 'stored_charge'
+  | 'accepted_flow'
+  | 'leakage_ratio'
+  | 'hands_off_steps';
+export type ContractCriterionComparison = 'at_least' | 'at_most';
+export type ContractCriterionAggregation = 'minimum' | 'maximum' | 'final';
+
+export interface ContractCriterion {
+  aggregation: ContractCriterionAggregation;
+  comparison: ContractCriterionComparison;
+  id: string;
+  metric: ContractCriterionMetric;
+  source: { id: number | null; kind: 'field' | 'component' | 'route' };
+  threshold: number;
+  window_steps: number;
+}
+
+export interface ContractCapabilitySet {
+  actions: LocalAction['kind'][];
+  conditions: LocalCondition['kind'][];
+  hardware: string[];
+}
+
+export interface ContractCatalogEntry {
+  available: boolean;
+  brief_key: string;
+  capabilities: ContractCapabilitySet;
+  commissioning: {
+    expected_minutes: number;
+    maximum_wall_wait_seconds: number;
+  };
+  criteria: ContractCriterion[];
+  failure_key: string;
+  grade_bands: {
+    complexity: [Frac, Frac, Frac, Frac];
+    economy: [Frac, Frac, Frac, Frac];
+    resilience: [Frac, Frac, Frac, Frac];
+    throughput: [Frac, Frac, Frac, Frac];
+  };
+  guidance_keys: string[];
+  id: string;
+  limits: {
+    max_components: number;
+    max_routes: number;
+    max_rules_per_component: number;
+  };
+  missing_prerequisites: string[];
+  opening: {
+    assembly_template_hash: string;
+    component_count: number;
+    form: FormId;
+    generator_spec_hash: string;
+    regime: RegimeId;
+    route_count: number;
+    supply_cycles: Array<{
+      current: number;
+      duty: Frac;
+      on_steps: number;
+      period: number;
+    }>;
+  };
+  order: number;
+  prerequisites: string[];
+  qualification: {
+    duration_steps: number;
+    failure_grace_steps: number;
+    trial_count: number;
+  };
+  status: ContractStatus;
+  success_key: string;
+  title_key: string;
+  unlocks: ContractCapabilitySet & {
+    next_contract: string | null;
+  };
+}
+
+export interface ContractCatalog extends Payload {
+  contract_version: 2;
+  contracts: ContractCatalogEntry[];
+}
+
+/** The ten events the worker may raise unsolicited. */
 export type EventName =
   | 'frame'
+  | 'mechanism_event'
+  | 'criterion_changed'
   | 'objective_changed'
   | 'pressure_changed'
   | 'review_ready'
   | 'checkpoint_written'
   | 'chapter_changed'
-  | 'run_completed';
+  | 'run_completed'
+  | 'qualification_progress';
 
 /** The closed error code set. */
 export type ErrorCode =
@@ -158,6 +1319,8 @@ export interface CurrentState {
   path: Vec2[];
   width: Fx;
   strength: Fx;
+  /** Fraction of each period that physically emits; strength is the cycle mean. */
+  duty: Frac;
   period: number;
   phase: number;
   bright: boolean;
@@ -270,6 +1433,76 @@ export interface ViewDeclaration {
   surround: Surround;
 }
 
+/** The implemented Atlas regimes visible in the Number 2 shell. */
+export type RegimeId =
+  | 'open_field'
+  | 'periodic_transport'
+  | 'crowded_medium'
+  | 'vestige_pressure'
+  | 'holdout_atmosphere';
+
+/** A passive measurement contract. It is never part of a causal plan. */
+export interface ObservationProtocol extends Payload {
+  instrument:
+    | 'stored_charge'
+    | 'route_flow'
+    | 'view_boundary_flow'
+    | 'supply_uptake'
+    | 'physical_leakage'
+    | 'maintenance_allocation'
+    | 'initial_stock_estimate'
+    | 'response_lag';
+  resolution: number;
+  window: number;
+  surround: Surround;
+}
+
+/** The target-specific Intervention Bench union. */
+export type InterventionPlan =
+  | { tool: 'blade'; scope: 'replay' | 'live'; route: number; onset: number }
+  | { tool: 'clamp'; scope: 'replay' | 'live'; route: number; inhibition: Frac; onset: number; duration: number }
+  | { tool: 'scramble'; scope: 'replay' | 'live'; network: number[]; probability: Frac; onset: number; duration: number }
+  | { tool: 'decoy'; scope: 'replay' | 'live'; supply: number; receiving_node: number; capture: Frac; onset: number; duration: number }
+  | { tool: 'delay'; scope: 'replay' | 'live'; input: number; delay: number; onset: number }
+  | { tool: 'replace'; scope: 'replay' | 'live'; components: number[]; fraction: Frac; transferred: string[]; onset: number }
+  | { tool: 'breach'; scope: 'replay' | 'live'; member: number; coefficient_delta: Frac; onset: number; duration: number }
+  | { tool: 'transplant'; scope: 'replay' | 'live'; regime: RegimeId; equilibration: number; retained: string[] };
+
+/** Everything frozen before an Ensemble or Holdout family begins. */
+export interface AnalysisScenarioSpec extends Payload {
+  scenario_id: string;
+  regime: RegimeId;
+  generator_hash: string;
+  initial_state_hash: string;
+  control_mode: 'recorded_open_loop' | 'frozen_policy' | 'hands_off';
+  view: ViewDeclaration;
+  observation: ObservationProtocol;
+  intervention: InterventionPlan | null;
+  seeds: number[];
+  sealed: boolean;
+}
+
+export type AnalysisJobKind =
+  | 'divergence'
+  | 'ensemble'
+  | 'holdout'
+  | 'archive'
+  | 'renewal'
+  | 'inheritance'
+  | 'compile_scenario';
+export type AnalysisJobStatus = 'queued' | 'running' | 'complete' | 'cancelled' | 'failed';
+
+/** Cold-path analysis crosses as one job summary, never as streamed states. */
+export interface AnalysisJob extends Payload {
+  job_id: string;
+  kind: AnalysisJobKind;
+  status: AnalysisJobStatus;
+  scenario_id: string;
+  completed: number;
+  total: number;
+  result: Payload | null;
+}
+
 /** One stream position: a key and counter as fixed-width hex, and the half. */
 export interface RngState {
   key: string;
@@ -313,6 +1546,43 @@ export interface ObjectiveState {
   completed_step: number | null;
 }
 
+export interface CriterionReading {
+  all_metrics_met: boolean;
+  components: Array<{
+    charge: Fx;
+    margin: Fx;
+    met: boolean;
+    minimum_q: Fx;
+    node: number;
+    present: boolean;
+  }>;
+  failure_grace_remaining: number;
+  failure_streak: number;
+  hands_off: boolean;
+  hands_off_remaining: number;
+  hands_off_streak: number;
+  leakage: {
+    ceiling: Frac;
+    leakage: Fx;
+    met: boolean;
+    ratio: Frac | null;
+    supply: Fx;
+  };
+  observed_steps: number;
+  ready: boolean;
+  routes: Array<{
+    floor: Fx;
+    mean: Fx;
+    minimum: Fx;
+    met: boolean;
+    route: number;
+    total: Fx;
+    window_steps: number;
+  }>;
+  status: CriterionStatus;
+  step: number;
+}
+
 /**
  * The tagged union of causal proposed changes, exactly four variants; `op` is
  * the tag.
@@ -328,7 +1598,15 @@ export type PlanCommand =
   | { op: 'connect'; from: number; to: number }
   | { op: 'redirect'; route: number; end: 'tail' | 'head'; to: number }
   | { op: 'cut'; route: number }
-  | { op: 'reshape_compartment'; members: number[] };
+  | { op: 'reshape_compartment'; members: number[] }
+  | { op: 'deploy_junction' }
+  | { op: 'limit_route'; route: number; retained_fraction: number; duration: number }
+  | { op: 'raise_leak'; delta: number; duration: number }
+  | { op: 'divert_supply'; current: number; receiver: number; capture_fraction: number; duration: number }
+  | { op: 'replace_component'; node: number; transfer_mask: number }
+  | { op: 'transplant'; regime: RegimeId }
+  | { op: 'delay_supply'; current: number; duration: number }
+  | { op: 'scramble_routes'; routes: number[]; probability: number; duration: number };
 
 /**
  * The body of the immediate, passive `set_focus` command. Position 0 clears
@@ -386,9 +1664,13 @@ export interface PlanUndone extends Payload {
 }
 
 /** The success body of `commit_plan`. */
-export interface PlanCommitted extends Payload {
+export interface PlanCommitted extends Payload, RunLineage {
   applied: number;
+  generator_spec_hash: string;
   impulse: number;
+  local_policy: FrozenLocalPolicy;
+  route_defaults: RouteControlDefault[];
+  scenario_hash: string;
   slate_ordinal: number;
 }
 
@@ -398,44 +1680,67 @@ export type InitRunBody =
   | { mode: 'restore'; save_key: string };
 
 /** The success body of `init_run`, in either mode. */
-export interface RunOpened extends Payload {
+export interface RunOpened extends Payload, RunLineage {
   protocol: number;
   save_version: number;
   run_id: string;
-  branch_nonce: number;
   step: number;
   chapter_index: number;
   view: ViewDeclaration;
   content_hash: string;
+  contract_id: string | null;
+  embodied_state_hash: string;
+  generator_spec_hash: string;
+  local_policy: FrozenLocalPolicy;
+  qualification_request: CanonicalQualificationRequest | null;
+  qualification_request_id: string | null;
+  route_defaults: RouteControlDefault[];
+  scenario_hash: string;
   content_changed: boolean;
+  regime: RegimeId;
   /** Present only when a V1 record was migrated in memory while opening. */
-  migrated_from?: 1;
+  migrated_from?: 1 | 2 | 3 | 4 | 5;
 }
 
 /** The success body both restores answer with. */
-export interface RunRestored extends Payload {
+export interface RunRestored extends Payload, RunLineage {
   step: number;
-  branch_nonce: number;
+  contract_id: string | null;
+  embodied_state_hash: string;
+  generator_spec_hash: string;
+  local_policy: FrozenLocalPolicy;
+  qualification_request: CanonicalQualificationRequest | null;
+  qualification_request_id: string | null;
+  route_defaults: RouteControlDefault[];
+  scenario_hash: string;
   view: ViewDeclaration;
   /** Present only when a V1 record was migrated in memory while restoring. */
-  migrated_from?: 1;
+  migrated_from?: 1 | 2 | 3 | 4 | 5;
 }
 
 /** The success body of `export_run`. */
 export interface RunExported extends Payload {
+  embodied_state_hash: string;
   text: string;
   sha256: string;
   filename_hint: string;
 }
 
 /** The success body of `import_run`. */
-export interface RunImported extends Payload {
+export interface RunImported extends Payload, RunLineage {
   run_id: string;
   step: number;
-  branch_nonce: number;
+  contract_id: string | null;
+  embodied_state_hash: string;
+  generator_spec_hash: string;
+  local_policy: FrozenLocalPolicy;
+  qualification_request: CanonicalQualificationRequest | null;
+  qualification_request_id: string | null;
+  route_defaults: RouteControlDefault[];
+  scenario_hash: string;
   view: ViewDeclaration;
-  /** Present only when the imported V1 payload was migrated to V2. */
-  migrated_from?: 1;
+  /** Present only when an older payload was migrated in memory. */
+  migrated_from?: 1 | 2 | 3 | 4 | 5;
 }
 
 /**
@@ -461,6 +1766,8 @@ export interface InputFrame extends Payload {
   pause: boolean;
   inspect: InspectRequest | null;
   advance_steps: number | null;
+  /** Worker-local wall-time multiplier. Removed before the frame enters Rust. */
+  runtime_rate?: 1 | 4 | 16;
 }
 
 /** The eight perturbation kinds, by the machine name the core reads. */
@@ -529,6 +1836,7 @@ export function neutralFrame(seq: number, timestampUs: number): InputFrame {
     pause: false,
     inspect: null,
     advance_steps: null,
+    runtime_rate: 1,
   };
 }
 
@@ -573,8 +1881,10 @@ export interface EventEnvelope {
   body: Payload;
 }
 
-/** The ten commands as a value, for membership tests. */
+/** The thirty-two commands as a value, for membership tests. */
 export const COMMAND_NAMES: readonly CommandName[] = [
+  'list_contracts',
+  'open_contract',
   'init_run',
   'input_frame',
   'queue_plan',
@@ -585,25 +1895,48 @@ export const COMMAND_NAMES: readonly CommandName[] = [
   'recover_branch',
   'export_run',
   'import_run',
+  'reopen_archive',
+  'run_analysis',
+  'sample_instrument',
+  'inspect_field',
+  'compile_scenario',
+  'run_scenario',
+  'sample_lens',
+  'renewal_trial',
+  'renewal_inventory',
+  'preview_design_patch',
+  'commit_design_patch',
+  'preview_commission_restart',
+  'preview_qualification_input',
+  'freeze_qualification_request',
+  'qualification_job',
+  'engineering_memory',
+  'restart_commission',
+  'return_commission',
+  'resume_commission',
+  'set_local_policy',
 ];
 
-/** True when a value is one of the ten commands. */
+/** True when a value is one of the thirty-two commands. */
 export function isCommandName(value: unknown): value is CommandName {
   return typeof value === 'string' && (COMMAND_NAMES as readonly string[]).includes(value);
 }
 
-/** The seven events as a value, for membership tests. */
+/** The ten events as a value, for membership tests. */
 export const EVENT_NAMES: readonly EventName[] = [
   'frame',
+  'mechanism_event',
+  'criterion_changed',
   'objective_changed',
   'pressure_changed',
   'review_ready',
   'checkpoint_written',
   'chapter_changed',
   'run_completed',
+  'qualification_progress',
 ];
 
-/** True when a value is one of the seven events. */
+/** True when a value is one of the ten events. */
 export function isEventName(value: unknown): value is EventName {
   return typeof value === 'string' && (EVENT_NAMES as readonly string[]).includes(value);
 }
@@ -612,6 +1945,10 @@ export function isEventName(value: unknown): value is EventName {
 export interface ObjectiveChanged extends Payload {
   objective: ObjectiveState;
   previous_id: string | null;
+}
+
+export interface CriterionChanged extends Payload {
+  criterion: CriterionReading | null;
 }
 
 /** The body of a `checkpoint_written` event. */
@@ -804,6 +2141,66 @@ export interface EchoHighlight extends Payload {
   target: { t: 'node' | 'route' | 'none'; id: number | null };
 }
 
+/** One compact authoritative transition carried into the diagnostic timeline. */
+export type MechanismEvent =
+  | {
+      kind: 'policy';
+      action: LocalAction['kind'] | 'none';
+      address: number;
+      object_id: number;
+      object_kind: 'form' | 'node';
+      outcome: PolicyOutcome;
+      rule: number;
+      target: number | null;
+      target_kind: PolicyTargetKind;
+    }
+  | { kind: 'interface'; node: number; open: boolean }
+  | {
+      kind: 'route';
+      route: number;
+      enabled: boolean;
+      capacity_limit: Fx;
+      allocation_weight: number;
+      requested_flow: Fx;
+      accepted_flow: Fx;
+      state: 'disabled' | 'closed' | 'standing' | 'capacity_throttled' | 'source_starved' | 'destination_headroom' | 'flowing';
+    }
+  | { kind: 'supply'; current: number; emitting: boolean }
+  | {
+      kind: 'reserve';
+      form: number;
+      node: number;
+      opening: Fx;
+      closing: Fx;
+      delta: Fx;
+      state: 'banked' | 'released';
+    }
+  | {
+      kind: 'charge';
+      accepted_supply: Fx;
+      closing: Fx;
+      coupled_transfer: Fx;
+      drain: Fx;
+      dominant_node: number | null;
+      leakage: Fx;
+      nodes: Array<{
+        closing: Fx;
+        exogenous: Fx;
+        inflow: Fx;
+        leakage: Fx;
+        node: number;
+        opening: Fx;
+        outflow: Fx;
+        supply: Fx;
+        upkeep: Fx;
+      }>;
+      opening: Fx;
+      route_transfer: Fx;
+      upkeep: Fx;
+    }
+  | { kind: 'criterion'; chapter_index: number; status: CriterionStatus }
+  | { kind: 'failure'; chapter_index: number; source: 'criterion' };
+
 /** The body of a `review_ready` event: one of the four reviews. */
 export interface ReviewReady extends Payload {
   review:
@@ -816,7 +2213,10 @@ export interface ReviewReady extends Payload {
 
 /** The body of a `chapter_changed` event. */
 export interface ChapterChanged extends Payload {
+  chapter_count: number;
   chapter_index: number;
+  objective_count: number;
+  route_defaults: RouteControlDefault[];
   title_key: string;
   /** The complete authoritative passive View at this chapter boundary. */
   view: ViewDeclaration;

@@ -25,15 +25,45 @@ import {
   PROTOCOL_VERSION,
   type CommandName,
   type CommandEnvelope,
+  type CanonicalAttemptBranchRecord,
+  type CanonicalAttemptRecord,
+  type CanonicalQualificationRequest,
+  type CommissionRestartPreview,
+  type ContractCatalog,
+  type CriterionReading,
+  type AttemptBranchOperation,
   type ErrorEnvelope,
+  type EngineeringAssemblyDraft,
+  type EngineeringAssemblyPreview,
+  type EngineeringCaptureSource,
+  type EngineeringGeneratorRecord,
+  type EngineeringMemoryCapture,
+  type EngineeringRunTransitionPreview,
+  type EngineeringTransitionKind,
   type EventEnvelope,
+  type FrozenLocalPolicy,
   type FormId,
   type FrameEventBody,
   type InputFrame,
+  type MechanismEvent,
+  type PolicyOutcome,
   type Payload,
   type PlanCommand,
+  type QualificationInputPreview,
+  type QualificationGrades,
+  type QualificationFailureTraceResult,
+  type QualificationJob,
+  type QualificationProgress,
+  type QualificationResolution,
+  type QualificationResultGroup,
+  type QualificationReceiptResult,
+  type QualificationUnlockReceipt,
+  type QualificationTrialArtifact,
   type QueueState,
+  type RegimeId,
   type ResponseEnvelope,
+  type RouteControlDefault,
+  type RunKind,
   type RunExported,
   type RunOpened,
   type ViewDeclaration,
@@ -61,12 +91,15 @@ import { openTelemetry, type Recorder, type Telemetry } from './telemetry';
 const HANDSHAKE_ID = 1;
 
 /**
- * The query marker a local preview opens the development run with, in place of
- * the empty Field a new run stands on until authored content arrives. Reached
- * only in a development build; `dev-run.ts` says what it carries and why the
- * command that opens it is the one it is.
+ * The diagnostic query marker that opens the old development run. It remains
+ * available for renderer diagnostics but is deliberately separate from the
+ * player-facing `field_run` campaign shortcut.
  */
-const DEV_RUN_MARKER = 'field_run';
+// `field_run` is the player-facing campaign shortcut. Keep the old authored-
+// content stand-in behind an explicitly diagnostic marker so opening the game
+// from the playtest URL can never silently replace the campaign with a field
+// that has no chapter or objective.
+const DEV_RUN_MARKER = 'field_stand_in';
 
 /** How long a pending command may go unanswered before the worker is faulted. */
 const RESPONSE_LIMIT_MS = 2_000;
@@ -104,8 +137,26 @@ export interface FramePair {
   alpha: number;
 }
 
+export interface RunIdentity {
+  assemblyExact: boolean;
+  assemblyHash: string | null;
+  attemptBranch: CanonicalAttemptBranchRecord | null;
+  attemptId: string | null;
+  attemptRecord: CanonicalAttemptRecord | null;
+  branchId: string | null;
+  branchNonce: number;
+  branchOperation: AttemptBranchOperation | null;
+  embodiedHash: string;
+  generatorHash: string;
+  parentBranchId: string | null;
+  qualificationRequest: CanonicalQualificationRequest | null;
+  qualificationRequestId: string | null;
+  runKind: RunKind;
+  scenarioHash: string;
+}
+
 export interface CoreClient {
-  /** Settles once the worker has answered in protocol version 2. */
+  /** Settles once the worker has answered in the current protocol version. */
   ready: Promise<ResponseEnvelope>;
   /** Sends one command and settles with the response envelope. */
   command: (cmd: CommandName, body: Payload) => Promise<ResponseEnvelope>;
@@ -118,6 +169,12 @@ export interface CoreClient {
   frames: () => FramePair;
   /** Holds or releases the pause level the next frame carries. */
   pause: (held: boolean) => void;
+  /** Enters or leaves the immediate Design pause. */
+  setDesignMode: (designing: boolean) => Promise<FrameEventBody | ErrorEnvelope>;
+  /** The worker-owned commissioning wall-time multiplier. */
+  rate: () => 1 | 4 | 16;
+  /** Replaces the commissioning wall-time multiplier. */
+  setRate: (rate: 1 | 4 | 16) => void;
   /**
    * Sends one frame now, outside the pump, and settles when it is answered.
    * The frame carries the steering, the Pulse, and the depth gesture held at
@@ -140,6 +197,129 @@ export interface CoreClient {
   inflight: () => number;
   /** The catalog keys this session has surfaced, most recent last. */
   notices: () => string[];
+  /** Bounded authoritative transition index for the current branch. */
+  mechanismEvents: () => MechanismTimelineEntry[];
+  /** One Commission-only presentation breakpoint, absent when none is armed. */
+  commissionBreakpoint: () => CommissionBreakpoint | null;
+  /** The newest addressed event that stopped Commission. */
+  commissionBreakpointHit: () => MechanismTimelineEntry | null;
+  /** Arms or clears a one-shot presentation breakpoint. */
+  setCommissionBreakpoint: (breakpoint: CommissionBreakpoint | null) => void;
+  /** Frozen identities reported by the authoritative open/restore response. */
+  identity?: () => RunIdentity | null;
+  /** The canonical local policy last accepted by the authoritative core. */
+  policy: () => FrozenLocalPolicy;
+  /** The current chapter's committed opening Route controls. */
+  routeDefaults: () => RouteControlDefault[];
+  /** Canonical authored contract ladder facts from Rust. */
+  contracts: (
+    receipts?: readonly QualificationUnlockReceipt[],
+  ) => Promise<ContractCatalog | ErrorEnvelope>;
+  /** The active contract identity, or null for a legacy/campaign run. */
+  contractId: () => string | null;
+  /** Opens one available authored contract directly into Design. */
+  openContract: (contractId: string) => Promise<ResponseEnvelope>;
+  /** Replaces the frozen local policy while the workbench is paused. */
+  setLocalPolicy: (policy: FrozenLocalPolicy) => Promise<ResponseEnvelope>;
+  /** Projects a complete draft against the exact paused Rust snapshot. */
+  previewDesignPatch: (
+    address: number,
+    policy: FrozenLocalPolicy,
+    routeDefaults: RouteControlDefault[],
+  ) => Promise<ResponseEnvelope>;
+  /** Atomically commits a complete policy and Route-default set. */
+  commitDesignPatch: (
+    policy: FrozenLocalPolicy,
+    routeDefaults: RouteControlDefault[],
+  ) => Promise<ResponseEnvelope>;
+  /** Reads every assembly-owned opening field from the committed Design authority. */
+  engineeringAssemblyDraft: () => Promise<ResponseEnvelope>;
+  /** Reconstructs and diffs a complete assembly draft without changing the run. */
+  previewEngineeringAssembly: (
+    draft: EngineeringAssemblyDraft,
+  ) => Promise<ResponseEnvelope>;
+  /** Rechecks and commits one accepted assembly preview as a child branch. */
+  commitEngineeringAssembly: (
+    draft: EngineeringAssemblyDraft,
+    preview: EngineeringAssemblyPreview,
+  ) => Promise<ResponseEnvelope>;
+  /** Reads the exact keep/restore/retain/branch boundary without mutation. */
+  previewCommissionRestart: () => Promise<ResponseEnvelope>;
+  /** Reads the complete canonical Q-01 input bundle without freezing it. */
+  previewQualificationInput: () => Promise<ResponseEnvelope>;
+  /** Freezes the current authoritative preview without starting any trial. */
+  freezeQualificationRequest: (preview: QualificationInputPreview) => Promise<ResponseEnvelope>;
+  /** Prepares the addressed cold job without dispatching a trial. */
+  prepareQualificationJob: (
+    requestId: string,
+    completedTrials?: number[],
+  ) => Promise<ResponseEnvelope>;
+  /** Dispatches a durably stored queued job to the analysis worker. */
+  dispatchQualificationJob: (jobId: string, requestId: string) => Promise<ResponseEnvelope>;
+  /** Requests cancellation between authoritative cold trials. */
+  cancelQualificationJob: (jobId: string, requestId: string) => Promise<ResponseEnvelope>;
+  /** Resolves the complete retained trial family inside Rust. */
+  resolveQualification: (
+    jobId: string,
+    requestId: string,
+    artifacts: readonly QualificationTrialArtifact[],
+  ) => Promise<ResponseEnvelope>;
+  /** Computes four independent grade records after function resolution. */
+  gradeQualification: (
+    jobId: string,
+    requestId: string,
+    functionDecisionId: string,
+    artifacts: readonly QualificationTrialArtifact[],
+  ) => Promise<ResponseEnvelope>;
+  /** Retains the earliest addressed failed relation and its exact trace. */
+  traceQualificationFailure: (
+    jobId: string,
+    requestId: string,
+    functionDecisionId: string,
+    artifacts: readonly QualificationTrialArtifact[],
+  ) => Promise<ResponseEnvelope>;
+  /** Assembles every standing immutable child under a marker published last. */
+  assembleQualificationResult: (
+    jobId: string,
+    requestId: string,
+    functionDecisionId: string,
+    gradeIds: readonly string[],
+    failureTraceId: string | null,
+    artifacts: readonly QualificationTrialArtifact[],
+  ) => Promise<ResponseEnvelope>;
+  /** Derives one deterministic post-pass receipt from a marker-complete result. */
+  deriveQualificationReceipt: (
+    group: QualificationResultGroup,
+    functionDecisionId: string,
+    gradeIds: readonly string[],
+    failureTraceId: string | null,
+    artifacts: readonly QualificationTrialArtifact[],
+  ) => Promise<ResponseEnvelope>;
+  /** Captures immutable generator, assembly, and blueprint authority records. */
+  captureEngineeringMemory: (
+    source: EngineeringCaptureSource,
+  ) => Promise<ResponseEnvelope>;
+  /** Previews one named engineering reconstruction without mutating the run. */
+  previewEngineeringTransition: (
+    operation: EngineeringTransitionKind,
+    generator?: EngineeringGeneratorRecord,
+  ) => Promise<ResponseEnvelope>;
+  /** Commits only the exact guarded transition preview returned by Rust. */
+  commitEngineeringTransition: (
+    preview: EngineeringRunTransitionPreview,
+  ) => Promise<ResponseEnvelope>;
+  /** Resolves an accepted transition from the receipt carried by the child save. */
+  recoverEngineeringTransition: (operationId: string) => Promise<ResponseEnvelope>;
+  /** The newest worker-owned job projection. */
+  qualificationJob: () => QualificationJob | null;
+  /** Immutable trial artifacts delivered so far in this worker session. */
+  qualificationArtifacts: () => QualificationTrialArtifact[];
+  /** Restores the accepted generator on the previewed contract opening assembly. */
+  restartCommission: (preview: CommissionRestartPreview) => Promise<ResponseEnvelope>;
+  /** Closes live authority for the active branch before showing the ladder. */
+  returnCommission: () => Promise<ResponseEnvelope>;
+  /** Continues a returned attempt as an explicit child branch in Design. */
+  resumeCommission: () => Promise<ResponseEnvelope>;
   /**
    * The objective the run stands on, and none before one is offered. It
    * arrives on `objective_changed` and on nothing else: the frame carries the
@@ -147,6 +327,8 @@ export interface CoreClient {
    * catalog by the key the event names.
    */
   objective: () => ObjectiveState | null;
+  /** The newest authoritative commissioning criterion reading. */
+  criterion?: () => CriterionReading | null;
   /**
    * The staged pressures as the worker last told them, active and queued
    * together in the closed set's own order, and empty before the first
@@ -256,12 +438,62 @@ export interface CoreClient {
    * made out of the two commands the closed set has.
    */
   undoPlan: () => Promise<ResponseEnvelope>;
+  /** Applies all queued Field edits and remains in Design authority. */
+  commitPlan: () => Promise<ResponseEnvelope>;
   /** The local telemetry marks this run has reached. */
   telemetry: () => Telemetry;
   /** Runs when a snapshot, a notice, or a restart changes what is shown. */
   watch: (observer: () => void) => () => void;
   /** Ends the worker session. */
   close: () => void;
+}
+
+export interface MechanismTimelineEntry {
+  ordinal: number;
+  step: number;
+  event: MechanismEvent;
+}
+
+export type CommissionBreakpoint =
+  | { kind: 'event'; eventKind: MechanismEvent['kind'] }
+  | { kind: 'object'; objectKind: 'form' | 'node' | 'route' | 'current'; objectId: number }
+  | { kind: 'rule'; address: number; rule: number }
+  | { kind: 'outcome'; outcome: PolicyOutcome }
+  | { kind: 'criterion' };
+
+function mechanismObject(
+  event: MechanismEvent,
+): { kind: 'form' | 'node' | 'route' | 'current'; id: number } | null {
+  switch (event.kind) {
+    case 'policy': return { kind: event.object_kind, id: event.object_id };
+    case 'interface': return { kind: 'node', id: event.node };
+    case 'route': return { kind: 'route', id: event.route };
+    case 'supply': return { kind: 'current', id: event.current };
+    case 'reserve': return { kind: 'form', id: event.form };
+    case 'charge': return event.dominant_node === null
+      ? null
+      : { kind: 'node', id: event.dominant_node };
+    case 'criterion':
+    case 'failure': return null;
+  }
+}
+
+function matchesCommissionBreakpoint(
+  breakpoint: CommissionBreakpoint,
+  event: MechanismEvent,
+): boolean {
+  switch (breakpoint.kind) {
+    case 'event': return event.kind === breakpoint.eventKind;
+    case 'object': {
+      const object = mechanismObject(event);
+      return object?.kind === breakpoint.objectKind && object.id === breakpoint.objectId;
+    }
+    case 'rule': return event.kind === 'policy'
+      && event.address === breakpoint.address
+      && event.rule === breakpoint.rule;
+    case 'outcome': return event.kind === 'policy' && event.outcome === breakpoint.outcome;
+    case 'criterion': return event.kind === 'criterion' || event.kind === 'failure';
+  }
 }
 
 export interface CoreOptions {
@@ -272,7 +504,9 @@ export interface CoreOptions {
    * `init_run` and part of what the run records — and a default here would be
    * a Form the game recommended by standing behind the option.
    */
-  form: FormId;
+  form?: FormId;
+  /** Immutable Field regime selected in the Atlas. */
+  regime?: RegimeId;
   /** How a worker is started. Replaced in tests. */
   spawn?: () => Worker;
   /** Whether the animation-frame pump runs. Off in tests that drive frames. */
@@ -287,21 +521,25 @@ export interface CoreOptions {
   still?: Still;
   /** Where the local telemetry is recorded. Replaced in tests. */
   telemetry?: Recorder;
+  /** Keeps the superseded direct-control grammar for explicit diagnostics. */
+  manualControls?: boolean;
 }
 
-/** Starts a worker session on the chosen Form and sends the first command. */
+/** Starts a worker session. With no Form it remains idle on the contract catalog. */
 export function openCore(options: CoreOptions): CoreClient {
   const form = options.form;
+  const regime = options.regime ?? 'open_field';
   const spawn = options.spawn ?? defaultWorker;
   const pumping = options.pump ?? true;
+  const manualControls = options.manualControls ?? false;
   // A source the caller supplied is the caller's to close; only one opened
   // here is closed with the session.
-  const steering = options.steering ?? openSteering();
-  const ownsSteering = options.steering === undefined;
-  const pulse = options.pulse ?? openPulse();
-  const ownsPulse = options.pulse === undefined;
-  const depth = options.depth ?? openDepth();
-  const ownsDepth = options.depth === undefined;
+  const steering = options.steering ?? (manualControls ? openSteering() : null);
+  const ownsSteering = options.steering === undefined && steering !== null;
+  const pulse = options.pulse ?? (manualControls ? openPulse() : null);
+  const ownsPulse = options.pulse === undefined && pulse !== null;
+  const depth = options.depth ?? (manualControls ? openDepth() : null);
+  const ownsDepth = options.depth === undefined && depth !== null;
   const still = options.still ?? openStill();
   const ownsStill = options.still === undefined;
   // Local only, and never sent anywhere: the five firsts of the onboarding
@@ -322,9 +560,9 @@ export function openCore(options: CoreOptions): CoreClient {
    * longer admits one.
    */
   function letGo(): void {
-    steering.clear();
-    pulse.clear();
-    depth.clear();
+    steering?.clear();
+    pulse?.clear();
+    depth?.clear();
     still.clear();
   }
 
@@ -332,6 +570,7 @@ export function openCore(options: CoreOptions): CoreClient {
   let nextId = HANDSHAKE_ID;
   let nextSeq = 1;
   let paused = false;
+  let runtimeRate: 1 | 4 | 16 = 1;
   let closed = false;
   let restarting: Promise<void> | null = null;
   let restarts = 0;
@@ -339,6 +578,19 @@ export function openCore(options: CoreOptions): CoreClient {
   const pair: FramePair = { previous: null, next: null, alpha: 0 };
   let recovery: Recovery | null = null;
   let objective: ObjectiveState | null = null;
+  let criterion: CriterionReading | null = null;
+  let identity: RunIdentity | null = null;
+  let contractId: string | null = null;
+  let policy: FrozenLocalPolicy = { version: 2, components: [] };
+  let routeDefaults: RouteControlDefault[] = [];
+  let mechanismEvents: MechanismTimelineEntry[] = [];
+  let nextMechanismOrdinal = 1;
+  let qualificationJobState: QualificationJob | null = null;
+  let qualificationTrialArtifacts: QualificationTrialArtifact[] = [];
+  let progressionReceipts: QualificationUnlockReceipt[] = [];
+  let commissionBreakpoint: CommissionBreakpoint | null = null;
+  let commissionBreakpointHit: MechanismTimelineEntry | null = null;
+  let breakpointResumeRate: 1 | 4 | 16 | null = null;
   /**
    * The staged pressures as the worker last told them, and none before the
    * first `pressure_changed`. The event carries the full list after every
@@ -429,7 +681,7 @@ export function openCore(options: CoreOptions): CoreClient {
     // press it offered — steps that ran consume it, anything else keeps it.
     if (offeredAt === seq) {
       offeredAt = null;
-      depth.settle('steps_run' in answer ? answer.steps_run : 0);
+      depth?.settle('steps_run' in answer ? answer.steps_run : 0);
     }
     const waiting = frames.get(seq);
     if (!waiting) return;
@@ -465,12 +717,59 @@ export function openCore(options: CoreOptions): CoreClient {
       return;
     }
     if (data.ev !== 'frame') {
-      // The other six events of the closed set. The objective is the one the
-      // chrome shows; the rest belong to the goals that own them, and the
-      // telemetry reads what it needs from every one of them.
+      // The other nine events of the closed set. The objective and criterion
+      // are the two the live chrome shows; the rest belong to the goals that
+      // own them, and telemetry reads what it needs from every one of them.
       telemetry.event(data.ev, data.body);
+      if (data.ev === 'qualification_progress') {
+        const progress = data.body as QualificationProgress;
+        if (qualificationJobState?.job_id === progress.job_id) {
+          qualificationJobState = {
+            ...qualificationJobState,
+            completed_trials: [...progress.completed_trials],
+            status: progress.status,
+          };
+        }
+        if (progress.artifact && !qualificationTrialArtifacts.some(
+          (artifact) => artifact.artifact_id === progress.artifact?.artifact_id,
+        )) {
+          qualificationTrialArtifacts = [...qualificationTrialArtifacts, progress.artifact]
+            .sort((left, right) => left.trial - right.trial);
+        }
+        announce();
+      }
+      if (data.ev === 'mechanism_event') {
+        const entry: MechanismTimelineEntry = {
+          ordinal: nextMechanismOrdinal,
+          step: data.step,
+          event: data.body as unknown as MechanismEvent,
+        };
+        mechanismEvents.push(entry);
+        nextMechanismOrdinal += 1;
+        if (mechanismEvents.length > 192) {
+          mechanismEvents = mechanismEvents.slice(-192);
+        }
+        if (commissionBreakpoint
+            && matchesCommissionBreakpoint(commissionBreakpoint, entry.event)) {
+          commissionBreakpointHit = entry;
+          commissionBreakpoint = null;
+          if (breakpointResumeRate !== null) runtimeRate = breakpointResumeRate;
+          breakpointResumeRate = null;
+          stopPump();
+          if (latest?.header.mode !== 'still') {
+            void sendFrame(
+              nextFrame({ advance_steps: 0, toggle_still: true }, performanceStamp()),
+            ).then(() => announce());
+          }
+        }
+        announce();
+      }
       if (data.ev === 'objective_changed') {
         objective = (data.body as { objective?: ObjectiveState }).objective ?? null;
+        announce();
+      }
+      if (data.ev === 'criterion_changed') {
+        criterion = (data.body as { criterion?: CriterionReading }).criterion ?? null;
         announce();
       }
       if (data.ev === 'pressure_changed') {
@@ -485,6 +784,7 @@ export function openCore(options: CoreOptions): CoreClient {
         // restore can report an earlier one, so only a step of exactly one
         // forwards leaves a chapter to review.
         const entered = data.body as ChapterChanged & { view?: ViewDeclaration };
+        routeDefaults = entered.route_defaults ?? [];
         if (chapter && entered.chapter_index === chapter.chapter_index + 1) {
           review = chapter;
         }
@@ -597,9 +897,9 @@ export function openCore(options: CoreOptions): CoreClient {
   function readMode(): void {
     const stillNow = latest?.header.mode === 'still';
     if (stillNow && !stilled) {
-      steering.clear();
-      pulse.clear();
-      depth.clear();
+      steering?.clear();
+      pulse?.clear();
+      depth?.clear();
     }
     if (!stillNow && stilled) still.dropIntents();
     stilled = stillNow;
@@ -624,6 +924,10 @@ export function openCore(options: CoreOptions): CoreClient {
     const intent = still.takeIntent();
     if (!intent) return;
     if (intent === 'commit') {
+      // Contract commits close an evidence branch and therefore must travel
+      // through the React commissioning transaction, which captures the old
+      // branch before calling this client's public `commitPlan` method.
+      if (contractId !== null) return;
       void command('commit_plan', {}).then((answer) => {
         if (!answer.ok) return;
         // A commit clears the queue and leaves Still Mode by the mode table's
@@ -731,6 +1035,12 @@ export function openCore(options: CoreOptions): CoreClient {
     if (closed) return Promise.resolve();
     if (restarting) return restarting;
     restarting = (async () => {
+      const contractToReopen = contractId;
+      const attemptToReopen = identity?.attemptId ?? null;
+      if (qualificationJobState
+          && ['queued', 'running', 'cancel_requested'].includes(qualificationJobState.status)) {
+        qualificationJobState = { ...qualificationJobState, status: 'interrupted' };
+      }
       console.error(`field_game shell: the worker faulted (${reason}), replacing it`);
       announce();
       stopPump();
@@ -751,6 +1061,7 @@ export function openCore(options: CoreOptions): CoreClient {
 
       worker = spawn();
       wire();
+      opened = false;
       // A worker session numbers its correlation ids and its frames from the
       // start; the fresh core has accepted neither. The offer a lost frame was
       // carrying was answered with the rest of them above, and the number it
@@ -768,6 +1079,12 @@ export function openCore(options: CoreOptions): CoreClient {
       // The objective the faulted worker had told the shell about belongs to
       // the session that is gone; the fresh one raises it again as it opens.
       objective = null;
+      criterion = null;
+      identity = null;
+      policy = { version: 2, components: [] };
+      routeDefaults = [];
+      mechanismEvents = [];
+      nextMechanismOrdinal = 1;
       // So do the staged pressures: a reopened run raises the list again.
       pressures = [];
       // So does the mode it was in and the queue it was holding. A restore
@@ -801,7 +1118,7 @@ export function openCore(options: CoreOptions): CoreClient {
       // resumed one, and saying so would be a false claim about state the
       // player has lost. What the shell shows a player who lost a run
       // outright is the goal that owns persistence and its recovery surface.
-      if (await reopen()) notices.push(RESUMED_NOTICE);
+      if (await reopen(contractToReopen, attemptToReopen)) notices.push(RESUMED_NOTICE);
       restarts += 1;
       restarting = null;
       startPump();
@@ -822,16 +1139,34 @@ export function openCore(options: CoreOptions): CoreClient {
    * random state. With nothing held, or with a held record the fresh worker
    * refuses, a run is opened fresh — and that is a new run, not a resumed one.
    */
-  async function reopen(): Promise<boolean> {
+  async function reopen(
+    contractToReopen: string | null = contractId,
+    attemptToReopen: string | null = identity?.attemptId ?? null,
+  ): Promise<boolean> {
     if (recovery) {
       const answer = await send('import_run', { text: recovery.text });
       if (answer.ok) {
         carryView(answer);
+        opened = true;
         return true;
       }
       console.error('field_game shell: the held record did not import', answer.error);
     }
-    carryView(await send('init_run', { mode: 'new', run_id: runId, form }));
+    if (form) {
+      const answer = await send('init_run', { mode: 'new', run_id: runId, form, regime });
+      carryView(answer);
+      opened = answer.ok;
+    } else if (contractToReopen) {
+      const answer = await send('open_contract', {
+        contract_id: contractToReopen,
+        receipts: progressionReceipts,
+        run_id: attemptToReopen ?? newRunId(),
+      });
+      carryView(answer);
+      opened = answer.ok;
+    } else {
+      await send('list_contracts', { receipts: progressionReceipts });
+    }
     return false;
   }
 
@@ -839,6 +1174,55 @@ export function openCore(options: CoreOptions): CoreClient {
   function carryView(response: ResponseEnvelope): void {
     if (response.ok && 'view' in response.body) {
       activeView = (response.body as { view: ViewDeclaration }).view;
+    }
+    if (response.ok && 'generator_spec_hash' in response.body && 'scenario_hash' in response.body) {
+      const body = response.body as {
+        assembly_template_exact?: boolean;
+        assembly_template_hash?: string | null;
+        attempt_branch?: CanonicalAttemptBranchRecord | null;
+        attempt_id?: string | null;
+        attempt_record?: CanonicalAttemptRecord | null;
+        branch_id?: string | null;
+        branch_nonce?: number;
+        branch_operation?: AttemptBranchOperation | null;
+        embodied_state_hash?: string;
+        generator_spec_hash: string;
+        parent_branch_id?: string | null;
+        qualification_request?: CanonicalQualificationRequest | null;
+        qualification_request_id?: string | null;
+        run_kind?: RunKind;
+        scenario_hash: string;
+      };
+      identity = {
+        assemblyExact: body.assembly_template_exact ?? identity?.assemblyExact ?? false,
+        assemblyHash: body.assembly_template_hash ?? identity?.assemblyHash ?? null,
+        attemptBranch: body.attempt_branch ?? identity?.attemptBranch ?? null,
+        attemptId: body.attempt_id ?? identity?.attemptId ?? null,
+        attemptRecord: body.attempt_record ?? identity?.attemptRecord ?? null,
+        branchId: body.branch_id ?? identity?.branchId ?? null,
+        branchNonce: body.branch_nonce ?? identity?.branchNonce ?? 0,
+        branchOperation: body.branch_operation ?? identity?.branchOperation ?? null,
+        embodiedHash: body.embodied_state_hash ?? identity?.embodiedHash ?? '',
+        generatorHash: body.generator_spec_hash,
+        parentBranchId: body.parent_branch_id ?? identity?.parentBranchId ?? null,
+        qualificationRequest: 'qualification_request' in body
+          ? body.qualification_request ?? null
+          : identity?.qualificationRequest ?? null,
+        qualificationRequestId: 'qualification_request_id' in body
+          ? body.qualification_request_id ?? null
+          : identity?.qualificationRequestId ?? null,
+        runKind: body.run_kind ?? identity?.runKind ?? 'legacy_campaign',
+        scenarioHash: body.scenario_hash,
+      };
+    }
+    if (response.ok && 'contract_id' in response.body) {
+      contractId = (response.body as { contract_id: string | null }).contract_id;
+    }
+    if (response.ok && 'local_policy' in response.body) {
+      policy = (response.body as { local_policy: FrozenLocalPolicy }).local_policy;
+    }
+    if (response.ok && 'route_defaults' in response.body) {
+      routeDefaults = (response.body as { route_defaults: RouteControlDefault[] }).route_defaults;
     }
   }
 
@@ -855,7 +1239,12 @@ export function openCore(options: CoreOptions): CoreClient {
   }
 
   function nextFrame(overrides: Partial<InputFrame>, stamp: number): InputFrame {
-    return { ...neutralFrame(nextSeq++, stamp), pause: paused, ...overrides };
+    return {
+      ...neutralFrame(nextSeq++, stamp),
+      pause: paused,
+      runtime_rate: runtimeRate,
+      ...overrides,
+    };
   }
 
   /**
@@ -877,17 +1266,36 @@ export function openCore(options: CoreOptions): CoreClient {
     const inspect = asked;
     asked = null;
     if (latest?.header.mode === 'still') return { ...still.sample(), inspect };
+    if (!manualControls) return { ...still.sample(), inspect };
     return {
-      ...steering.sample(),
-      ...pulse.sample(),
-      ...depth.sample(),
+      ...(steering?.sample() ?? {}),
+      ...(pulse?.sample() ?? {}),
+      ...(depth?.sample() ?? {}),
       ...still.sample(),
       inspect,
     };
   }
 
   function startPump(): void {
-    if (!pumping || closed || pumpHandle !== null) return;
+    if (
+      opened
+      && !paused
+      && pumping
+      && !closed
+      && identity?.qualificationRequest
+    ) {
+      if (latest === null && frames.size === 0) {
+        void sendFrame(nextFrame({ advance_steps: 0 }, performanceStamp()));
+      }
+      return;
+    }
+    if (
+      !opened
+      || paused
+      || !pumping
+      || closed
+      || pumpHandle !== null
+    ) return;
     const tick = (timestamp: number): void => {
       pumpHandle = requestAnimationFrame(tick);
       if (restarting) return;
@@ -905,6 +1313,18 @@ export function openCore(options: CoreOptions): CoreClient {
     pumpHandle = null;
   }
 
+  function configureCommissionBreakpoint(nextBreakpoint: CommissionBreakpoint | null): void {
+    commissionBreakpoint = nextBreakpoint;
+    commissionBreakpointHit = null;
+    if (nextBreakpoint) {
+      if (breakpointResumeRate === null) breakpointResumeRate = runtimeRate;
+      runtimeRate = 1;
+    } else if (breakpointResumeRate !== null) {
+      runtimeRate = breakpointResumeRate;
+      breakpointResumeRate = null;
+    }
+  }
+
   wire();
   // A development preview opens its run by importing the stand-in; every other
   // build opens a new one, and does it here rather than a microtask later, so
@@ -912,14 +1332,16 @@ export function openCore(options: CoreOptions): CoreClient {
   // The stand-in is a record rather than a new run, so the Form it stands on is
   // the one its own bytes carry and the chosen Form reaches nothing.
   const ready = (
-    import.meta.env.DEV && wantsStandInRun()
+    form && import.meta.env.DEV && wantsStandInRun()
       ? import('./dev-run').then((stand) => send('import_run', { text: stand.DEV_RUN_EXPORT }))
-      : send('init_run', { mode: 'new', run_id: runId, form })
+      : form
+        ? send('init_run', { mode: 'new', run_id: runId, form, regime })
+        : send('list_contracts', { receipts: progressionReceipts })
   )
     .then((response) => {
       if (!answeredByCore(response)) throw response;
       carryView(response);
-      opened = true;
+      opened = 'run_id' in response.body;
       console.info(`field_game shell: worker handshake in protocol ${response.v}`, response);
       announce();
       startPump();
@@ -945,6 +1367,7 @@ export function openCore(options: CoreOptions): CoreClient {
   function setPause(held: boolean): void {
     if (paused === held) return;
     paused = held;
+    if (!opened) return;
     if (held) {
       stopPump();
       letGo();
@@ -957,6 +1380,12 @@ export function openCore(options: CoreOptions): CoreClient {
   if (typeof window !== 'undefined') {
     window.addEventListener('blur', onBlur);
     window.addEventListener('focus', onFocus);
+    // Some embedded browser shells reactivate the page without delivering a
+    // matching Window `focus` event. A real interaction inside this document
+    // is equivalent evidence that play has resumed. This only releases the
+    // pause; pointer movement remains completely disconnected from steering.
+    window.addEventListener('pointerdown', onFocus);
+    window.addEventListener('keydown', onFocus);
     document.addEventListener('visibilitychange', onVisibility);
   }
 
@@ -966,6 +1395,31 @@ export function openCore(options: CoreOptions): CoreClient {
     snapshot: () => latest,
     frames: () => pair,
     pause: setPause,
+    setDesignMode: (designing) => {
+      if (designing) stopPump();
+      const held = latest?.header.mode;
+      let response: Promise<FrameEventBody | ErrorEnvelope>;
+      if (designing && held == null) {
+        response = sendFrame(nextFrame({ advance_steps: 0 }, performanceStamp()));
+      } else {
+        const already = designing ? held === 'still' : held === 'running';
+        response = already
+          ? sendFrame(nextFrame({ advance_steps: 0 }, performanceStamp()))
+          : sendFrame(
+              nextFrame({ advance_steps: 0, toggle_still: true }, performanceStamp()),
+            );
+      }
+      return response.then((answer) => {
+        if (!designing && 'steps_run' in answer) startPump();
+        return answer;
+      });
+    },
+    rate: () => breakpointResumeRate ?? runtimeRate,
+    setRate(nextRate) {
+      if (commissionBreakpoint) breakpointResumeRate = nextRate;
+      else runtimeRate = nextRate;
+      announce();
+    },
     // One frame now, outside the pump, carrying what the shell holds: the
     // steering sample is taken here for the same reason the pause level is —
     // a frame carries what is held when it is sent, and this is a frame.
@@ -976,7 +1430,409 @@ export function openCore(options: CoreOptions): CoreClient {
     recovering: () => restarting !== null,
     inflight: () => pending.size + frames.size + frameIds.size,
     notices: () => [...notices],
+    mechanismEvents: () => mechanismEvents.map((entry) => ({
+      ...entry,
+      event: { ...entry.event },
+    })) as MechanismTimelineEntry[],
+    commissionBreakpoint: () => commissionBreakpoint,
+    commissionBreakpointHit: () => commissionBreakpointHit,
+    setCommissionBreakpoint(nextBreakpoint) {
+      configureCommissionBreakpoint(nextBreakpoint);
+      announce();
+    },
+    identity: () => identity,
+    policy: () => policy,
+    routeDefaults: () => routeDefaults.map((control) => ({ ...control })),
+    contracts: (receipts = progressionReceipts) => {
+      progressionReceipts = receipts.map((receipt) => ({
+        definition: { ...receipt.definition },
+        receipt_id: receipt.receipt_id,
+      }));
+      return command('list_contracts', { receipts: progressionReceipts }).then((answer) =>
+        answer.ok ? (answer.body as ContractCatalog) : answer.error,
+      );
+    },
+    contractId: () => contractId,
+    openContract: (nextContractId) =>
+      command('open_contract', {
+        contract_id: nextContractId,
+        receipts: progressionReceipts,
+        run_id: newRunId(),
+      }).then(
+        (answer) => {
+          if (answer.ok) {
+            configureCommissionBreakpoint(null);
+            opened = true;
+            queue = EMPTY_QUEUE;
+            slate = null;
+            criterion = null;
+            mechanismEvents = [];
+            nextMechanismOrdinal = 1;
+            qualificationJobState = null;
+            qualificationTrialArtifacts = [];
+            startPump();
+            announce();
+          }
+          return answer;
+        },
+      ),
+    setLocalPolicy: (nextPolicy) => {
+      const branch = identity?.branchId;
+      return command('set_local_policy', { policy: nextPolicy }).then((answer) => {
+        if (answer.ok && identity?.branchId !== branch) {
+          criterion = null;
+          mechanismEvents = [];
+          nextMechanismOrdinal = 1;
+        }
+        if (answer.ok) announce();
+        return answer;
+      });
+    },
+    previewDesignPatch(address, nextPolicy, nextRouteDefaults) {
+      const base = identity?.generatorHash;
+      if (!base) return Promise.resolve(localFault(0, 'missing_generator_identity'));
+      return command('preview_design_patch', {
+        address,
+        base_generator_hash: base,
+        policy: nextPolicy,
+        route_defaults: nextRouteDefaults,
+      });
+    },
+    commitDesignPatch(nextPolicy, nextRouteDefaults) {
+      const base = identity?.generatorHash;
+      if (!base) return Promise.resolve(localFault(0, 'missing_generator_identity'));
+      const branch = identity?.branchId;
+      return command('commit_design_patch', {
+        base_generator_hash: base,
+        policy: nextPolicy,
+        route_defaults: nextRouteDefaults,
+      }).then((answer) => {
+        if (answer.ok && identity?.branchId !== branch) {
+          criterion = null;
+          mechanismEvents = [];
+          nextMechanismOrdinal = 1;
+        }
+        if (answer.ok) announce();
+        return answer;
+      });
+    },
+    engineeringAssemblyDraft: () => command('engineering_memory', { op: 'assembly_draft' }),
+    previewEngineeringAssembly(draft) {
+      const assembly = identity?.assemblyHash;
+      const attempt = identity?.attemptId;
+      const branch = identity?.branchId;
+      const contract = identity?.attemptRecord?.contract_id;
+      const generator = identity?.generatorHash;
+      const runKind = identity?.runKind;
+      if (!assembly || !attempt || !branch || !contract || !generator || runKind !== 'automation_contract') {
+        return Promise.resolve(localFault(0, 'missing_engineering_identity'));
+      }
+      return command('engineering_memory', {
+        draft,
+        expected_assembly_hash: assembly,
+        expected_attempt_id: attempt,
+        expected_branch_id: branch,
+        expected_contract_id: contract,
+        expected_generator_hash: generator,
+        expected_run_kind: runKind,
+        op: 'preview_assembly',
+      });
+    },
+    commitEngineeringAssembly(draft, preview) {
+      const assembly = identity?.assemblyHash;
+      const attempt = identity?.attemptId;
+      const branch = identity?.branchId;
+      const contract = identity?.attemptRecord?.contract_id;
+      const generator = identity?.generatorHash;
+      const runKind = identity?.runKind;
+      if (!assembly || !attempt || !branch || !contract || !generator || runKind !== 'automation_contract') {
+        return Promise.resolve(localFault(0, 'missing_engineering_identity'));
+      }
+      const priorBranch = branch;
+      return command('engineering_memory', {
+        draft,
+        expected_assembly_hash: assembly,
+        expected_attempt_id: attempt,
+        expected_branch_id: branch,
+        expected_contract_id: contract,
+        expected_generator_hash: generator,
+        expected_preview_id: preview.preview_id,
+        expected_run_kind: runKind,
+        op: 'commit_assembly',
+      }).then((answer) => {
+        if (answer.ok) {
+          carryView(answer);
+          if (identity?.branchId !== priorBranch) {
+            criterion = null;
+            mechanismEvents = [];
+            nextMechanismOrdinal = 1;
+          }
+          announce();
+        }
+        return answer;
+      });
+    },
+    previewCommissionRestart: () => command('preview_commission_restart', {}),
+    previewQualificationInput: () => command('preview_qualification_input', {}),
+    freezeQualificationRequest: (preview) =>
+      command('freeze_qualification_request', {
+        expected_assembly_hash: preview.input.assembly_template_hash,
+        expected_branch_id: preview.input.branch_id,
+        expected_branch_nonce: preview.input.branch_nonce,
+        expected_generator_hash: preview.input.generator_spec_hash,
+        expected_preview_hash: preview.preview_hash,
+      }).then((answer) => {
+        if (answer.ok) {
+          configureCommissionBreakpoint(null);
+          stopPump();
+          queue = EMPTY_QUEUE;
+          slate = null;
+          criterion = null;
+          mechanismEvents = [];
+          nextMechanismOrdinal = 1;
+          qualificationJobState = null;
+          qualificationTrialArtifacts = [];
+          announce();
+        }
+        return answer;
+      }),
+    prepareQualificationJob: (requestId, completedTrials = []) =>
+      command('qualification_job', {
+        completed_trials: completedTrials,
+        op: 'start',
+        request_id: requestId,
+      }).then((answer) => {
+        if (answer.ok) {
+          qualificationJobState = answer.body as QualificationJob;
+          qualificationTrialArtifacts = qualificationTrialArtifacts
+            .filter((artifact) => artifact.job_id === qualificationJobState?.job_id);
+          announce();
+        }
+        return answer;
+      }),
+    dispatchQualificationJob: (jobId, requestId) =>
+      command('qualification_job', {
+        job_id: jobId,
+        op: 'dispatch',
+        request_id: requestId,
+      }).then((answer) => {
+        if (answer.ok) {
+          qualificationJobState = answer.body as QualificationJob;
+          announce();
+        }
+        return answer;
+      }),
+    cancelQualificationJob: (jobId, requestId) =>
+      command('qualification_job', {
+        job_id: jobId,
+        op: 'cancel',
+        request_id: requestId,
+      }).then((answer) => {
+        if (answer.ok) {
+          qualificationJobState = answer.body as QualificationJob;
+          announce();
+        }
+        return answer;
+      }),
+    resolveQualification: (jobId, requestId, artifacts) =>
+      command('qualification_job', {
+        artifacts: artifacts.map((artifact) => ({ ...artifact })),
+        job_id: jobId,
+        op: 'resolve',
+        request_id: requestId,
+      }).then((answer) => {
+        if (answer.ok) {
+          const resolution = answer.body as QualificationResolution;
+          qualificationJobState = qualificationJobState?.job_id === resolution.job_id
+            ? { ...qualificationJobState, status: 'completed' }
+            : qualificationJobState;
+        } else if (qualificationJobState?.job_id === jobId) {
+          qualificationJobState = { ...qualificationJobState, status: 'invalid_execution' };
+        }
+        announce();
+        return answer;
+      }),
+    gradeQualification: (jobId, requestId, functionDecisionId, artifacts) =>
+      command('qualification_job', {
+        artifacts: artifacts.map((artifact) => ({ ...artifact })),
+        function_decision_id: functionDecisionId,
+        job_id: jobId,
+        op: 'grade',
+        request_id: requestId,
+      }).then((answer) => {
+        if (answer.ok) {
+          const grades = answer.body as QualificationGrades;
+          qualificationJobState = qualificationJobState?.job_id === grades.job_id
+            ? { ...qualificationJobState, status: 'completed' }
+            : qualificationJobState;
+          announce();
+        }
+        return answer;
+      }),
+    traceQualificationFailure: (jobId, requestId, functionDecisionId, artifacts) =>
+      command('qualification_job', {
+        artifacts: artifacts.map((artifact) => ({ ...artifact })),
+        function_decision_id: functionDecisionId,
+        job_id: jobId,
+        op: 'trace',
+        request_id: requestId,
+      }).then((answer) => {
+        if (answer.ok) {
+          const traced = answer.body as QualificationFailureTraceResult;
+          qualificationJobState = qualificationJobState?.job_id === traced.job_id
+            ? { ...qualificationJobState, status: 'completed' }
+            : qualificationJobState;
+          announce();
+        }
+        return answer;
+      }),
+    assembleQualificationResult: (
+      jobId,
+      requestId,
+      functionDecisionId,
+      gradeIds,
+      failureTraceId,
+      artifacts,
+    ) => command('qualification_job', {
+      artifacts: artifacts.map((artifact) => ({ ...artifact })),
+      failure_trace_id: failureTraceId,
+      function_decision_id: functionDecisionId,
+      grade_ids: [...gradeIds],
+      job_id: jobId,
+      op: 'result',
+      request_id: requestId,
+    }).then((answer) => {
+      if (answer.ok) {
+        const group = answer.body as QualificationResultGroup;
+        qualificationJobState = qualificationJobState?.job_id === group.result.definition.job_id
+          ? { ...qualificationJobState, status: 'completed' }
+          : qualificationJobState;
+        announce();
+      }
+      return answer;
+    }),
+    deriveQualificationReceipt: (
+      group,
+      functionDecisionId,
+      gradeIds,
+      failureTraceId,
+      artifacts,
+    ) => command('qualification_job', {
+      artifacts: artifacts.map((artifact) => ({ ...artifact })),
+      failure_trace_id: failureTraceId,
+      function_decision_id: functionDecisionId,
+      grade_ids: [...gradeIds],
+      job_id: group.result.definition.job_id,
+      marker_id: group.complete_marker.marker_id,
+      op: 'receipt',
+      request_id: group.result.definition.request_id,
+      result_id: group.result.result_id,
+    }).then((answer) => {
+      if (answer.ok) {
+        const derived = answer.body as QualificationReceiptResult;
+        progressionReceipts = [
+          ...progressionReceipts.filter((receipt) => (
+            receipt.receipt_id !== derived.receipt.receipt_id
+          )),
+          derived.receipt,
+        ];
+        announce();
+      }
+      return answer;
+    }),
+    captureEngineeringMemory: (source) =>
+      command('engineering_memory', {
+        op: 'capture',
+        source,
+      }).then((answer) => {
+        if (answer.ok) {
+          const captured = answer.body as EngineeringMemoryCapture;
+          const definition = captured.blueprint.definition;
+          const sourceBranchId = definition.version === 1
+            ? definition.branch_id
+            : definition.source_branch_id;
+          if (sourceBranchId === identity?.branchId) announce();
+        }
+        return answer;
+      }),
+    previewEngineeringTransition: (operation, generator) => {
+      const body: Payload = operation === 'revert_generator'
+        ? {
+          generator_record: generator as unknown as Payload,
+          op: 'preview_transition',
+          operation,
+        }
+        : { op: 'preview_transition', operation };
+      return command('engineering_memory', body);
+    },
+    commitEngineeringTransition: (preview) =>
+      command('engineering_memory', {
+        expected_guard: preview.definition.guard,
+        op: 'commit_transition',
+        preview_id: preview.preview_id,
+      }).then((answer) => {
+        if (answer.ok) {
+          const status = (answer.body as { status?: string }).status;
+          if (status === 'committed') {
+            carryView(answer);
+            qualificationJobState = null;
+            qualificationTrialArtifacts = [];
+            configureCommissionBreakpoint(null);
+            queue = EMPTY_QUEUE;
+            slate = null;
+            announce();
+          }
+        }
+        return answer;
+      }),
+    recoverEngineeringTransition: (operationId) =>
+      command('engineering_memory', {
+        op: 'recover_transition',
+        operation_id: operationId,
+      }),
+    qualificationJob: () => qualificationJobState,
+    qualificationArtifacts: () => qualificationTrialArtifacts.map((artifact) => ({ ...artifact })),
+    restartCommission: (preview) =>
+      command('restart_commission', {
+        expected_assembly_hash: preview.assembly_template_hash,
+        expected_branch_id: preview.branch_id,
+        expected_branch_nonce: preview.branch_nonce,
+        expected_generator_hash: preview.generator_spec_hash,
+      }).then((answer) => {
+        if (answer.ok) {
+          configureCommissionBreakpoint(null);
+          queue = EMPTY_QUEUE;
+          slate = null;
+          criterion = null;
+          mechanismEvents = [];
+          nextMechanismOrdinal = 1;
+          announce();
+        }
+        return answer;
+      }),
+    returnCommission: () =>
+      command('return_commission', {}).then((answer) => {
+        if (answer.ok) {
+          configureCommissionBreakpoint(null);
+          stopPump();
+          announce();
+        }
+        return answer;
+      }),
+    resumeCommission: () =>
+      command('resume_commission', {}).then((answer) => {
+        if (answer.ok) {
+          configureCommissionBreakpoint(null);
+          criterion = null;
+          mechanismEvents = [];
+          nextMechanismOrdinal = 1;
+          startPump();
+          announce();
+        }
+        return answer;
+      }),
     objective: () => objective,
+    criterion: () => criterion,
     pressures: () => pressures,
     mode: () => latest?.header.mode ?? null,
     queue: () => queue,
@@ -1021,6 +1877,21 @@ export function openCore(options: CoreOptions): CoreClient {
         }
         return answer;
       }),
+    commitPlan: () => {
+      const branch = identity?.branchId;
+      return command('commit_plan', {}).then((answer) => {
+        if (answer.ok) {
+          queue = { ...EMPTY_QUEUE, impulse: Number(answer.body.impulse ?? queue.impulse_after) };
+          if (identity?.branchId !== branch) {
+            criterion = null;
+            mechanismEvents = [];
+            nextMechanismOrdinal = 1;
+          }
+          announce();
+        }
+        return answer;
+      });
+    },
     telemetry: () => telemetry.marks(),
     watch(observer) {
       observers.add(observer);
@@ -1029,9 +1900,9 @@ export function openCore(options: CoreOptions): CoreClient {
     close() {
       closed = true;
       stopPump();
-      if (ownsSteering) steering.close();
-      if (ownsPulse) pulse.close();
-      if (ownsDepth) depth.close();
+      if (ownsSteering) steering?.close();
+      if (ownsPulse) pulse?.close();
+      if (ownsDepth) depth?.close();
       if (ownsStill) still.close();
       for (const waiting of pending.values()) clearTimeout(waiting.timer);
       pending.clear();
@@ -1041,6 +1912,8 @@ export function openCore(options: CoreOptions): CoreClient {
       if (typeof window !== 'undefined') {
         window.removeEventListener('blur', onBlur);
         window.removeEventListener('focus', onFocus);
+        window.removeEventListener('pointerdown', onFocus);
+        window.removeEventListener('keydown', onFocus);
         document.removeEventListener('visibilitychange', onVisibility);
       }
       worker.terminate();

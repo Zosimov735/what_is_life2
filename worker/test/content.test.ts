@@ -196,9 +196,9 @@ test('a run resumed on a different build of the content says so', async () => {
   expect(exported.ok).toBe(true);
   if (!exported.ok) return;
   const file = JSON.parse(String(exported.body.text)) as {
-    payload: { content_hash: string };
+    payload: { scenario_spec: { content_hash: string } };
   };
-  expect(file.payload.content_hash).toBe(CONTENT_HASH);
+  expect(file.payload.scenario_spec.content_hash).toBe(CONTENT_HASH);
   session.close();
 });
 

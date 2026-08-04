@@ -7,5 +7,13 @@
   "capacity": 167772160,
   "reserve": 0,
   "steer_scale": 65536,
-  "abilities": []
+  "abilities": [
+    {
+      "kind": "junction",
+      "blanks": 4,
+      "deploy_cost": 2097152,
+      "capacity": 4194304,
+      "upkeep_rate": 16384
+    }
+  ]
 }

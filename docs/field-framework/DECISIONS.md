@@ -178,3 +178,88 @@ start. A daily 05:00 UTC shutdown schedule is a backstop for forgotten test
 sessions. The resource group carries a low monthly budget with staged alerts;
 deleting and rebuilding the entire environment remains the zero-persistent-cost
 path because the host contains no canonical data.
+
+## D-017 — Coupling is an instrumented world action
+
+Status: accepted after first-impression playtest.
+
+Active play binds Coupling to `E`: hold to extend the true world-space radius
+and release to apply the existing zero-`Q` Pulse. Shift is not an alias, and
+pointer input remains available for inspection and interface controls. Before
+release, every affected Port, stored-resource source, and suppressible
+Interference target must be identifiable on the Field; the shell summarizes
+only nonzero outcomes. Supply delivery is shown as directed filaments into its
+actual geometric recipients, while a stable reservoir arc shows the controlled
+Form's stored `Q`. These readings are presentation derived from authoritative
+state and do not alter the existing gather, open, discharge, or suppression
+rules.
+
+## D-018 — Campaign position and Port wiring stay continuously legible
+
+Status: accepted after human-playtest preparation.
+
+The active Field carries a persistent campaign rail sourced from authoritative
+chapter events and frame progress: chapter title, chapter number, campaign
+count, objective number, objective count, campaign elapsed time, chapter
+progress, and overall progress. Directed Routes render a permanent tail-to-head
+notch. A Route with either endpoint Port closed is visibly dormant, broken, and
+terminated by a gate mark at the exact closed endpoint; it becomes continuous
+only when both endpoint gates are open. Coupling's Port locks are sourced from
+the exact Port ids in the core's projected release, never reconstructed from
+projected screen distance.
+
+The local `?field_run` shortcut enters the authored campaign at Form selection.
+The legacy no-campaign stand-in is isolated behind `?field_stand_in`, so a
+playtest link cannot silently open a Field with no chapter or objective state.
+
+## D-019 — Mechanistic automation is the primary game
+
+Status: accepted; supersedes the player-role and product-structure portions of
+D-003, D-011, D-017, and D-018.
+
+The primary game is a deterministic automation and commissioning game. The
+player designs topology, configures frozen local policies, observes operation,
+diagnoses failure, and qualifies a generator after editing is locked. Narrative
+chapters, inhabitants, moral choices, and character framing are not part of the
+target loop. Existing chapter Fields may supply placements and disturbance
+ideas, but their serial objective campaign is legacy content rather than a
+parallel primary mode.
+
+## D-020 — Forms are programmable mobile Components
+
+Status: accepted; supersedes D-003 and the manual-control portion of D-017.
+
+A Form is a mobile hardware profile and one Component of the generator. It is
+not directly steered. Movement, depth changes, Coupling, interface actions,
+signals, and chassis abilities are actuators selected by the Form's frozen
+local policy. The shell sends no per-step steering, Pulse, wheel, or handoff
+control during normal automation play.
+
+Policies may read only owning-Component state, locally detectable Supply,
+neighboring Route state, decoded local signals, available local material, and
+state-carried timers. Target selection and conflict resolution are stable and
+deterministic. A qualification harness may evaluate hidden facts but may not
+expose them to a policy.
+
+## D-021 — Contract completion and engineering grades remain separate
+
+Status: accepted.
+
+The contract ladder replaces campaign progression. A contract passes only by
+its explicit function-criterion vector. Throughput, resilience, economy, and
+complexity are reported as four independent engineering grades under authored
+bands; they are never collapsed into one score and do not replace pass/fail.
+Qualification freezes the GeneratorSpec, initial assembly declaration, regime,
+input schedule, criteria, and control contract before accelerated trials begin.
+
+## D-022 — Design, Commission, and Qualify are distinct authority states
+
+Status: accepted.
+
+Design is immediately paused and permits topology, compartment, and policy
+editing. Commission runs the deterministic Field at a selected wall-time rate
+and permits pause, inspection, revision, reset, and comparison. Qualify runs
+the frozen generator under `frozen_feedback`, exposes no rescue control, and
+returns evidence after execution. Simulation rate is Worker-owned presentation
+state and never enters physics, save identity, generator identity, or scenario
+identity.
